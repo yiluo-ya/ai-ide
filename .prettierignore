@@ -1,0 +1,8 @@
+node_modules
+dist
+tmp
+data
+.codegraph
+.xchen
+package-lock.json
+*.md

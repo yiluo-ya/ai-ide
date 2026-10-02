@@ -1,0 +1,86 @@
+/**
+ * S4c 打印友好视图：评审前把关键代码打成 PDF。
+ *
+ * 只做一件事：打印时把「界面」全部收起来，只留代码与页眉。
+ * 页眉由 ShareMenu 渲染的 .wcr-print-header 提供（屏幕上不显示）——
+ * 没有页眉的打印件没人知道是哪份代码、从哪来。
+ *
+ * 已知限制：代码区是 Monaco 的 canvas，只能打印当前渲染出来的视口范围，
+ * 不是「整文件分页」。所以入口叫「打印 / 存 PDF」，而不是「导出 PDF」。
+ */
+
+.wcr-print-header {
+  display: none;
+}
+
+@media print {
+  /* 界面元素：打印件里一律不出现 */
+  header.topbar,
+  aside.sidebar,
+  footer.statusbar,
+  div.nav-bar,
+  div.tabbar,
+  div.graph-overlay,
+  div.search-overlay,
+  div.goto-notice,
+  div.toast,
+  .quickopen-backdrop,
+  .share-wrap {
+    display: none !important;
+  }
+
+  /* 正文区域：撑满纸张，不再有固定高度与滚动条 */
+  html,
+  body,
+  .app,
+  .body,
+  .main,
+  .editor-wrap,
+  .panes,
+  .pane {
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* 页眉：文件名 + 项目 + 行号，黑色白底，省墨且清楚 */
+  body.wcr-printing .wcr-print-header {
+    display: block !important;
+    padding: 0 0 6px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #999999;
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    color: #000000;
+  }
+
+  .wcr-print-title {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .wcr-print-meta {
+    font-size: 11px;
+    color: #444444;
+  }
+
+  /* 深色主题在纸上会把墨吃光：打印时强制白底黑字 */
+  body.wcr-printing,
+  body.wcr-printing .editor-host,
+  body.wcr-printing .monaco-editor,
+  body.wcr-printing .monaco-editor-background {
+    background: #ffffff !important;
+  }
+
+  /* 密度条 / 提示条这类叠加物不参与打印 */
+  .density-toggle,
+  .density-track,
+  .crumb-menu,
+  .loading-mask {
+    display: none !important;
+  }
+}

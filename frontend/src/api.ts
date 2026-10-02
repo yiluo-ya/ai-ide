@@ -1,0 +1,290 @@
+/** 后端 API 客户端（与 shared/types.ts 的契约一一对应）。 */
+import type {
+  CallDirection,
+  CallHierarchyResult,
+  CallNode,
+  DefinitionResult,
+  DensitySegment,
+  ExternalSource,
+  FileDensity,
+  FileNode,
+  FindReferencesRequest,
+  HighlightResult,
+  HoverDefinition,
+  HoverLiteral,
+  HoverReason,
+  HoverResult,
+  ImplementationsResult,
+  IgnoreInfo,
+  IndexReport,
+  IndexStatus,
+  IntegrationManifest,
+  Location,
+  Position,
+  ProjectInfo,
+  ReferenceLocation,
+  ReferenceResult,
+  SearchMatch,
+  SearchResult,
+  SearchOptions,
+  SymbolInfo,
+  SymbolKind,
+  TypeHierarchyResult,
+  TypeNode,
+} from '../../shared/types';
+
+export type {
+  ProjectInfo,
+  IndexStatus,
+  SymbolInfo,
+  FileNode,
+  SearchResult,
+  Position,
+  HighlightResult,
+  // 透镜（02-lens）：悬停卡片与密度条
+  HoverResult,
+  HoverDefinition,
+  HoverLiteral,
+  HoverReason,
+  FileDensity,
+  DensitySegment,
+  Location,
+  SymbolKind,
+  // 导航（03-navigator）
+  DefinitionResult,
+  ReferenceResult,
+  ReferenceLocation,
+  ExternalSource,
+  CallDirection,
+  CallHierarchyResult,
+  CallNode,
+  TypeHierarchyResult,
+  TypeNode,
+  ImplementationsResult,
+  SearchMatch,
+  SearchOptions,
+};
+
+const BASE = '/api';
+
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { 'content-type': 'application/json' },
+    ...init,
+  });
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { message?: string; error?: string };
+      detail = body.message ?? body.error ?? detail;
+    } catch {
+      /* 保底用状态码 */
+    }
+    throw new Error(detail);
+  }
+  return (await res.json()) as T;
+}
+
+export const api = {
+  manifest: () => request<IntegrationManifest>('/integration/manifest'),
+
+  /** P17：服务自述里的隐私段；后端未提供时为 null（面板回落内置文案）。 */
+  privacy: () => request<IntegrationManifest>('/integration/manifest').then((m) => m.privacy ?? null),
+
+  /** P9：索引报告（哪些文件没进索引、为什么）。旧后端 404，调用方自行容错。 */
+  indexReport: (id: string) => request<IndexReport>(`/projects/${id}/index-report`),
+
+  /** P8：生效的忽略规则与统计。旧后端 404，调用方自行容错。 */
+  ignoreInfo: (id: string) => request<IgnoreInfo>(`/projects/${id}/ignore`),
+
+  listProjects: () => request<{ projects: ProjectInfo[] }>('/projects').then((r) => r.projects),
+
+  lookupByRoot: (root: string) =>
+    request<{ project: ProjectInfo }>(`/projects/lookup?root=${encodeURIComponent(root)}`).then(
+      (r) => r.project,
+    ),
+
+  openProject: (root: string, name?: string) =>
+    request<{ project: ProjectInfo; created: boolean }>('/projects', {
+      method: 'POST',
+      body: JSON.stringify({ root, name }),
+    }),
+
+  forgetProject: (id: string) => request<{ ok: boolean }>(`/projects/${id}`, { method: 'DELETE' }),
+
+  reindex: (id: string) => request<{ ok: boolean }>(`/projects/${id}/reindex`, { method: 'POST' }),
+
+  status: (id: string) => request<{ status: IndexStatus }>(`/projects/${id}/status`).then((r) => r.status),
+
+  fileTree: (id: string) =>
+    request<{ tree: FileNode; status: IndexStatus }>(`/projects/${id}/files`),
+
+  fileText: (id: string, path: string) =>
+    request<{ file: string; lang: string; text: string; size: number }>(
+      `/projects/${id}/file?path=${encodeURIComponent(path)}`,
+    ),
+
+  gotoDefinition: (id: string, file: string, line: number, col: number) =>
+    request<DefinitionResult>(`/projects/${id}/goto-definition`, {
+      method: 'POST',
+      body: JSON.stringify({ file, line, col }),
+    }),
+
+  findReferences: (id: string, args: FindReferencesRequest) =>
+    request<ReferenceResult>(`/projects/${id}/find-references`, {
+      method: 'POST',
+      body: JSON.stringify(args),
+    }),
+
+  documentSymbols: (id: string, file: string) =>
+    request<{ symbols: SymbolInfo[] }>(
+      `/projects/${id}/document-symbols?file=${encodeURIComponent(file)}`,
+    ).then((r) => r.symbols),
+
+  workspaceSymbols: (id: string, q: string, kind?: string) =>
+    request<{ symbols: SymbolInfo[] }>(
+      `/projects/${id}/workspace-symbols?q=${encodeURIComponent(q)}${kind ? `&kind=${kind}` : ''}`,
+    ).then((r) => r.symbols),
+
+  /** 语义着色：本项目符号 vs 外部依赖/标准库符号。 */
+  highlights: (id: string, file: string) =>
+    request<HighlightResult>(`/projects/${id}/highlights?file=${encodeURIComponent(file)}`),
+
+  /** 悬停解释（02-lens §3.1）：光标处是什么、从哪来、被谁用。 */
+  hover: (id: string, file: string, line: number, col: number) =>
+    request<HoverResult>(`/projects/${id}/hover`, {
+      method: 'POST',
+      body: JSON.stringify({ file, line, col }),
+    }),
+
+  /** 整文件密度概览（02-lens §3.4）：按固定行数分段统计代码/注释/空白占比。 */
+  density: (id: string, file: string) =>
+    request<FileDensity>(`/projects/${id}/density?file=${encodeURIComponent(file)}`),
+
+  search: (
+    id: string,
+    query: string,
+    options: {
+      regex?: boolean;
+      caseSensitive?: boolean;
+      wholeWord?: boolean;
+      filePattern?: string;
+      maxResults?: number;
+      /** N14：只在指定目录（前缀匹配）内搜索。 */
+      dirs?: string[];
+    } = {},
+    /** N12：中止请求（后端会停止扫描）。 */
+    signal?: AbortSignal,
+  ) =>
+    request<SearchResult>(`/projects/${id}/search`, {
+      method: 'POST',
+      body: JSON.stringify({ query, options }),
+      signal,
+    }),
+
+  /**
+   * N12：流式搜索（SSE）。每收到一个文件分组的命中就回调一次，客户端可随时 abort。
+   * 返回值在 `done` 事件后 resolve。
+   */
+  searchStream: async (
+    id: string,
+    query: string,
+    options: SearchOptions,
+    onChunk: (matches: SearchMatch[], truncated: boolean) => void,
+    signal?: AbortSignal,
+  ): Promise<{ fileCount: number; truncated: boolean; total: number }> => {
+    const res = await fetch(`${BASE}/projects/${id}/search-stream`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query, options }),
+      signal,
+    });
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => '');
+      throw new Error(text || `search-stream failed: ${res.status}`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let summary = { fileCount: 0, truncated: false, total: 0 };
+    let failure: string | null = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // SSE 事件以空行分隔
+      let sep: number;
+      while ((sep = buffer.indexOf('\n\n')) >= 0) {
+        const raw = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        let event = 'message';
+        let data = '';
+        for (const line of raw.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) data += line.slice(5).trim();
+        }
+        if (!data) continue;
+        const parsed = JSON.parse(data) as Record<string, unknown>;
+        if (event === 'chunk') {
+          onChunk(
+            (parsed.matches as SearchMatch[]) ?? [],
+            Boolean(parsed.truncated),
+          );
+        } else if (event === 'done') {
+          summary = {
+            fileCount: Number(parsed.fileCount ?? 0),
+            truncated: Boolean(parsed.truncated),
+            total: Number(parsed.total ?? 0),
+          };
+        } else if (event === 'error') {
+          failure = String(parsed.message ?? 'search failed');
+        }
+      }
+    }
+    if (failure) throw new Error(failure);
+    return summary;
+  },
+
+  /** N16：调用层级（in=谁调用我 / out=我调用了谁）。 */
+  callHierarchy: (
+    id: string,
+    args: { file: string; line: number; col: number; direction: CallDirection; depth?: number },
+  ) =>
+    request<CallHierarchyResult>(`/projects/${id}/call-hierarchy`, {
+      method: 'POST',
+      body: JSON.stringify(args),
+    }),
+
+  /** N17：类型层级（显式继承 / 实现）。 */
+  typeHierarchy: (id: string, file: string, line: number, col: number) =>
+    request<TypeHierarchyResult>(`/projects/${id}/type-hierarchy`, {
+      method: 'POST',
+      body: JSON.stringify({ file, line, col }),
+    }),
+
+  /** N15：跳到实现（接口 → 实现类 / 实现方法）。 */
+  implementations: (id: string, file: string, line: number, col: number) =>
+    request<ImplementationsResult>(`/projects/${id}/implementations`, {
+      method: 'POST',
+      body: JSON.stringify({ file, line, col }),
+    }),
+};
+
+/** 订阅索引事件（SSE）。返回取消函数。 */
+export function subscribeEvents(
+  id: string,
+  onEvent: (event: { type: string; [k: string]: unknown }) => void,
+): () => void {
+  const source = new EventSource(`${BASE}/projects/${id}/events`);
+  const handler = (e: MessageEvent) => {
+    try {
+      onEvent(JSON.parse(e.data) as { type: string });
+    } catch {
+      /* 忽略坏事件 */
+    }
+  };
+  for (const type of ['status', 'file-changed', 'file-deleted', 'index-ready']) {
+    source.addEventListener(type, handler as EventListener);
+  }
+  return () => source.close();
+}

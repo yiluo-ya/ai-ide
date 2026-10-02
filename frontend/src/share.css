@@ -1,0 +1,166 @@
+/* 05 信使 Share 的样式：分享下拉 + 批注面板。单独成文件，避免与 03/06 共用 styles.css 打架。 */
+
+.share-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.share-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.share-menu {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  z-index: 41;
+  width: 320px;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 6px;
+  background: #252526;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+}
+
+.share-section {
+  margin: 8px 6px 4px;
+  font-size: 11px;
+  color: var(--fg-dim, #9aa7b6);
+  text-transform: none;
+}
+
+.share-item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--fg, #d4d4d4);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.share-item:hover:not(:disabled) {
+  background: #2a2d2e;
+}
+
+.share-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.share-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fg-dim, #9aa7b6);
+}
+
+.share-note {
+  margin: 0 6px 6px;
+  padding: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-dim, #9aa7b6);
+  background: #1f1f22;
+  border-radius: 4px;
+}
+
+.share-note code {
+  color: var(--fg, #d4d4d4);
+}
+
+.share-flash {
+  margin: 6px;
+  padding: 4px 6px;
+  font-size: 11px;
+  color: #0b0b0b;
+  background: var(--hl-local, #cfe2ff);
+  border-radius: 4px;
+}
+
+/* ---------------------------------------------------------------- 批注面板 */
+
+.notes-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.notes-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-bottom: 1px solid #2a2d2e;
+}
+
+.notes-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.notes-row {
+  padding: 6px 8px;
+  border-bottom: 1px solid #232326;
+  cursor: pointer;
+}
+
+.notes-row:hover {
+  background: #2a2d2e;
+}
+
+.notes-row.resolved .notes-text {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.notes-where {
+  font-size: 11px;
+  color: var(--fg-dim, #9aa7b6);
+}
+
+.notes-text {
+  margin-top: 2px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.notes-reply {
+  margin: 4px 0 0 10px;
+  padding-left: 8px;
+  font-size: 12px;
+  color: var(--fg-dim, #9aa7b6);
+  border-left: 2px solid #3c3c3c;
+  white-space: pre-wrap;
+}
+
+.notes-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.notes-compose {
+  padding: 6px;
+  border-top: 1px solid #2a2d2e;
+}
+
+.notes-compose textarea {
+  width: 100%;
+  min-height: 48px;
+  resize: vertical;
+  font-size: 12px;
+  background: #1f1f22;
+  color: var(--fg, #d4d4d4);
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+}

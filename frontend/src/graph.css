@@ -1,0 +1,398 @@
+/**
+ * 依赖图浮层（01-map 形态二）的样式。
+ *
+ * 容器会被放在 App 的 `.graph-overlay`（position: fixed）里，所以根节点必须撑满
+ * 且允许内部收缩，否则画布与侧栏会把浮层顶出可视区。
+ */
+
+.graph-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-2);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------ 头部 */
+
+.gv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.gv-title {
+  font-weight: 600;
+}
+
+.gv-levels {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.gv-levels .gv-btn {
+  border: none;
+  border-radius: 0;
+}
+
+.gv-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  padding: 3px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.gv-btn:hover:not(:disabled) {
+  border-color: var(--accent-2);
+  color: var(--graph-strong-fg);
+}
+
+.gv-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gv-btn.is-on {
+  background: var(--accent);
+  border-color: var(--accent-2);
+  color: var(--accent-fg);
+}
+
+.gv-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.gv-stat {
+  color: var(--fg-dim);
+}
+
+.gv-axis-label {
+  color: var(--fg-dim);
+}
+
+.gv-warn {
+  color: var(--warn);
+}
+
+.gv-close {
+  margin-left: auto;
+}
+
+/* ------------------------------------------------------------ 画布 */
+
+.gv-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.gv-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.gv-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  cursor: grab;
+  /* 触屏上 pointer 拖拽要接管手势，否则会变成页面滚动 */
+  touch-action: none;
+}
+
+.gv-canvas:active {
+  cursor: grabbing;
+}
+
+.gv-status {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--fg-dim);
+  pointer-events: none;
+}
+
+.gv-status-err {
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.gv-edge {
+  stroke: var(--graph-edge);
+  /* 边只是背景信息：必须让它对指针透明，否则会抢走节点的点击 */
+  pointer-events: none;
+}
+
+.gv-edge-cycle {
+  stroke: var(--danger);
+}
+
+.gv-node {
+  cursor: pointer;
+}
+
+.gv-label {
+  fill: var(--fg);
+  font-size: 11px;
+  /* 深色描边保证标签压在边/节点上也读得清 */
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+  user-select: none;
+}
+
+.gv-label.is-strong {
+  fill: var(--graph-strong-fg);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ 泳道（M4.2） */
+
+/* 色带是背景语义：必须对指针透明，否则会盖掉节点的点击 */
+.gv-lane {
+  pointer-events: none;
+}
+
+.gv-lane-bg {
+  stroke: none;
+}
+
+/* 色带只做「区域提示」，透明度压得很低，免得比节点与边还抢眼 */
+.gv-lane-entry {
+  fill: var(--lane-entry);
+}
+
+.gv-lane-domain {
+  fill: var(--lane-domain);
+}
+
+.gv-lane-infra {
+  fill: var(--lane-infra);
+}
+
+.gv-lane-utility {
+  fill: var(--lane-utility);
+}
+
+.gv-lane-isolated {
+  fill: var(--lane-isolated);
+}
+
+.gv-lane-label {
+  fill: var(--fg-dim);
+  font-size: 11px;
+  letter-spacing: 3px;
+  user-select: none;
+}
+
+/* ------------------------------------------------------------ 图例 */
+
+.gv-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  flex-wrap: wrap;
+  padding: 6px 12px;
+  background: var(--bg-3);
+  border-top: 1px solid var(--border);
+  color: var(--fg-dim);
+}
+
+.gv-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.gv-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.gv-line-red {
+  display: inline-block;
+  width: 16px;
+  height: 0;
+  border-top: 2px solid var(--danger);
+}
+
+/* ------------------------------------------------------------ 反向依赖面板 */
+
+.gv-side {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 300px;
+  min-height: 0;
+  background: var(--bg-2);
+  border-left: 1px solid var(--border);
+}
+
+.gv-side-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.gv-side-file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.gv-side-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.gv-side-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 10px 10px;
+}
+
+.gv-sec {
+  margin: 10px 0;
+}
+
+.gv-sec-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* 「改坏了谁会红」是面板里最该被一眼看到的一块 */
+.gv-sec-tests {
+  padding: 6px 8px;
+  border: 1px solid var(--danger-border);
+  border-radius: 4px;
+  background: var(--danger-bg);
+}
+
+.gv-sec-tests .gv-sec-title {
+  color: var(--danger);
+}
+
+.gv-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gv-row:hover {
+  background: var(--bg-3);
+}
+
+.gv-row-file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gv-row-meta {
+  flex: none;
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.gv-badge {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--danger-bg-strong);
+  color: var(--danger);
+  font-size: 10px;
+}
+
+.gv-note {
+  margin: 4px 0;
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+/* 分层依据是这一节的「可信度来源」，单独给一点对比度 */
+.gv-note-layer {
+  color: var(--accent-2);
+}
+
+.gv-side-text {
+  margin: 0 0 6px;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+/* 目录级面板里唯一值得标红的一类行：它的测试会因你改动而红 */
+.gv-row-tests .gv-row-file {
+  color: var(--danger);
+}
+
+.gv-row-tests:hover {
+  background: var(--danger-bg);
+}
+
+.gv-sym-kind {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg-dim);
+  font-size: 10px;
+}
+
+.gv-more {
+  margin-top: 6px;
+  width: 100%;
+}
+
+.gv-note-err {
+  color: var(--danger);
+}

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>代码阅读器</title>
+    <script>
+      // P25：首帧就把 lang / title 对齐偏好（避免英文用户先看到中文标题）；
+      // 其余偏好（主题 / 字号 / 侧栏宽）由 prefs.ts 的 applyPrefs 应用。
+      try {
+        var prefs = JSON.parse(localStorage.getItem('wcr:prefs') || '{}');
+        if (prefs && prefs.locale === 'en') {
+          document.documentElement.lang = 'en';
+          document.title = 'Web Code Reader';
+        }
+      } catch (err) {
+        /* 坏 JSON：保持默认中文 */
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

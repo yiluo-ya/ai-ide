@@ -1,0 +1,250 @@
+/**
+ * 流视图浮层（04 Guide · W5 / G9.1–G9.4）的样式。
+ *
+ * 与依赖图同一套视觉语言：`.gv-*` 的头部 / 侧栏 / 状态行样式直接复用（graph.css），
+ * 这里只放流视图自己的东西 —— 边（调用实线 / 数据虚线）、节点徽标、逐层清单。
+ * 容器同样放在 App 的 `.graph-overlay`（position: fixed）里，根节点必须撑满并允许收缩。
+ */
+
+.flow-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-2);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.5;
+  /* 数据流边的专用色：与调用边区分开（虚线 + 这个颜色 = 名字级近似） */
+  --fl-data: #d7a86e;
+  --fl-unresolved: #6a6a6a;
+}
+
+/* ------------------------------------------------------------ 头部 */
+
+.fl-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.fl-title {
+  font-weight: 600;
+}
+
+.fl-focus {
+  color: var(--fg-dim);
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fl-kinds {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.fl-kinds .gv-btn {
+  border: none;
+  border-radius: 0;
+}
+
+.fl-depth,
+.fl-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-dim);
+}
+
+.fl-check {
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------ 画布 */
+
+.fl-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.fl-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.fl-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  cursor: grab;
+  touch-action: none;
+}
+
+.fl-canvas:active {
+  cursor: grabbing;
+}
+
+/* 边只在自己的描边上响应指针：既留得住 hover 提示，又不抢节点的点击 */
+.fl-edge {
+  stroke: var(--graph-edge);
+  pointer-events: stroke;
+}
+
+.fl-edge-data {
+  stroke: var(--fl-data);
+}
+
+.fl-approx {
+  fill: var(--fl-data);
+  font-size: 10px;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+  user-select: none;
+}
+
+.fl-node {
+  cursor: pointer;
+}
+
+.fl-label {
+  fill: var(--fg);
+  font-size: 11px;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+  user-select: none;
+}
+
+.fl-label.is-strong {
+  fill: var(--graph-strong-fg);
+  font-weight: 600;
+}
+
+.fl-badge {
+  fill: var(--fg-dim);
+  font-size: 9px;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+  user-select: none;
+}
+
+.fl-badge-entry {
+  fill: var(--warn);
+}
+
+.fl-focus-btn {
+  cursor: pointer;
+}
+
+.fl-focus-btn circle {
+  fill: var(--bg-3);
+  stroke: var(--border);
+}
+
+.fl-focus-btn:hover circle {
+  stroke: var(--accent-2);
+}
+
+.fl-focus-btn text {
+  fill: var(--fg-dim);
+  font-size: 9px;
+  user-select: none;
+}
+
+/* ------------------------------------------------------------ 右侧：选中节点 / 逐层清单 */
+
+.fl-side {
+  width: 258px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-2);
+}
+
+.fl-side-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fl-side-title {
+  font-weight: 600;
+}
+
+.fl-side-at {
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fl-side-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px;
+}
+
+.fl-side-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.fl-meta {
+  color: var(--fg-dim);
+}
+
+/* ------------------------------------------------------------ 底部 */
+
+.fl-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--fg-dim);
+}
+
+.fl-approx-note {
+  color: var(--fl-data);
+}
+
+.fl-hint {
+  color: var(--fg-dim);
+}
+
+@media (max-width: 900px) {
+  .fl-side {
+    display: none;
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "name": "web-code-reader",
+  "version": "0.1.0",
+  "private": true,
+  "description": "浏览器里的代码阅读器：后端 tree-sitter 索引 + Monaco 前端（只读，不上传，代码不出本机）",
+  "license": "MIT",
+  "bin": {
+    "wcr": "bin/wcr.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin",
+    "backend/src",
+    "backend/package.json",
+    "backend/tsconfig.json",
+    "shared",
+    "frontend/dist",
+    "Dockerfile",
+    "README.md"
+  ],
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix backend run start",
+    "cli": "node --import tsx backend/src/cli.ts",
+    "test": "npm --prefix backend test",
+    "test:unit": "npm --prefix frontend run test",
+    "test:ui": "node tests/ui/run.mjs",
+    "bench": "npm --prefix backend run bench",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.0",
+    "chokidar": "^4.0.3",
+    "hono": "^4.7.0",
+    "tree-sitter": "0.25.1",
+    "tree-sitter-go": "0.25.0",
+    "tree-sitter-java": "0.23.5",
+    "tree-sitter-javascript": "0.25.0",
+    "tree-sitter-python": "0.25.0",
+    "tree-sitter-rust": "^0.24.0",
+    "tree-sitter-typescript": "0.23.2",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^14.0.0",
+    "playwright-core": "^1.63.0",
+    "prettier": "^3.9.9",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.71.0"
+  }
+}

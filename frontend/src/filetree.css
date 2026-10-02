@@ -1,0 +1,91 @@
+/* 文件树的叠加层：改动热力 / 来源徽标 / 已读与忽略状态。 */
+
+.file-tree .tree-row.read .tree-name {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.file-tree .tree-row.ignored .tree-name {
+  opacity: 0.45;
+  font-style: italic;
+}
+
+.heat {
+  flex: none;
+  width: 14px;
+  height: 5px;
+  border-radius: 2px;
+  margin-left: 4px;
+  background: var(--heat-empty);
+}
+
+.heat-0 { background: var(--heat-0); }
+.heat-1 { background: var(--heat-1); }
+.heat-2 { background: var(--heat-2); }
+.heat-3 { background: var(--heat-3); }
+.heat-4 { background: var(--heat-4); box-shadow: 0 0 5px var(--heat-glow); }
+
+.file-tree .badge {
+  flex: none;
+  font-size: 10px;
+  line-height: 14px;
+  margin-left: 2px;
+  border-radius: 3px;
+  padding: 0 3px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+}
+
+.file-tree .badge.hot {
+  background: var(--badge-hot-bg);
+  color: var(--badge-hot-fg);
+}
+
+.file-tree .badge.orphan {
+  background: var(--badge-orphan-bg);
+  color: var(--badge-orphan-fg);
+}
+
+.file-tree .badge.read {
+  background: var(--badge-read-bg);
+  color: var(--badge-read-fg);
+}
+
+.file-tree .badge.ignored {
+  background: var(--badge-ignored-bg);
+  color: var(--badge-ignored-fg);
+}
+
+/* M9.3：阅读时 agent 还在写 —— 刚变更的行要跳出来 */
+.file-tree .badge.pulse {
+  background: var(--badge-pulse-bg);
+  color: var(--badge-pulse-fg);
+  animation: wcr-pulse 1.2s ease-in-out infinite;
+}
+
+.file-tree .heat.is-pulse {
+  box-shadow: 0 0 6px var(--agent);
+}
+
+@keyframes wcr-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* 视图过滤行：时间 / agent 产出 / 孤立 / 未读 / 隐藏忽略 */
+.tree-views {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 0 8px 6px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.tree-views label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}

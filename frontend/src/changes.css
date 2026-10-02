@@ -1,0 +1,384 @@
+/* 变更感知（04 Guide · W3 / G7–G8）—— 独立样式，避免与 styles.css 的并行改动互相干扰。
+   配色一律走全局 CSS 变量，深浅主题自动跟随（--fg / --fg-dim / --border / --accent / --ok / --danger）。 */
+
+/* ---------------------------------------------------------------- 侧栏面板 */
+
+.changes-panel {
+  height: 100%;
+  overflow: auto;
+  padding: 8px 10px 24px;
+  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.changes-section {
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.changes-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.changes-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* G8.1：会话内变更提示（只报「刚有几个文件变了」，不描述内容） */
+.changes-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--notice-border);
+  background: var(--notice-bg);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+/* 没有基线：只给「记录当前为基线」，不填假数字 */
+.changes-nobase {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.changes-counts {
+  margin-top: 6px;
+  font-size: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.changes-lines {
+  color: var(--fg-dim);
+}
+
+/* 无 git：如实说明口径（不给增删行） */
+.changes-nogit {
+  margin-top: 6px;
+  border: 1px solid var(--notice-border);
+  background: var(--notice-bg);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.changes-note-summary {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.changes-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.changes-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.changes-error {
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.changes-rows {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.changes-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.changes-row:hover {
+  background: var(--row-hover);
+}
+
+/* M / A / D 状态字母 */
+.changes-status {
+  width: 16px;
+  text-align: center;
+  font-weight: 600;
+  border-radius: 3px;
+}
+
+.changes-status.M {
+  color: var(--warn);
+}
+
+.changes-status.A {
+  color: var(--ok);
+}
+
+.changes-status.D {
+  color: var(--danger);
+}
+
+.changes-file {
+  flex: 1 1 140px;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-file:hover {
+  text-decoration: underline;
+}
+
+.changes-delta {
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--fg-dim);
+}
+
+/* 来源徽标：agent 用实心标记（宿主上报），其余标「推断」 */
+.changes-origin {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.changes-origin.agent {
+  border-color: var(--accent-2);
+  color: var(--fg);
+}
+
+.changes-note-count {
+  color: var(--fg-dim);
+}
+
+.changes-stale {
+  color: var(--warn);
+}
+
+.changes-row-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* 首屏摘要卡（Overview 顶部，紧挨「从这里开始」之后） */
+.changes-card h3 {
+  margin: 0 0 6px;
+}
+
+/* G8.1：首屏的会话内变更提示（只说「刚刚变了几个文件」） */
+.changes-live-inline {
+  border: 1px solid var(--notice-border);
+  background: var(--notice-bg);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- 只读 diff 浮层 */
+
+.diff-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-strong);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px;
+  z-index: 60;
+}
+
+.diff-dialog {
+  width: min(1100px, 96vw);
+  height: min(760px, 86vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.diff-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.diff-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-readonly {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.diff-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.diff-empty {
+  padding: 10px;
+  color: var(--fg-dim);
+  white-space: normal;
+}
+
+.diff-line {
+  padding: 0 10px;
+  color: var(--fg-dim);
+}
+
+/* 增 / 删 / 行头 / 文件头，四种一眼可分 */
+.diff-line.add {
+  color: var(--ok);
+  background: rgba(106, 153, 85, 0.1);
+}
+
+.diff-line.del {
+  color: var(--danger);
+  background: rgba(224, 108, 117, 0.1);
+}
+
+.diff-line.hunk {
+  color: var(--fg-dim);
+}
+
+.diff-line.meta {
+  color: var(--fg-dim);
+  opacity: 0.8;
+}
+
+.diff-line.ctx {
+  color: var(--fg);
+}
+
+.diff-foot {
+  border-top: 1px solid var(--border);
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+/* ---------------------------------------------------------------- 行级 blame（G7.3） */
+
+/* 行尾作者短名：贴在代码右侧，不占行首的阅读位 */
+.wcr-blame-author {
+  color: var(--fg-dim);
+  opacity: 0.75;
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+.wcr-blame-line {
+  /* 整行不再额外加底色：当前行的高亮交给 Monaco 自己的 renderLineHighlight */
+}
+
+.blame-status {
+  margin-left: 8px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- 历史版本（G7.4 / G7.5） */
+
+.pane-rev {
+  margin-left: 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.summary-history {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.summary-history:hover {
+  background: var(--row-hover);
+}
+
+.summary-history-rev {
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--accent-2);
+}
+
+.summary-history-when {
+  color: var(--fg-dim);
+  flex: 0 0 auto;
+}
+
+.summary-history-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
