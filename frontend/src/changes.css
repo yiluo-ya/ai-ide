@@ -110,6 +110,39 @@
   gap: 6px;
 }
 
+/* 按目录展示（2026-10-03）：目录行 + 汇总，与文件树同口径（目录有色、可折叠） */
+.changes-dir {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.changes-dir:hover {
+  background: var(--row-hover);
+}
+
+.changes-dir .chevron {
+  width: 12px;
+  color: var(--tree-dir);
+  font-size: 11px;
+}
+
+.changes-dir-name {
+  color: var(--tree-dir);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.changes-dir-count {
+  margin-left: auto;
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
 .changes-row {
   display: flex;
   align-items: center;

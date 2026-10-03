@@ -152,13 +152,20 @@ async function main() {
     await page.waitForSelector('.dock-changes .changes-panel', { timeout: 15_000 });
     const hasGit = process.env.UI_FIXTURE_GIT === '1';
     if (hasGit) {
-      // 夹具是真 git 仓库，且有一个未提交的修改 → 面板必须列出它
-      await page.waitForSelector('.dock-changes .changes-row', { timeout: 15_000 });
+      // 夹具是真 git 仓库，且有一个未提交的修改。
+      // 2026-10-03 起默认**按目录**展示且目录折叠：先看目录行的汇总，再逐层展开到文件行。
+      await page.waitForSelector('.dock-changes .changes-dir', { timeout: 15_000 });
+      const dirText = await page.locator('.dock-changes .changes-panel').innerText();
+      assert(/1 个/.test(dirText), `目录行没有给出改动数汇总：${dirText.slice(0, 120)}`);
+      await page.locator('.dock-changes .changes-dir').first().click(); // 展开根目录
+      await page.waitForTimeout(250);
+      await page.locator('.dock-changes .changes-dir').nth(1).click(); // 展开 src
+      await page.waitForSelector('.dock-changes .changes-row', { timeout: 10_000 });
       const text = await page.locator('.dock-changes .changes-panel').innerText();
-      assert(/src\/util\.ts/.test(text), `变更栏没列出被改的文件：${text.slice(0, 120)}`);
+      assert(/util\.ts/.test(text), `展开目录后没列出被改的文件：${text.slice(0, 120)}`);
       assert(/(^|\s)M(\s|$)/.test(text), `没有 M（已修改）状态：${text.slice(0, 120)}`);
       assert(!/记录当前为阅读基线/.test(text), '还在用自记基线那套（应已改成 git）');
-      return `git 变更：${text.replace(/\s+/g, ' ').slice(0, 90)}`;
+      return `git 变更（按目录）：${text.replace(/\s+/g, ' ').slice(0, 90)}`;
     }
     // 没有 git 时也不能编数字：必须如实说不是 git 仓库
     const text = await page.locator('.dock-changes .changes-panel').innerText();
