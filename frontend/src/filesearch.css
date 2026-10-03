@@ -1,0 +1,82 @@
+/* 文件面板里的内联代码搜索（2026-10-03）：紧凑，只占需要的那点高度。 */
+
+.file-search {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 8px 4px;
+}
+
+.fs-input-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fs-input-row .text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.fs-result {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.fs-summary {
+  padding: 4px 8px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fs-file + .fs-file {
+  border-top: 1px solid var(--border);
+}
+
+.fs-file-name {
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--hl-project);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fs-more {
+  margin-left: 4px;
+  color: var(--fg-dim);
+}
+
+.fs-hit {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 8px 2px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.fs-hit:hover {
+  background: var(--row-hover);
+}
+
+.fs-line {
+  flex: none;
+  min-width: 28px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

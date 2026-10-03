@@ -368,6 +368,18 @@ async function main() {
     return '页眉 + @media print 规则就位';
   });
 
+  await step('CMD：命令面板看得到服务状态（不点重启）', async () => {
+    await openPanel(page, 'service');
+    await page.waitForSelector('.service-panel .sv-facts', { timeout: 15_000 });
+    const text = await page.locator('.service-panel').innerText();
+    assert(/pid\s*\d+/.test(text), `没显示进程 pid：${text.slice(0, 120)}`);
+    assert(/运行时长/.test(text), `没显示运行时长：${text.slice(0, 120)}`);
+    assert(/重启服务/.test(text) && /停止服务/.test(text), '缺少重启 / 停止按钮');
+    // 注意：这里**不点**重启与停止 —— 那会真的把跑测试的服务杀掉。
+    // 真实重启路径由 bin/restart-worker.mjs 承担，人工验证时点一次即可。
+    return text.replace(/\s+/g, ' ').slice(0, 90);
+  });
+
   // 这条用例要「开图 + 点开一个目录（触发一次后端重算）」再断言布局，
   // 内部等待本身就超过默认 20 秒上限，所以显式放宽到 40 秒（其余用例仍守 20 秒）。
   await step('M：依赖图里文件节点贴着自己所属的目录', async () => {

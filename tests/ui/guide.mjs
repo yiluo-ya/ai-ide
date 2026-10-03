@@ -146,17 +146,24 @@ async function main() {
   // G3.1/G3.2 进度 / G3.5 待读队列）随之删除 —— 界面上一已经没有这个面板。
   // 首屏「从这里开始」（路线的入口）仍保留在上面的 G1/G2 用例里。
 
-  await step('W：变更栏常驻在右侧，能报「没有变化」', async () => {
-    // 2026-10-03：变更面板从侧栏 tab 改成右侧常驻栏（.dock-changes），用例跟着搬家。
+  await step('W：变更栏常驻在右侧，且以 git 为准', async () => {
+    // 2026-10-03：① 变更面板从侧栏 tab 搬到右侧常驻栏（.dock-changes）；
+    //            ② 内容改成「以 git 为准」，不再有「记录阅读基线」那套自记录对比。
     await page.waitForSelector('.dock-changes .changes-panel', { timeout: 15_000 });
-    const record = page.locator('.changes-panel button', { hasText: '记录当前为阅读基线' }).first();
-    if (await record.count()) await record.click();
-    const refresh = page.locator('.changes-panel button', { hasText: '重新比对' }).first();
-    if (await refresh.count()) await refresh.click();
-    await page.waitForSelector('.changes-panel >> text=没有变化', { timeout: 20000 });
-    const counts = await page.locator('.changes-panel').innerText();
-    assert(!/变了\s*[1-9]/.test(counts), `刚记完基线却说有变化：${counts.slice(0, 80)}`);
-    return '无变化（未编造数字）';
+    const hasGit = process.env.UI_FIXTURE_GIT === '1';
+    if (hasGit) {
+      // 夹具是真 git 仓库，且有一个未提交的修改 → 面板必须列出它
+      await page.waitForSelector('.dock-changes .changes-row', { timeout: 15_000 });
+      const text = await page.locator('.dock-changes .changes-panel').innerText();
+      assert(/src\/util\.ts/.test(text), `变更栏没列出被改的文件：${text.slice(0, 120)}`);
+      assert(/(^|\s)M(\s|$)/.test(text), `没有 M（已修改）状态：${text.slice(0, 120)}`);
+      assert(!/记录当前为阅读基线/.test(text), '还在用自记基线那套（应已改成 git）');
+      return `git 变更：${text.replace(/\s+/g, ' ').slice(0, 90)}`;
+    }
+    // 没有 git 时也不能编数字：必须如实说不是 git 仓库
+    const text = await page.locator('.dock-changes .changes-panel').innerText();
+    assert(/不是 git 仓库/.test(text), `无 git 时应如实说明：${text.slice(0, 120)}`);
+    return '无 git → 如实说明（未编造）';
   });
 
   await step('G5.1/G5.2 解释这段给出结构性解释（未使用模型）', async () => {

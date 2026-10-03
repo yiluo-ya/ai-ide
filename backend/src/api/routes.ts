@@ -19,6 +19,8 @@ import type {
   FileDiffResult,
   FileHistoryEntry,
   FileSummary,
+  GitChangeEntry,
+  GitChangesResult,
   FindReferencesRequest,
   FlowKind,
   FlowResult,
@@ -56,7 +58,17 @@ import { buildTimeline, DEFAULT_RECENT_WINDOW_MS, hostLinesFor, markHostOrigins 
 import { compareSnapshot, readmap } from '../indexer/changes';
 import { explainAt } from '../indexer/explain';
 import { flowGraph } from '../indexer/flow';
-import { BLAME_MAX_LINES, blame, DIFF_MAX_CHARS, fileDiff, fileHistory, isValidRev, showFile } from '../indexer/gitread';
+import {
+  BLAME_MAX_LINES,
+  blame,
+  DIFF_MAX_CHARS,
+  diffNumstat,
+  fileDiff,
+  fileHistory,
+  isValidRev,
+  showFile,
+  worktreeChanges,
+} from '../indexer/gitread';
 import {
   CORS_ORIGINS,
   DATA_DIR,
@@ -70,6 +82,7 @@ import {
 } from '../config';
 import { buildIndexReport } from '../indexer/index-report';
 import { AGENT_TOOLS_NOTE, agentToolNames, agentToolSpecs, callAgentTool, type AgentCallResult } from './agent';
+import { restartService, serviceStatus, stopService } from '../services';
 
 const VERSION = '0.1.0';
 
@@ -318,6 +331,49 @@ export function createApp(
     return c.json({ status: project.status });
   });
 
+  // -------------------------------------------------------------- 命令管理（2026-10-03）
+
+  /**
+   * 服务状态：pid / 端口 / 运行时长 / 日志路径。
+   * 只在**本机模式**下可见可用 —— 共享出去以后不给看机器的运行信息。
+   */
+  const serviceGuarded = (c: Context): Response | null => {
+    if (!LOCAL_HOSTS.has(HOST)) {
+      return fail(c, 403, 'disabled_in_share_mode', '共享模式下不提供命令管理（只读阅读）');
+    }
+    return null;
+  };
+
+  app.get('/api/service/status', async (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    return c.json(await serviceStatus());
+  });
+
+  /** 重启：交给独立 worker（自己杀自己之后没人能把它拉起来）。需要 ?confirm=1。 */
+  app.post('/api/service/restart', async (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    if (c.req.query('confirm') !== '1') {
+      return fail(c, 400, 'confirm_required', '重启需要二次确认（?confirm=1）');
+    }
+    const { via } = await restartService();
+    return c.json({ ok: true, restartedBy: via, note: '本服务将在约 0.5 秒后退出，由 worker 拉起新进程' });
+  });
+
+  /** 停止：同样需要 ?confirm=1。 */
+  app.post('/api/service/stop', async (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    if (c.req.query('confirm') !== '1') {
+      return fail(c, 400, 'confirm_required', '停止需要二次确认（?confirm=1）');
+    }
+    const { pid } = await stopService();
+    return c.json({ ok: true, pid, note: '服务正在退出；重新启动请看 README 的 `npm start`' });
+  });
+
+  // -------------------------------------------------------------- 命令管理结束
+
   // -------------------------------------------------------------- 文件
 
   /**
@@ -524,6 +580,39 @@ export function createApp(
       return fail(c, 400, 'bad_request', 'at / files are required');
     }
     const result: ChangeSummary = await compareSnapshot(project, body);
+    return c.json(result);
+  });
+
+  /**
+   * 变更（2026-10-03 用户要求：以 git 为基础，不自记录）：
+   * `git status` 的改动清单 + `git diff --numstat HEAD` 的增删行数。
+   * 非 git 仓库如实返回 isRepo=false，不用「自记录快照」凑数字。
+   */
+  app.get('/api/projects/:id/git-changes', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const changes = await worktreeChanges(project.root);
+    const numstat = changes.isRepo ? await diffNumstat(project.root, 'HEAD') : null;
+    const statByFile = new Map((numstat ?? []).map((n) => [n.file, n]));
+    const LIMIT = 500;
+    const entries: GitChangeEntry[] = changes.entries.slice(0, LIMIT).map((e) => {
+      const st = statByFile.get(e.file);
+      return {
+        file: e.file,
+        status: e.status,
+        ...(e.from ? { from: e.from } : {}),
+        added: st?.added ?? null,
+        removed: st?.removed ?? null,
+        binary: st?.binary ?? false,
+        isTest: isTestFile(e.file),
+      };
+    });
+    const result: GitChangesResult = {
+      isRepo: changes.isRepo,
+      branch: changes.branch,
+      entries,
+      truncated: Math.max(0, changes.entries.length - LIMIT),
+    };
     return c.json(result);
   });
 

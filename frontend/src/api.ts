@@ -9,6 +9,7 @@ import type {
   FileDensity,
   FileNode,
   FindReferencesRequest,
+  GitChangesResult,
   HighlightResult,
   HoverDefinition,
   HoverLiteral,
@@ -27,6 +28,7 @@ import type {
   SearchMatch,
   SearchResult,
   SearchOptions,
+  ServiceStatus,
   SymbolInfo,
   SymbolKind,
   TypeHierarchyResult,
@@ -122,6 +124,15 @@ export const api = {
   /** 2026-10-03：文件树要显示项目的所有文件（含二进制与规则忽略的）。 */
   allFiles: (id: string) =>
     request<{ tree: FileNode; status: IndexStatus }>(`/projects/${id}/all-files`),
+
+  /** 变更（2026-10-03）：以 git 为准的工作区改动清单。 */
+  gitChanges: (id: string) => request<GitChangesResult>(`/projects/${id}/git-changes`),
+
+  /** 命令管理（2026-10-03）：服务状态与启停（重启 / 停止都要 confirm=1）。 */
+  serviceStatus: () => request<ServiceStatus>('/service/status'),
+  serviceRestart: () =>
+    request<{ ok: boolean; restartedBy: string; note?: string }>('/service/restart?confirm=1', { method: 'POST' }),
+  serviceStop: () => request<{ ok: boolean; pid: number; note?: string }>('/service/stop?confirm=1', { method: 'POST' }),
 
   /** 目录选择器：列本机目录（共享模式下后端会 403）。 */
   fsDirs: (path?: string) =>

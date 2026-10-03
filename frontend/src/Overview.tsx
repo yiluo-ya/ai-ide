@@ -19,9 +19,7 @@ import { useMapStore } from './mapState';
 import { useStore } from './state';
 import { ROUTE_KINDS } from './guide';
 import { useGuideStore } from './guideState';
-import { staleNoteCount, useChangesStore } from './changesState';
-import { snapshotAge } from './readSnapshot';
-import { timeAgoMs } from './timeAgo';
+import { useChangesStore } from './changesState';
 import { useI18n } from './i18n';
 import { Welcome } from './Welcome';
 import './overview.css';
@@ -216,27 +214,22 @@ function GuideStart({ onOpenFile }: { onOpenFile: (file: string, line?: number) 
 }
 
 /**
- * W3 / G8.2–G8.4：首屏「自上次阅读以来」摘要卡（紧接「从这里开始」之后）。
+ * 变更摘要卡（2026-10-03：改为**以 git 为准**）。
  *
- * 没有基线时不填假数字，整块改成「记录当前为阅读基线」；
- * 无 git 时只报「变了几个文件」，不显示增删行（后端给的是 null）。
+ * 显示「几个未提交改动」+ 分支名 + 增删行；不是 git 仓库就如实说，
+ * 不再有「记录阅读基线」那种自记录对比（用户要求：不自己记录变更）。
  */
 function ChangesHint({ onOpenChanges }: { onOpenChanges?: () => void }) {
   const { t } = useI18n();
-  const projectId = useChangesStore((s) => s.projectId);
-  const summary = useChangesStore((s) => s.summary);
-  const snapshot = useChangesStore((s) => s.snapshot);
-  const hasSnapshot = useChangesStore((s) => s.hasSnapshot);
+  const result = useChangesStore((s) => s.result);
   const busy = useChangesStore((s) => s.busy);
-  const recordBaseline = useChangesStore((s) => s.recordBaseline);
   const refresh = useChangesStore((s) => s.refresh);
   /** G8.1：SSE 报过的文件（20 秒后自动消失）——只说「刚有变更」，不描述变了什么。 */
   const pulse = useMapStore((s) => s.pulse);
 
-  const changed = summary?.files.length ?? 0;
-  const added = summary?.counts.added ?? 0;
-  const staleNotes = staleNoteCount(summary);
-  const age = snapshotAge(snapshot);
+  const entries = result?.entries ?? [];
+  const added = entries.reduce((n, e) => n + (e.added ?? 0), 0);
+  const removed = entries.reduce((n, e) => n + (e.removed ?? 0), 0);
 
   return (
     <section className="ov-card ov-wide changes-card">
@@ -244,60 +237,34 @@ function ChangesHint({ onOpenChanges }: { onOpenChanges?: () => void }) {
       <div className="guide-start">
         {Object.keys(pulse).length > 0 && (
           <div className="guide-start-row">
-            <span className="changes-live-inline">
-              {t('changes.live', { n: Object.keys(pulse).length })}
-            </span>
-            <button
-              className="btn ghost small"
-              onClick={() => void refresh()}
-              disabled={!hasSnapshot || busy}
-            >
+            <span className="changes-live-inline">{t('changes.live', { n: Object.keys(pulse).length })}</span>
+            <button className="btn ghost small" onClick={() => void refresh()} disabled={busy}>
               {t('changes.refresh')}
             </button>
           </div>
         )}
-        {!hasSnapshot ? (
+        {result && !result.isRepo && <div className="guide-muted">{t('changes.noGit')}</div>}
+        {result?.isRepo && (
           <div className="guide-start-row">
-            <span className="guide-muted">{t('changes.noBaseline')}</span>
+            <b>{entries.length > 0 ? t('changes.startChanged', { n: entries.length }) : t('changes.empty')}</b>
+            <span className="guide-muted">分支 {result.branch ?? '（无提交）'}</span>
+            {(added > 0 || removed > 0) && (
+              <span className="guide-muted">{t('changes.lines', { added, removed })}</span>
+            )}
             <span className="spacer" />
-            <button
-              className="btn ghost small"
-              onClick={() => void recordBaseline()}
-              disabled={!projectId || busy}
-            >
-              {t('changes.record')}
+            <button className="btn ghost small" onClick={onOpenChanges} disabled={!onOpenChanges}>
+              {t('changes.seeAll')}
             </button>
           </div>
-        ) : (
-          <>
-            <div className="guide-start-row">
-              <b>{changed > 0 ? t('changes.startChanged', { n: changed }) : t('changes.empty')}</b>
-              {summary?.source === 'git' && (
-                <span className="guide-muted">
-                  {t('changes.lines', {
-                    added: summary.counts.addedLines,
-                    removed: summary.counts.removedLines,
-                  })}
-                </span>
-              )}
-              {added > 0 && <span className="guide-muted">{t('changes.startNew', { n: added })}</span>}
-              {staleNotes > 0 && (
-                <span className="guide-muted">{t('changes.startStale', { n: staleNotes })}</span>
-              )}
-              <span className="spacer" />
-              <button className="btn ghost small" onClick={onOpenChanges} disabled={!onOpenChanges}>
-                {t('changes.seeAll')}
-              </button>
-            </div>
-            {summary?.source === 'snapshot' && (
-              <div className="guide-muted">
-                {summary.git === 'no-head' ? t('changes.noGitHead') : t('changes.noGit')}
-              </div>
-            )}
-            {age != null && (
-              <div className="guide-muted">{t('changes.baselineAge', { age: timeAgoMs(age, t) })}</div>
-            )}
-          </>
+        )}
+        {!result && (
+          <div className="guide-start-row">
+            <span className="guide-muted">{busy ? '读取中…' : t('changes.noGit')}</span>
+            <span className="spacer" />
+            <button className="btn ghost small" onClick={() => void refresh()} disabled={busy}>
+              {t('changes.refresh')}
+            </button>
+          </div>
         )}
       </div>
     </section>

@@ -76,6 +76,70 @@ export async function diffNumstat(root: string, rev = 'HEAD'): Promise<NumstatEn
   return parseNumstat(out);
 }
 
+// ---------------------------------------------------------------- 工作区状态（2026-10-03）
+
+/** 归一化后的改动状态：只保留人能直接理解的六种。 */
+export type WorktreeStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflicted';
+
+export interface WorktreeEntry {
+  file: string;
+  status: WorktreeStatus;
+  /** 重命名 / 复制时的原路径。 */
+  from?: string;
+}
+
+export interface WorktreeChanges {
+  isRepo: boolean;
+  branch: string | null;
+  entries: WorktreeEntry[];
+}
+
+/** 两个状态字符 → 一种人话状态（顺序即优先级：未跟踪 / 冲突 > 重命名 > 新增 / 删除 > 修改）。 */
+function classifyStatus(x: string, y: string): WorktreeStatus {
+  if (x === '?' || y === '?') return 'untracked';
+  if (x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) return 'conflicted';
+  if (x === 'R' || y === 'R' || x === 'C' || y === 'C') return 'renamed';
+  if (x === 'A' || y === 'A') return 'added';
+  if (x === 'D' || y === 'D') return 'deleted';
+  return 'modified';
+}
+
+/** git 对含特殊字符的路径会加引号并转义；这里还原成可用的相对路径。 */
+function unquotePath(raw: string): string {
+  const s = raw.trim();
+  if (!s.startsWith('"') || !s.endsWith('"')) return s;
+  return s.slice(1, -1).replace(/\\(.)/g, '$1');
+}
+
+/**
+ * `git status --porcelain -uall`：工作区（含未跟踪文件）相对 HEAD 的改动清单。
+ *
+ * 2026-10-03 用户要求「变更以 git 为基础，不自己记录变更」—— 这份清单就是变更面板的唯一来源：
+ * git 说改了才算改了，不再让阅读器自己存快照去比对。非 git 仓库 / 没装 git 一律 isRepo=false。
+ */
+export async function worktreeChanges(root: string): Promise<WorktreeChanges> {
+  const statusOut = await git(root, ['status', '--porcelain', '-uall']);
+  if (statusOut === null) return { isRepo: false, branch: null, entries: [] };
+  const branchOut = await git(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const entries: WorktreeEntry[] = [];
+  for (const line of statusOut.split('\n')) {
+    if (line.trim().length < 4) continue;
+    const x = line[0];
+    const y = line[1];
+    let rest = line.slice(3);
+    let from: string | undefined;
+    if (x === 'R' || x === 'C') {
+      const parts = rest.split(' -> ');
+      if (parts.length === 2) {
+        from = unquotePath(parts[0]);
+        rest = parts[1];
+      }
+    }
+    entries.push({ file: unquotePath(rest), status: classifyStatus(x, y), ...(from ? { from } : {}) });
+  }
+  return { isRepo: true, branch: branchOut?.trim() || null, entries };
+}
+
 function parseNumstat(out: string): NumstatEntry[] {
   const entries: NumstatEntry[] = [];
   for (const raw of out.split('\n')) {

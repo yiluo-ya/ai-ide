@@ -13,7 +13,7 @@
  *
  * 跑法：npm run build && npm run test:ui
  */
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -120,6 +120,29 @@ async function waitForIndex(id, timeoutMs = 90_000) {
 }
 
 const fixtureRoot = await writeFixture();
+
+/**
+ * 2026-10-03：变更面板改成「以 git 为准」，夹具也要是个真 git 仓库才验得了。
+ * 顺便再改一个文件，制造一条「已修改（未提交）」记录。
+ * git 不可用时不让整轮挂掉 —— 用例会退化成断言「不是 git 仓库」那句如实说明。
+ */
+let fixtureIsRepo = false;
+try {
+  const git = (args) => execFileSync('git', args, { cwd: fixtureRoot, stdio: 'pipe' });
+  git(['init', '-q']);
+  git(['config', 'user.email', 'ui@test.local']);
+  git(['config', 'user.name', 'ui-fixture']);
+  git(['add', '-A']);
+  git(['commit', '-qm', 'fixture: init']);
+  await fsp.appendFile(
+    path.join(fixtureRoot, 'src', 'util.ts'),
+    '\n// ui-fixture: 制造一处未提交改动\n',
+    'utf8',
+  );
+  fixtureIsRepo = true;
+} catch {
+  fixtureIsRepo = false;
+}
 /** 本次专用的数据目录：绝不去读使用者本机已注册的真实项目（否则会拖着一大批索引跑）。 */
 const dataDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'wcr-ui-data-'));
 
@@ -264,7 +287,7 @@ const runSuite = (file) => {
   const child = spawn(
     process.execPath,
     [path.join(import.meta.dirname, file), project.id, ...process.argv.slice(2)],
-    { cwd: ROOT, env: { ...process.env, PORT }, stdio: 'inherit' },
+    { cwd: ROOT, env: { ...process.env, PORT, UI_FIXTURE_GIT: fixtureIsRepo ? '1' : '0' }, stdio: 'inherit' },
   );
   return new Promise((resolve) => child.on('exit', resolve));
 };

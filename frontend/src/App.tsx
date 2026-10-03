@@ -10,6 +10,8 @@ import {
 import { api } from './api';
 import { Editor } from './Editor';
 import { FileTree, type TreeDecor } from './FileTree';
+import { FileSearch } from './FileSearch';
+import { CommandPanel } from './CommandPanel';
 import { GraphView, type GraphViewState } from './GraphView';
 import { FlowView } from './FlowView';
 import { Overview, OverviewPanel } from './Overview';
@@ -52,17 +54,18 @@ type PanelTab =
   | 'search'
   | 'marks'
   | 'changes'
-  | 'notes';
+  | 'notes'
+  | 'service';
 
 /** 常驻 tab：阅读时随时够得着（其余都收进「更多」）。 */
-const PRIMARY_TABS: PanelTab[] = ['files', 'outline', 'search'];
+const PRIMARY_TABS: PanelTab[] = ['files', 'outline'];
 /**
  * 辅助 tab：收进「更多 ▾」。
- * 2026-10-03 用户要求移除「向导 / 引用 / 层级」三个面板（“没啥用”），
- * 它们对应的 tab 与渲染分支一并去掉；组件与后端接口保留（不破坏性删除，日后可恢复）。
+ * 2026-10-03 用户要求移除「向导 / 引用 / 层级」三个面板（“没啥用”）；
+ * 「搜索」也收进来 —— 它的日常用法（搜内容）已经并进文件面板（FileSearch）。
  */
-const SECONDARY_TABS: PanelTab[] = ['overview', 'marks', 'notes'];
-/** 快捷键顺序的**唯一次序来源**：Ctrl/Cmd+1..3 = 常驻，4..9 与 0 = 辅助组依次。
+const SECONDARY_TABS: PanelTab[] = ['overview', 'search', 'marks', 'notes', 'service'];
+/** 快捷键顺序的**唯一次序来源**：Ctrl/Cmd+1..2 = 常驻（文件 / 大纲），3..9 与 0 = 辅助组依次。
  * 以前这里和快捷键的 order 数组各写一份，漂移过：用户按 Ctrl+4 以为是「大纲」（界面上第 4 个），
  * 却切到了「引用」。加面板时只改这一处。
  */
@@ -77,6 +80,7 @@ const TAB_TEXT: Record<string, string> = {
   search: '搜索',
   marks: '书签',
   notes: '批注',
+  service: '命令',
 };
 const HOT_METRICS: HotMetric[] = ['files', 'refs', 'symbols', 'defined', 'unique', 'recent'];
 
@@ -165,7 +169,8 @@ export default function App() {
   /** 「更多 ▾」下拉是否展开（辅助面板都收在里面）。 */
   const [moreOpen, setMoreOpen] = useState(false);
   /** W3：变更面板 tab 上的计数（变了几个文件）。 */
-  const changesCount = useChangesStore((s) => s.summary?.files.length ?? 0);
+  // 变更计数 = git 报的未提交改动条数（2026-10-03：变更以 git 为准，不再自记录）
+  const changesCount = useChangesStore((s) => s.result?.entries.length ?? 0);
 
   /** tab 文字：guide / changes 走 i18n，其余走 TAB_TEXT。 */
   const tabLabel = (id: PanelTab) =>
@@ -847,6 +852,8 @@ export default function App() {
 
           {/* 「变更」已改到右侧常驻（见 .dock-changes），不再占侧栏 tab */}
 
+          {tab === 'service' && <CommandPanel />}
+
           {tab === 'overview' && (
             <OverviewPanel
               onOpenFile={(file, line) => jump(file, line ?? 1, 1)}
@@ -863,6 +870,8 @@ export default function App() {
                 value={fileFilter}
                 onChange={(e) => setFileFilter(e.target.value)}
               />
+              {/* 2026-10-03：搜内容也在这里（独立搜索面板收进「更多」） */}
+              <FileSearch onOpen={(file, line, col) => jump(file, line, col)} />
               <div className="tree-views">
                 <select
                   className="ov-select"

@@ -89,6 +89,45 @@ export interface FileNode {
   children?: FileNode[];
 }
 
+/** 服务状态（2026-10-03 命令管理）：命令面板显示它，并据此决定按钮是否可用。 */
+export interface ServiceStatus {
+  pid: number;
+  port: number;
+  host: string;
+  startedAt: number;
+  uptimeMs: number;
+  /** 本机模式才允许启停；共享模式下为 false。 */
+  manageable: boolean;
+  /** 日志文件路径（本服务自己拉起的进程会写这里）。 */
+  logPath: string;
+  lastAction: { action: string; at: number; detail?: string } | null;
+}
+
+/**
+ * 变更（以 git 为准，2026-10-03 用户要求）：工作区相对 HEAD 的改动清单。
+ * 阅读器不再自己记录「阅读基线快照」——git 说改了才算改了。
+ */
+export interface GitChangeEntry {
+  file: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflicted';
+  /** 重命名 / 复制时的原路径。 */
+  from?: string;
+  /** 增删行数；未跟踪文件与二进制为 null（不编 0）。 */
+  added: number | null;
+  removed: number | null;
+  binary: boolean;
+  isTest?: boolean;
+}
+
+export interface GitChangesResult {
+  /** false = 不是 git 仓库（或没装 git），此时 entries 为空，界面如实说明。 */
+  isRepo: boolean;
+  branch: string | null;
+  entries: GitChangeEntry[];
+  /** 超过上限被省略的条数。 */
+  truncated: number;
+}
+
 export interface SearchMatch {
   file: string;
   range: Range;

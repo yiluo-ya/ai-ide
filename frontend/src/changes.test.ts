@@ -10,9 +10,8 @@
  *   UI 交互归 `npm run test:ui`）。
  */
 import { describe, expect, it } from 'vitest';
-import type { ChangeSummary, ReadmapResult } from '../../shared/types';
+import type { ReadmapResult } from '../../shared/types';
 import { buildSnapshot, snapshotAge } from './readSnapshot';
-import { staleFileCount, staleNoteCount, visibleChanges } from './changesState';
 import { blameAt, shortAuthor } from './blame';
 import type { Note } from './notes';
 
@@ -68,52 +67,8 @@ describe('snapshotAge', () => {
   });
 });
 
-describe('visibleChanges / 笔记过期口径', () => {
-  const summary = (): ChangeSummary => ({
-    at: 1,
-    now: 2,
-    source: 'snapshot',
-    git: 'no-repo',
-    files: [
-      {
-        file: 'src/a.ts',
-        status: 'M',
-        origin: 'recent',
-        originConfidence: 0.5,
-        notes: 3,
-        noteStale: true,
-      },
-      {
-        file: 'src/b.ts',
-        status: 'M',
-        origin: 'project',
-        originConfidence: 0.2,
-        notes: 2,
-        noteStale: true,
-      },
-      { file: 'src/c.ts', status: 'A', origin: 'agent', originConfidence: 1, notes: 0, noteStale: false },
-    ],
-    counts: { added: 1, modified: 2, deleted: 0, addedLines: 0, removedLines: 0, noteStale: 2 },
-  });
-
-  it('「已读，跳过」的文件不再出现在列表里', () => {
-    const rows = visibleChanges({ summary: summary(), dismissed: { 'src/c.ts': true }, onlyStale: false });
-    expect(rows.map((r) => r.file)).toEqual(['src/a.ts', 'src/b.ts']);
-  });
-
-  it('「只看笔记过期」按 noteStale 筛', () => {
-    const rows = visibleChanges({ summary: summary(), dismissed: {}, onlyStale: true });
-    expect(rows.map((r) => r.file)).toEqual(['src/a.ts', 'src/b.ts']);
-    const none = visibleChanges({ summary: null, dismissed: {}, onlyStale: true });
-    expect(none).toEqual([]);
-  });
-
-  it('笔记过期数按「笔记条数」累加（不是文件数 2）', () => {
-    expect(staleFileCount(summary())).toBe(2);
-    expect(staleNoteCount(summary())).toBe(5);
-    expect(staleNoteCount(null)).toBe(0);
-  });
-});
+// 2026-10-03：变更改成「以 git 为准」后，visibleChanges / 笔记过期那套（自记录快照对比）
+// 连同实现一起删除，对应的用例也删掉 —— 测已经不存在的功能没有意义。
 
 describe('blame 的一行摘要', () => {
   it('作者短名过长时截断；找不到那一行返回 null（不猜）', () => {

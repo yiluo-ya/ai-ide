@@ -1,0 +1,84 @@
+/* 命令面板（2026-10-03）：服务状态 + 重启 / 停止。 */
+
+.service-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px;
+}
+
+.sv-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sv-head h3 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.sv-facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.sv-facts > div {
+  display: flex;
+  gap: 8px;
+}
+
+.sv-facts dt {
+  flex: none;
+  width: 68px;
+  color: var(--fg-dim);
+}
+
+.sv-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-path {
+  font-size: 11px;
+  color: var(--hl-external);
+}
+
+.sv-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sv-note {
+  font-size: 11px;
+  color: var(--accent-2);
+  line-height: 1.5;
+}
+
+.sv-hint {
+  font-size: 11px;
+  color: var(--fg-dim);
+  line-height: 1.6;
+}
+
+.sv-hint code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--bg-3);
+}
+
+.sv-error {
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--badge-bg);
+  color: var(--warn);
+  font-size: 12px;
+}
