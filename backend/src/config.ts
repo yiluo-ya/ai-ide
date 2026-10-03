@@ -12,9 +12,14 @@ export const REPO_ROOT = path.resolve(here, '..', '..');
 export const PORT = Number(process.env.PORT ?? 8787);
 export const HOST = process.env.HOST ?? '127.0.0.1';
 
+/**
+ * 数据目录（项目列表 / 模型配置 / 索引快照 / 命令清单…）。
+ * 2026-10-03 用户要求：默认放**用户主目录下的 `.ide/`**，不把状态写进被阅读的仓库。
+ * 老版本的 `<仓库根>/data` 会在启动时自动复制过来（见 `bootstrap.migrateLegacyDataDir`，只复制不删）。
+ */
 export const DATA_DIR = process.env.READER_DATA_DIR
   ? path.resolve(process.env.READER_DATA_DIR)
-  : path.join(REPO_ROOT, 'data');
+  : path.join(os.homedir(), '.ide');
 
 export const FRONTEND_DIST = process.env.READER_FRONTEND_DIST
   ? path.resolve(process.env.READER_FRONTEND_DIST)
@@ -72,10 +77,9 @@ export const CORS_ORIGINS = parseCorsOrigins(process.env.READER_CORS_ORIGIN);
 export const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
 /** 仅本机监听时的说明；也是 shareHint=null 时的「如何放开」。 */
-export const SHARE_NOTE_LOCAL =
-  '当前只监听 127.0.0.1，仅本机可访问；要同机同目录分享，用 HOST=0.0.0.0 重启（同一局域网内的人打开链接即只读阅读，仍不会写被读目录）';
-/** 已放开监听时的只读承诺。 */
-export const SHARE_NOTE_SHARED = '同一局域网内的人打开即只读阅读；不会写被读目录、不执行命令';
+export const SHARE_NOTE_LOCAL = '当前只监听 127.0.0.1，仅本机可访问；要同机同目录分享，用 HOST=0.0.0.0 重启';
+/** 已放开监听时的分享说明。 */
+export const SHARE_NOTE_SHARED = '同一局域网内的人打开链接即可阅读';
 
 /** 本机局域网 IPv4（排除回环 / 内部地址），用于「同机同目录分享」提示。 */
 export function lanIPv4Addresses(): string[] {

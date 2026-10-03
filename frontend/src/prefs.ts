@@ -1,5 +1,5 @@
 /**
- * 界面偏好（P24 / Q14）的唯一真相：主题 · 字号 · 侧栏宽 · 语言。
+ * 界面偏好（P24 / Q14）的唯一真相：主题 · 字号 · 侧栏宽 · 语言 + 编辑器 / 界面细项。
  *
  * 纪律：
  * 1) 只写一个 localStorage 键 `wcr:prefs`，与项目无关（不分片）；
@@ -18,6 +18,18 @@ export interface Prefs {
   fontSize: number;
   sidebarWidth: number;
   locale: Locale;
+  /** 编辑器：自动换行。 */
+  wrap: boolean;
+  /** 编辑器：缩进宽度（空格数）。 */
+  tabSize: number;
+  /** 编辑器：显示 minimap。 */
+  minimap: boolean;
+  /** 编辑器：显示空白字符与缩进参考线。 */
+  whitespace: boolean;
+  /** 界面：动效减弱（关掉过渡 / 动画）。 */
+  reduceMotion: boolean;
+  /** 界面：右侧变更栏默认展开。 */
+  changesOpen: boolean;
 }
 
 export const PREFS_KEY = 'wcr:prefs';
@@ -25,12 +37,20 @@ export const FONT_SIZE_MIN = 12;
 export const FONT_SIZE_MAX = 18;
 export const SIDEBAR_MIN = 240;
 export const SIDEBAR_MAX = 560;
+/** 缩进宽度可选值（编辑器设置里只给这三档）。 */
+export const TAB_SIZES = [2, 4, 8] as const;
 
 export const DEFAULT_PREFS: Prefs = {
   theme: 'dark',
   fontSize: 13,
   sidebarWidth: 320,
   locale: 'zh',
+  wrap: false,
+  tabSize: 4,
+  minimap: true,
+  whitespace: false,
+  reduceMotion: false,
+  changesOpen: true,
 };
 
 type Listener = (prefs: Prefs) => void;
@@ -53,6 +73,12 @@ function coerce(raw: unknown): Prefs {
     locale,
     fontSize: clampInt(src.fontSize, FONT_SIZE_MIN, FONT_SIZE_MAX, DEFAULT_PREFS.fontSize),
     sidebarWidth: clampInt(src.sidebarWidth, SIDEBAR_MIN, SIDEBAR_MAX, DEFAULT_PREFS.sidebarWidth),
+    wrap: src.wrap === true,
+    tabSize: clampInt(src.tabSize, 2, 8, DEFAULT_PREFS.tabSize),
+    minimap: src.minimap !== false,
+    whitespace: src.whitespace === true,
+    reduceMotion: src.reduceMotion === true,
+    changesOpen: src.changesOpen !== false,
   };
 }
 
@@ -104,6 +130,8 @@ export function applyPrefs(prefs: Prefs = current): void {
   root.dataset.theme = resolvedTheme(prefs.theme);
   root.style.setProperty('--ui-font-size', `${prefs.fontSize}px`);
   root.style.setProperty('--sidebar-width', `${prefs.sidebarWidth}px`);
+  // 动效减弱：由 CSS 用 [data-motion='reduced'] 关掉过渡与动画
+  root.dataset.motion = prefs.reduceMotion ? 'reduced' : 'full';
   root.lang = prefs.locale === 'zh' ? 'zh-CN' : 'en';
   document.title = prefs.locale === 'en' ? 'Web Code Reader' : '代码阅读器';
   if (prefs.theme === 'system') watchSystemTheme();

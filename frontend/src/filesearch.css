@@ -7,17 +7,6 @@
   padding: 0 8px 4px;
 }
 
-.fs-input-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.fs-input-row .text-input {
-  flex: 1;
-  min-width: 0;
-}
-
 .fs-result {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -26,6 +15,10 @@
 }
 
 .fs-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   padding: 4px 8px;
   color: var(--fg-dim);
   font-size: 11px;

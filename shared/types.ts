@@ -14,6 +14,30 @@ export type LangId =
   | 'go'
   | 'java'
   | 'rust'
+  // 常用文件（2026-10-03）：shell / 数据配置 / 标记 / 样式 / SQL
+  | 'shell'
+  | 'json'
+  | 'yaml'
+  | 'toml'
+  | 'ini'
+  | 'dockerfile'
+  | 'markdown'
+  | 'css'
+  | 'scss'
+  | 'less'
+  | 'html'
+  | 'sql'
+  // 包依赖 / 构建清单（2026-10-03）：只高亮与预览，不进符号索引
+  | 'xml'
+  | 'gomod'
+  | 'groovy'
+  | 'kotlin'
+  | 'scala'
+  | 'ruby'
+  | 'elixir'
+  | 'swift'
+  | 'pip'
+  | 'makefile'
   | 'plaintext';
 
 /** 位置：行、列均 1-based，列按 UTF-16 code unit 计。 */
@@ -103,13 +127,75 @@ export interface ServiceStatus {
   lastAction: { action: string; at: number; detail?: string } | null;
 }
 
+// ------------------------------------------------ 项目命令（FR-0005，2026-10-03）
+
+/** 命令的用途分类；四类为主，其余归 other。 */
+export type CommandKind = 'build' | 'start' | 'stop' | 'test' | 'other';
+
+/** 命令从哪来：script = 仓库里读到的（note 写出处）；generated = agent 给的建议。 */
+export type CommandSource = 'script' | 'generated';
+
+/** 危险级别：warn 要在确认框里额外勾选；block 后端直接拒绝执行。 */
+export type CommandRisk = 'none' | 'warn' | 'block';
+
+/** 一条项目命令（agent 分析出来的，或用户手输的自定义命令）。 */
+export interface ProjectCommand {
+  id: string;
+  kind: CommandKind;
+  /** 展示名，如「编译前端」。 */
+  label: string;
+  /** 原样可执行的命令字符串。 */
+  command: string;
+  source: CommandSource;
+  /** 出处（package.json scripts.build）或「生成」的理由。 */
+  note?: string;
+  /** 建议后台跑（start 类默认 true）。 */
+  background?: boolean;
+  /** 后端按黑名单标注。 */
+  risk?: CommandRisk;
+}
+
+/** 一个项目的命令清单（一次分析的结果，落盘保留）。 */
+export interface CommandPlan {
+  projectId: string;
+  createdAt: number;
+  /** 用户那次输入的一句话。 */
+  prompt: string;
+  /** agent 的一句话结论。 */
+  summary?: string;
+  model?: { provider?: string; modelId?: string } | null;
+  /** 想回看分析过程时，去 Agent 面板打开它（内存会话，重启即清）。 */
+  sessionId?: string;
+  commands: ProjectCommand[];
+}
+
+/** 一次命令执行（前台跑完就结束；后台留在运行列表里）。 */
+export interface CommandRun {
+  id: string;
+  projectId: string;
+  command: string;
+  kind: CommandKind;
+  background: boolean;
+  pid?: number;
+  startedAt: number;
+  endedAt?: number;
+  exitCode?: number | null;
+  /** lost = 记着但进程已不在（IDE 后端重启过）。 */
+  status: 'running' | 'done' | 'failed' | 'stopped' | 'lost';
+  /** 后台运行的日志文件。 */
+  logPath?: string;
+  /** 前台运行的合并输出；后台为空（去读日志）。 */
+  output?: string;
+}
+
 /**
  * 变更（以 git 为准，2026-10-03 用户要求）：工作区相对 HEAD 的改动清单。
  * 阅读器不再自己记录「阅读基线快照」——git 说改了才算改了。
  */
 export interface GitChangeEntry {
   file: string;
-  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflicted';
+  /** 未跟踪的新文件按 added 报（见 gitread.classifyStatus）；被忽略的文件不会出现在清单里。 */
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'conflicted';
   /** 重命名 / 复制时的原路径。 */
   from?: string;
   /** 增删行数；未跟踪文件与二进制为 null（不编 0）。 */
@@ -126,6 +212,29 @@ export interface GitChangesResult {
   entries: GitChangeEntry[];
   /** 超过上限被省略的条数。 */
   truncated: number;
+}
+
+/**
+ * 变更栏上的四个写操作（2026-10-03 用户要求）：只有这四个，没有「任意 git」。
+ * git status 是默认的只读展示，不需要点。
+ */
+export type GitWriteAction = 'add' | 'commit' | 'pull' | 'push';
+
+export interface GitWriteRequest {
+  action: GitWriteAction;
+  /** action=commit 时的提交说明（空串由后端拒绝）。 */
+  message?: string;
+}
+
+/** 一次 git 写操作的结果：成功失败都如实回报，界面只负责把 summary 冒泡出来。 */
+export interface GitRunResult {
+  ok: boolean;
+  /** 退出码；git 命令根本没起来（本机没装 git）时为 null。 */
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  /** 一句人话（成功 / 失败都能直接显示给用户）。 */
+  summary: string;
 }
 
 export interface SearchMatch {
@@ -540,8 +649,6 @@ export interface IntegrationManifest {
   resourcesEndpoint?: string;
   /** S9c：生命周期约定（何时清、清到什么程度）。 */
   lifecycleNote?: string;
-  /** P17：隐私承诺的可追证描述（读什么 / 写哪里 / 传什么 / 谁在用）。 */
-  privacy?: PrivacyInfo;
 }
 
 /** Agent 工具参数描述（JSON Schema 子集，够表述 string / number / boolean / array）。 */
@@ -882,26 +989,6 @@ export type SkipReason =
   | 'ignored'        // 被忽略规则排除
   | 'not-source';    // 不是被索引的源码扩展名
 
-/** 索引报告（P9）：每个未索引 / 降级文件的去向，以及编码分布。 */
-export interface IndexReport {
-  /** 扫描到的文件总数（不含目录，含被忽略的）。 */
-  scanned: number;
-  /** 已建符号索引的文件数。 */
-  indexed: number;
-  /** 降级索引的文件数（>1MB 的「顶层符号模式」，P11）。 */
-  degraded: number;
-  /** 源码文件数（按扩展名匹配语言 spec 的文件）。 */
-  sourceFiles: number;
-  /**
-   * 按原因归类的清单（files 最多 50 条）。
-   * `detail` 是可选补充（如 parse-failed 的语法包错误文本），不影响既有字段语义。
-   */
-  byReason: Array<{ reason: SkipReason; count: number; files: string[]; detail?: string }>;
-  /** 正文实际使用的编码分布（P12）。 */
-  encodings: Array<{ encoding: string; count: number }>;
-  generatedAt: number;
-}
-
 /** 忽略规则现状（P8）：生效来源与命中数，供界面显示「规则真的生效了」。 */
 export interface IgnoreInfo {
   /** 生效的规则文件（相对项目根）；没有则为空数组。 */
@@ -937,21 +1024,6 @@ export interface VerifyResult {
   deleted: string[];
   /** 差异是否已自动修复。 */
   healed: boolean;
-}
-
-/** 隐私承诺的可追证描述（P17，写进 /api/integration/manifest）。 */
-export interface PrivacyInfo {
-  /** 固定 'none'：服务不发起任何外部网络请求。 */
-  network: 'none';
-  /** 监听地址（只监听本机）。 */
-  host: string;
-  port: number;
-  /** 是否写入被读目录（恒为 false，硬承诺）。 */
-  writesSource: false;
-  /** 本工具自己的数据目录（用户数据落在这里）。 */
-  dataDir: string;
-  /** 读取的文件范围说明。 */
-  reads: string;
 }
 
 // ------------------------------------------ 向导（04 Guide · W3 变更感知 / G8）

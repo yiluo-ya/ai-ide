@@ -8,6 +8,9 @@
  * 只读承诺：这里只渲染后端 `file-diff` 返回的**原始 diff 文本**（前端不解析、更不应用），
  * 不提供任何写操作；无 git 时如实说「没 git」，并指出可以改用阅读快照对比，
  * 而不是留一个空白面板。
+ *
+ * 入口（2026-10-03 用户要求）：在变更栏里**点某一行的增删行数**（`+2 -0` 那块）打开；
+ * 行末不再单独放一个「差异」按钮。
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { FileDiffResult } from '../../shared/types';
@@ -25,6 +28,22 @@ function lineKind(line: string): string {
   if (line.startsWith('+')) return 'add';
   if (line.startsWith('-')) return 'del';
   return 'ctx';
+}
+
+/**
+ * diff 正文：只按行着色，不解析、更不应用。
+ * 空行给一个不换行空格，否则行高会塌掉。
+ */
+function DiffLines({ text }: { text: string }) {
+  return (
+    <>
+      {text.split('\n').map((line, i) => (
+        <div className={`diff-line ${lineKind(line)}`} key={i}>
+          {line === '' ? '\u00a0' : line}
+        </div>
+      ))}
+    </>
+  );
 }
 
 export function DiffPanel({
@@ -105,12 +124,7 @@ export function DiffPanel({
         <div className="diff-body">
           {loading && <div className="guide-empty">{t('diff.loading')}</div>}
           {!loading && lines.length === 0 && <div className="diff-empty">{reasonText()}</div>}
-          {!loading &&
-            lines.map((line, i) => (
-              <div className={`diff-line ${lineKind(line)}`} key={i}>
-                {line === '' ? '\u00a0' : line}
-              </div>
-            ))}
+          {!loading && lines.length > 0 && <DiffLines text={data?.diff ?? ''} />}
         </div>
         {data?.truncated && <div className="diff-foot">{t('diff.truncated')}</div>}
       </div>

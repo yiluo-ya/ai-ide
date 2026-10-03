@@ -1,10 +1,9 @@
 /**
- * 侧栏向导面板（04 Guide · W1/W2）：路线 / 进度 / 待读 / 笔记。
+ * 侧栏向导面板（04 Guide · W1/W2）：路线 / 进度 / 待读。
  *
  * 形态对齐 `docs/04-guide.md` §3.2：路线是一张可执行的清单 —— 每一步一个文件，
- * 带序号、一句理由、状态（已读 / 在读 / 待读），底部是行进控制；
- * §3.3 的笔记汇总在底部（G4.3 / G4.4）：按文件分组 + 筛选 + 导出。
- * 文案全部走 i18n（`guide.*`），状态与存储都在 `guideState.ts` / `guide.ts` / `notes.ts`。
+ * 带序号、一句理由、状态（已读 / 在读 / 待读），底部是行进控制。
+ * 文案全部走 i18n（`guide.*`），状态与存储都在 `guideState.ts` / `guide.ts`。
  */
 import { useMemo, useState } from 'react';
 import type { FileNode } from '../../shared/types';
@@ -12,11 +11,7 @@ import { ROUTE_KINDS } from './guide';
 import { useGuideStore, visibleSteps } from './guideState';
 import { setRead as setReadMark } from './marks';
 import { useMapStore } from './mapState';
-import type { Note } from './notes';
-import { exportJson as exportNotesJson } from './notes';
-import { useNotesStore } from './notesState';
-import { downloadText } from './report';
-import { showFlash, useStore } from './state';
+import { useStore } from './state';
 import { useI18n } from './i18n';
 import './guide.css';
 
@@ -275,194 +270,7 @@ export function GuidePanel({
         )}
       </section>
 
-      {/* ------------------------------------------------------------ 笔记（W2） */}
-      <NotesSection currentFile={openFile} onOpenFile={onOpenFile} />
     </div>
   );
 }
 
-/** 文件级笔记在列表里的标记（行级写 `path:line`，文件级只有路径）。 */
-function noteSpot(note: Note): string {
-  return note.level === 'file' ? note.file : `${note.file}:${note.line}`;
-}
-
-/**
- * G4.3 / G4.4：笔记汇总 —— 按文件分组、三档筛选（全部 / 当前文件 / 待归位）、
- * 点一条跳回原处、导出 Markdown / JSON、导入 JSON（合并去重）。
- *
- * 「待归位」只对**当前打开的文件**成立：锚点校验要靠文件正文，而正文只有编辑器有。
- * 所以这一档的条数是「当前文件里没找到原位置的笔记」，文案里如实说明。
- */
-function NotesSection({
-  currentFile,
-  onOpenFile,
-}: {
-  currentFile: string | null;
-  onOpenFile: (file: string, line?: number, col?: number) => void;
-}) {
-  const { t } = useI18n();
-  const projectId = useStore((s) => s.projectId);
-  const projectName = useStore((s) => s.project?.name ?? '');
-  const notes = useNotesStore((s) => s.notes);
-  const orphans = useNotesStore((s) => s.orphans);
-  const remove = useNotesStore((s) => s.remove);
-  const importJson = useNotesStore((s) => s.importJson);
-  const exportMarkdown = useNotesStore((s) => s.exportMarkdown);
-  const [filter, setFilter] = useState<'all' | 'current' | 'orphans'>('all');
-
-  /** 筛过的笔记，按「文件 → 文件级在前 → 行号」分组（顺序与存储一致）。 */
-  const groups = useMemo(() => {
-    const list = filter === 'current' ? notes.filter((n) => n.file === currentFile) : filter === 'orphans' ? orphans : notes;
-    const out: Array<{ file: string; items: Note[] }> = [];
-    for (const note of list) {
-      const last = out[out.length - 1];
-      if (last && last.file === note.file) last.items.push(note);
-      else out.push({ file: note.file, items: [note] });
-    }
-    return out;
-  }, [notes, orphans, filter, currentFile]);
-
-  const shown = groups.reduce((n, g) => n + g.items.length, 0);
-  /** 待归位的那几条（在「全部」视图里也要标出来：它的行号是旧的，不可信）。 */
-  const orphanIds = useMemo(() => new Set(orphans.map((n) => n.id)), [orphans]);
-  // 文件名只带日期：项目名可能含空格 / 路径分隔符，不往文件名里塞
-  const stamp = new Date().toISOString().slice(0, 10);
-
-  const doExportMarkdown = () => {
-    if (!notes.length) {
-      showFlash(t('guide.notes.exportEmpty'));
-      return;
-    }
-    downloadText(`notes-${stamp}.md`, exportMarkdown(projectName || t('app.title')));
-    showFlash(t('guide.notes.exportDone', { n: notes.length }));
-  };
-
-  const doExportJson = () => {
-    if (!projectId) return;
-    downloadText(`notes-${stamp}.json`, exportNotesJson(projectId));
-    showFlash(t('guide.notes.exportDone', { n: notes.length }));
-  };
-
-  return (
-    <section className="guide-section">
-      <header className="guide-sec-head">
-        <h3>{t('guide.notes.title')}</h3>
-        <span className="guide-muted">{t('guide.notes.count', { n: notes.length })}</span>
-      </header>
-
-      <div className="guide-actions">
-        <button
-          className={`btn ghost small ${filter === 'all' ? 'active' : ''}`}
-          onClick={() => setFilter('all')}
-        >
-          {t('guide.notes.filter.all')}
-        </button>
-        <button
-          className={`btn ghost small ${filter === 'current' ? 'active' : ''}`}
-          onClick={() => setFilter('current')}
-          disabled={!currentFile}
-          title={currentFile ?? t('guide.notes.noCurrent')}
-        >
-          {t('guide.notes.filter.current')}
-        </button>
-        <button
-          className={`btn ghost small ${filter === 'orphans' ? 'active' : ''}`}
-          onClick={() => setFilter('orphans')}
-        >
-          {t('guide.notes.filter.orphans', { n: orphans.length })}
-        </button>
-      </div>
-
-      {filter === 'orphans' && (
-        <div className="guide-orphan-note">
-          <b>{t('guide.notes.orphansTitle')}</b> {t('guide.notes.orphansNote')}
-        </div>
-      )}
-
-      {shown === 0 && (
-        <div className="guide-empty">
-          {filter === 'orphans'
-            ? t('guide.notes.orphansEmpty')
-            : notes.length === 0
-              ? t('guide.notes.empty')
-              : t('guide.notes.emptyCurrent')}
-        </div>
-      )}
-
-      {groups.map((group) => (
-        <div className="guide-note-group" key={group.file}>
-          <div className="guide-note-file" title={group.file}>
-            {group.file}
-            <span className="guide-muted"> ({group.items.length})</span>
-          </div>
-          {group.items.map((note) => {
-            // 待归位的行级笔记：原行号已经不可信，跳转只到文件（不把人送到错的一行）
-            const lostHere = orphanIds.has(note.id);
-            const target = lostHere
-              ? { file: note.file, line: undefined, col: undefined }
-              : { file: note.file, line: note.line, col: note.col || 1 };
-            return (
-              <div className="guide-note-row" key={note.id}>
-                <button
-                  className="guide-note-main"
-                  onClick={() => onOpenFile(target.file, target.line, target.col)}
-                  title={lostHere ? `${noteSpot(note)}\n${t('guide.notes.orphanJump')}` : noteSpot(note)}
-                >
-                  <span className="guide-note-spot">
-                    {note.level === 'file'
-                      ? t('guide.notes.fileLevel')
-                      : lostHere
-                        ? t('guide.notes.spotOrphan', { line: note.line })
-                        : `L${note.line}`}
-                  </span>
-                  <span className="guide-note-body">{note.body}</span>
-                </button>
-                <button
-                  className="btn ghost small"
-                  onClick={() => onOpenFile(target.file, target.line, target.col)}
-                  title={lostHere ? t('guide.notes.orphanJump') : t('guide.notes.jump')}
-                >
-                  →
-                </button>
-                <button className="btn ghost small" onClick={() => remove(note.id)} title={t('guide.notes.delete')}>
-                  ✕
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      ))}
-
-      <div className="guide-note-foot">
-        <button className="btn ghost small" onClick={doExportMarkdown}>
-          {t('guide.notes.export')}
-        </button>
-        <button className="btn ghost small" onClick={doExportJson}>
-          {t('guide.notes.exportJson')}
-        </button>
-        <label className="btn ghost small" title={t('guide.notes.importTitle')}>
-          {t('guide.notes.import')}
-          <input
-            type="file"
-            accept=".json,application/json"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              e.target.value = '';
-              if (!f) return;
-              void f.text().then((text) => {
-                try {
-                  const added = importJson(text);
-                  showFlash(added > 0 ? t('guide.notes.importOk', { n: added }) : t('guide.notes.importNone'));
-                } catch {
-                  showFlash(t('guide.notes.importFail'));
-                }
-              });
-            }}
-          />
-        </label>
-      </div>
-      <div className="guide-muted">{t('guide.notes.hint')}</div>
-    </section>
-  );
-}

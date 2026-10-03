@@ -1,28 +1,19 @@
 /**
  * UI 用例共用的「打开侧栏面板」动作。
  *
- * 侧栏现在分两组：常驻（文件 / 大纲 / 搜索）直接点；其余收在「更多 ▾」菜单里。
- * 用例只关心「我要打开哪个面板」，不该各自记着哪个面板藏在菜单里 ——
- * 之前三套脚本各写一份点击逻辑，收敛 tab 时有 5 条用例直接超时 30 秒。
+ * 左栏四个 tab（文件 / 大纲 / 搜索 / code会话）都并排常驻、直接点。
+ * 2026-10-03 起没有「更多 ▾」二级菜单 —— 辅助面板只剩「总览」，它已搬去右栏 dock。
  */
 
-/** 打开侧栏面板（按 tab id）。常驻的直接点，辅助的先展开「更多」菜单。 */
+/** 打开侧栏面板（按 tab id）。 */
 export async function openPanel(page, id) {
+  // 已经是当前面板就不用再点（平白多一次点击与等待）
+  const labelledBy = await page.locator('#wcr-side-panel').getAttribute('aria-labelledby').catch(() => null);
+  if (labelledBy === `wcr-tab-${id}`) return;
+
   const direct = page.locator(`#wcr-tab-${id}`).first();
-  if (await direct.count()) {
-    await direct.click();
-    return;
-  }
-  await page.locator('.panel-more > button').click();
-  const item = page.locator(`.panel-more-menu #wcr-tab-${id}`).first();
-  if (!(await item.count())) {
-    // 菜单开着却不认识这个 id：先把菜单关掉（不然遮罩会挡住后面每一条用例的点击，
-    // 变成一连串超时，把真正的失败原因埋掉），再报错。
-    await page.locator('.panel-more > button').click().catch(() => {});
-    await page.locator('.panel-more-backdrop').click({ timeout: 1000 }).catch(() => {});
-    throw new Error(`侧栏没有这个面板：${id}（既不在常驻组，也不在「更多」菜单里）`);
-  }
-  await item.click();
+  if (!(await direct.count())) throw new Error(`左栏没有这个面板：${id}`);
+  await direct.click();
 }
 
 /**

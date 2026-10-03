@@ -2,12 +2,11 @@
  * 05 信使 Share 的入口：把「位置 / 片段 / 理解 / 整份交付物」带得走，也把阅读器接给宿主与 agent。
  *
  * 一个下拉收口，不再往顶栏继续堆按钮：带得走（链接 / 片段）→ 导出（报告 / 截图 / 打印）
- * → 批注 → 分享给同事（同机同目录）→ 给 agent 用（HTTP 工具）。
+ * → 分享给同事（同机同目录）→ 给 agent 用（HTTP 工具）。
  */
 import { useEffect, useRef, useState } from 'react';
 import type { HighlightResult } from './api';
 import { api } from './api';
-import { annotationsMarkdown } from './annotations';
 import { mapApi } from './mapApi';
 import {
   copyText,
@@ -28,7 +27,6 @@ interface Props {
   cursor: { line: number; col: number };
   /** 搜索面板里的查询串（导出搜索报告要写进标题）。 */
   searchQuery: string;
-  onOpenAnnotations: () => void;
 }
 
 interface ShareInfo {
@@ -69,7 +67,7 @@ function visibleRange(): { startLine: number; endLine: number } | null {
   return range ? { startLine: range.startLineNumber, endLine: range.endLineNumber } : null;
 }
 
-export function ShareMenu({ cursor, searchQuery, onOpenAnnotations }: Props) {
+export function ShareMenu({ cursor, searchQuery }: Props) {
   const store = useStore();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -189,10 +187,6 @@ export function ShareMenu({ cursor, searchQuery, onOpenAnnotations }: Props) {
       content: store.fileContent,
       symbols: store.symbols,
       highlights,
-      annotations: useStore
-        .getState()
-        .annotations.filter((a) => a.file === file)
-        .map((a) => ({ file: a.file, line: a.line, col: a.col, text: a.text, reply: a.replies.map((r) => r.text).join(' / ') })),
     });
     downloadText(reportFilename({ project: store.project?.name, kind: 'file', file }), md);
     setBusy(false);
@@ -274,15 +268,6 @@ export function ShareMenu({ cursor, searchQuery, onOpenAnnotations }: Props) {
     }, 0);
   };
 
-  const exportAnnotations = () => {
-    const list = useStore.getState().annotations;
-    downloadText(
-      `annotations-${(store.project?.name ?? 'project').replace(/[^\w.-]+/g, '-')}.md`,
-      annotationsMarkdown(store.project?.name ?? '项目', list),
-    );
-    say(list.length ? `已导出 ${list.length} 条批注` : '还没有批注，导出的是空清单');
-  };
-
   const copyAgentTools = async () => {
     const url = `${window.location.origin}/api/agent/tools`;
     say((await copyText(url)) ? '已复制 agent 工具清单地址' : '复制失败：浏览器拒绝了剪贴板');
@@ -339,15 +324,6 @@ export function ShareMenu({ cursor, searchQuery, onOpenAnnotations }: Props) {
             <button className="share-item" onClick={printView}>
               打印 / 存 PDF
               <span className="share-hint">打印视图只留代码与页眉，页眉带 path:line 与项目名</span>
-            </button>
-
-            <div className="share-section">批注（只存本机，不写被读目录）</div>
-            <button className="share-item" onClick={onOpenAnnotations}>
-              打开批注面板
-              <span className="share-hint">共 {store.annotations.length} 条</span>
-            </button>
-            <button className="share-item" onClick={exportAnnotations}>
-              导出批注 Markdown
             </button>
 
             <div className="share-section">分享给同事（同一台机器 / 同一目录）</div>

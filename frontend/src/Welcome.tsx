@@ -1,12 +1,10 @@
 /**
  * 首次使用引导（P16 / 06 §3.2 草图）：空白页 → 5 秒内完成第一次成功操作（填路径 → 看到文件树）。
  *
- * 三步：① 路径输入 + 打开；② 最近项目；③ 索引进度 + 完成摘要（点击「为什么没索引上？」开索引报告）。
+ * 三步：① 路径输入 + 打开；② 最近项目；③ 索引进度 + 完成摘要。
  * 落在 Overview 真正可达的空状态位置（未打开项目 / 已打开但无文件），不再留 App 里的死分支。
  */
-import { useEffect, useMemo, useState } from 'react';
-import type { IndexReport } from '../../shared/types';
-import { api } from './api';
+import { useMemo, useState } from 'react';
 import { useI18n, type TFunc } from './i18n';
 import { useStore } from './state';
 
@@ -22,42 +20,14 @@ function relTime(t: TFunc, ms: number, now = Date.now()): string {
   return new Date(ms).toLocaleDateString();
 }
 
-export function Welcome({
-  /** first = 还没打开任何项目；empty = 项目打开了但没有可读源码文件。 */
-  variant,
-  onOpenReport,
-}: {
-  variant: 'first' | 'empty';
-  onOpenReport?: () => void;
-}) {
+export function Welcome({ variant }: { variant: 'first' | 'empty' }) {
   const { t } = useI18n();
   const projects = useStore((s) => s.projects);
   const project = useStore((s) => s.project);
   const status = useStore((s) => s.status);
   const [input, setInput] = useState('');
-  const [report, setReport] = useState<IndexReport | null>(null);
 
   const projectId = project?.id ?? null;
-
-  // 索引摘要（P9）：优先用后端报告（含降级与原因归类），拿不到就退回 status
-  useEffect(() => {
-    if (!projectId) {
-      setReport(null);
-      return;
-    }
-    let cancelled = false;
-    api
-      .indexReport(projectId)
-      .then((r) => {
-        if (!cancelled) setReport(r);
-      })
-      .catch(() => {
-        if (!cancelled) setReport(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, status?.indexedAt]);
 
   const recent = useMemo(
     () =>
@@ -75,8 +45,8 @@ export function Welcome({
   };
 
   const indexing = status?.indexing === true;
-  const indexed = report?.indexed ?? status?.filesIndexed ?? 0;
-  const total = report?.scanned ?? status?.filesTotal ?? 0;
+  const indexed = status?.filesIndexed ?? 0;
+  const total = status?.filesTotal ?? 0;
   const skipped = Math.max(0, total - indexed);
   const percent = total > 0 ? Math.round((indexed / total) * 100) : 0;
 
@@ -155,18 +125,11 @@ export function Welcome({
         ) : projectId ? (
           <>
             <div className="wp-summary">{t('welcome.indexDone', { files: total, indexed, skipped })}</div>
-            {onOpenReport && (
-              <button className="ov-linklike" onClick={onOpenReport}>
-                {t('welcome.whySkipped')}
-              </button>
-            )}
           </>
         ) : (
           <div className="wp-note">{t('welcome.indexIdle')}</div>
         )}
       </section>
-
-      <div className="wp-privacy">{t('welcome.privacyNote')}</div>
     </div>
   );
 }

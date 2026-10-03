@@ -80,7 +80,6 @@ function OutlineNode({
   depth,
   activeLine,
   onJump,
-  onCopy,
   overrides,
   cursorPath,
   onToggle,
@@ -89,8 +88,6 @@ function OutlineNode({
   depth: number;
   activeLine: number;
   onJump: (s: SymbolInfo) => void;
-  /** S3b：把「符号名 + 种类 + 签名 + 位置」复制走。 */
-  onCopy?: (s: SymbolInfo) => void;
   /** 用户手动展开 / 折叠的覆盖（键 → 是否展开）。 */
   overrides: Record<string, boolean>;
   /** 光标所在符号链：自动展开，跟着阅读位置走。 */
@@ -127,18 +124,6 @@ function OutlineNode({
         <KindIcon kind={symbol.kind} />
         <span className="outline-name">{symbol.name}</span>
         {symbol.detail && <span className="outline-detail">{symbol.detail}</span>}
-        {onCopy && (
-          <button
-            className="btn ghost small outline-copy"
-            title="复制符号摘要（签名 + 位置）"
-            onClick={(e) => {
-              e.stopPropagation();
-              onCopy(symbol);
-            }}
-          >
-            ⧉
-          </button>
-        )}
       </div>
       {open &&
         kids.map((c) => (
@@ -148,7 +133,6 @@ function OutlineNode({
             depth={depth + 1}
             activeLine={activeLine}
             onJump={onJump}
-            onCopy={onCopy}
             overrides={overrides}
             cursorPath={cursorPath}
             onToggle={onToggle}
@@ -163,14 +147,11 @@ export function OutlinePanel({
   fileName,
   cursorLine,
   onJump,
-  onCopySymbol,
 }: {
   symbols: SymbolInfo[];
   fileName: string | null;
   cursorLine: number;
   onJump: (symbol: SymbolInfo) => void;
-  /** S3b：复制符号摘要（签名 + 位置），承接 05 信使。 */
-  onCopySymbol?: (symbol: SymbolInfo) => void;
 }) {
   /** 手动展开 / 折叠的覆盖；缺省时按「顶层一级 + 光标链」展开。 */
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
@@ -205,7 +186,6 @@ export function OutlinePanel({
           depth={0}
           activeLine={cursorLine}
           onJump={onJump}
-          onCopy={onCopySymbol}
           overrides={overrides}
           cursorPath={cursorPath}
           onToggle={(key, open) => setOverrides((prev) => ({ ...prev, [key]: open }))}

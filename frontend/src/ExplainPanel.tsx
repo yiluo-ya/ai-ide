@@ -7,11 +7,8 @@
  */
 import { useEffect, type ReactNode } from 'react';
 import type { CallNode } from '../../shared/types';
-import { anchorOf } from './notes';
-import { useNotesStore } from './notesState';
-import { useStore, showFlash } from './state';
 import { useI18n, translate } from './i18n';
-import { EXPLAIN_SCOPES, explainNoteBody, kindText, useExplainStore } from './explainState';
+import { EXPLAIN_SCOPES, kindText, useExplainStore } from './explainState';
 import './guide.css';
 
 /** 一条「出处」按钮：`path:line`，点击跳过去。 */
@@ -133,27 +130,6 @@ export function ExplainPanel({
 
   if (!target) return null;
 
-  /** G5.4：把解释的要点存成笔记 —— 位置对得上当前文件写行级，否则写文件级。 */
-  const saveAsNote = () => {
-    const r = useExplainStore.getState().result;
-    if (!r) return;
-    const body = explainNoteBody(r);
-    const store = useStore.getState();
-    const sameFile = store.openFile === r.target.file;
-    const add = useNotesStore.getState().add;
-    const note = sameFile
-      ? add({
-          file: r.target.file,
-          line: r.target.line,
-          col: r.target.col,
-          // 行级笔记要靠 anchor 抗住代码变动（Q9）：当前文件正文才算得出来
-          anchor: anchorOf(store.fileContent, r.target.line),
-          body,
-        })
-      : add({ file: r.target.file, line: 0, col: 0, anchor: '', body, level: 'file' });
-    showFlash(note ? t('explain.saved') : t('explain.saveFailed'));
-  };
-
   const coverage = result?.coverage;
 
   return (
@@ -262,9 +238,6 @@ export function ExplainPanel({
           <span className="ex-coverage">{t('explain.coverageUnknown')}</span>
         )}
         <span className="ex-foot-static">{t('explain.staticNote')}</span>
-        <button className="gv-btn" onClick={saveAsNote} disabled={!result}>
-          {t('explain.save')}
-        </button>
       </footer>
     </div>
   );

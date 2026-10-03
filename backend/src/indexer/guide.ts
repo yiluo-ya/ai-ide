@@ -337,7 +337,9 @@ function withHints(project: ProjectIndex, route: GuideRoute): GuideRoute {
  */
 export function buildRoutes(project: ProjectIndex): GuideRoutesResult {
   const facts = projectMap(project).facts;
-  const files = [...facts.keys()].sort();
+  // 文档 / 配置（README、ini 这类）不进路线：路线回答「该读哪些代码」，
+  // 与下面的进度分母（sourceFiles）同一口径，否则分母 5 而步骤 7，进度永远到不了 100%。
+  const files = [...facts.keys()].filter((f) => !isDocOrConfig(f)).sort();
   const graph = importGraph(project);
   const dep = depRoute(files, graph, facts);
   const entry = entryRoute(files, graph, facts, dep.steps.map((s) => s.file));

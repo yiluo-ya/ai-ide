@@ -146,26 +146,33 @@ async function main() {
   // G3.1/G3.2 进度 / G3.5 待读队列）随之删除 —— 界面上一已经没有这个面板。
   // 首屏「从这里开始」（路线的入口）仍保留在上面的 G1/G2 用例里。
 
-  await step('W：变更栏常驻在右侧，且以 git 为准', async () => {
+  await step('W：变更栏常驻右侧，以 git 为准，点行尾增删数弹差异', async () => {
     // 2026-10-03：① 变更面板从侧栏 tab 搬到右侧常驻栏（.dock-changes）；
-    //            ② 内容改成「以 git 为准」，不再有「记录阅读基线」那套自记录对比。
+    //            ② 内容改成「以 git 为准」，不再有「记录阅读基线」那套自记录对比；
+    //            ③ 行改紧凑（中文徽标 + 增删数），**点行尾的增删数弹只读 diff 浮层**
+    //               （用户澄清：不是行末加一个 + 按钮，也不是行内就地展开）；
+    //            ④ 默认**平铺**（一行一个文件、完整路径），可切「按目录」。
     await page.waitForSelector('.dock-changes .changes-panel', { timeout: 15_000 });
     const hasGit = process.env.UI_FIXTURE_GIT === '1';
     if (hasGit) {
-      // 夹具是真 git 仓库，且有一个未提交的修改。
-      // 2026-10-03 起默认**按目录**展示且目录折叠：先看目录行的汇总，再逐层展开到文件行。
-      await page.waitForSelector('.dock-changes .changes-dir', { timeout: 15_000 });
-      const dirText = await page.locator('.dock-changes .changes-panel').innerText();
-      assert(/1 个/.test(dirText), `目录行没有给出改动数汇总：${dirText.slice(0, 120)}`);
-      await page.locator('.dock-changes .changes-dir').first().click(); // 展开根目录
-      await page.waitForTimeout(250);
-      await page.locator('.dock-changes .changes-dir').nth(1).click(); // 展开 src
-      await page.waitForSelector('.dock-changes .changes-row', { timeout: 10_000 });
-      const text = await page.locator('.dock-changes .changes-panel').innerText();
-      assert(/util\.ts/.test(text), `展开目录后没列出被改的文件：${text.slice(0, 120)}`);
-      assert(/(^|\s)M(\s|$)/.test(text), `没有 M（已修改）状态：${text.slice(0, 120)}`);
-      assert(!/记录当前为阅读基线/.test(text), '还在用自记基线那套（应已改成 git）');
-      return `git 变更（按目录）：${text.replace(/\s+/g, ' ').slice(0, 90)}`;
+      // 夹具是真 git 仓库，且有一个未提交的修改（src/util.ts）。
+      await page.waitForSelector('.dock-changes .changes-row', { timeout: 15_000 });
+      const listText = await page.locator('.dock-changes .changes-panel').innerText();
+      assert(/util\.ts/.test(listText), `平铺清单里没有改动的文件：${listText.slice(0, 120)}`);
+      assert(/修改/.test(listText), `没有「修改」状态徽标：${listText.slice(0, 120)}`);
+      assert(!/记录当前为阅读基线/.test(listText), '还在用自记基线那套（应已改成 git）');
+      // 默认平铺：不该出现目录行
+      const dirRows = await page.locator('.dock-changes .changes-dir').count();
+      assert(dirRows === 0, `默认应是平铺，不该有目录行（实际 ${dirRows} 行）`);
+
+      // 点行尾增删数 → 弹只读 diff 浮层（内容色块由 .diff-line 渲染）
+      await page.locator('.dock-changes .changes-delta-btn').first().click();
+      await page.waitForSelector('.diff-overlay .diff-line', { timeout: 10_000 });
+      const diffText = await page.locator('.diff-overlay').innerText();
+      assert(/ui-fixture/.test(diffText), `diff 浮层里没有夹具那行改动：${diffText.slice(0, 160)}`);
+      await page.keyboard.press('Escape'); // 看完就关，不挡住读代码
+      await page.waitForSelector('.diff-overlay', { state: 'detached', timeout: 5_000 });
+      return `git 变更（平铺 + 点增删数看差异）：${listText.replace(/\s+/g, ' ').slice(0, 80)}`;
     }
     // 没有 git 时也不能编数字：必须如实说不是 git 仓库
     const text = await page.locator('.dock-changes .changes-panel').innerText();

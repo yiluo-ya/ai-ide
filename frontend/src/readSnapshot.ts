@@ -1,7 +1,7 @@
 /**
  * 阅读快照存储（04 Guide · W3 / G8.2）：把「上次阅读时代的代码是什么样」记在本机。
  *
- * 存储口径与 `guide.ts` / `notes.ts` 同源（`04-guide-plan.md` §4）：落浏览器 localStorage、
+ * 存储口径与 `guide.ts` 同源（`04-guide-plan.md` §4）：落浏览器 localStorage、
  * 按项目 id 分片（`wcr:readsnapshot:<id>`）、不写被读目录、不落后端；全部读写包 try/catch。
  *
  * 只存**索引内的源码文件**（`readmap` 已按这一口径过滤）——非源码文件不进快照，
@@ -21,14 +21,11 @@ import type {
   ReadmapResult,
 } from '../../shared/types';
 import { request } from './api';
-import { loadNotes, type Note } from './notes';
 
 /** 一次阅读快照：`at` = 记录时间（客户端时钟，界面写「上次阅读」用的就是它）。 */
 export interface ReadSnapshot {
   at: number;
   files: Record<string, ChangeSnapshotFile>;
-  /** 笔记 id → 它当时锚在哪个文件的哪一行（文件级笔记 line=0）。 */
-  noteLocs: Record<string, { file: string; line: number }>;
 }
 
 /** openFileAt 之后写快照的防抖（阅读时频繁翻文件，不该每个文件都写一次）。 */
@@ -60,14 +57,7 @@ export function readSnapshot(projectId: string | null): ReadSnapshot | null {
       lines: Number.isFinite(s.lines) ? Number(s.lines) : 0,
     };
   }
-  const noteLocs: ReadSnapshot['noteLocs'] = {};
-  if (raw.noteLocs && typeof raw.noteLocs === 'object') {
-    for (const [id, loc] of Object.entries(raw.noteLocs)) {
-      if (!loc || typeof loc.file !== 'string') continue;
-      noteLocs[id] = { file: loc.file, line: typeof loc.line === 'number' ? loc.line : 0 };
-    }
-  }
-  return { at: raw.at, files, noteLocs };
+  return { at: raw.at, files };
 }
 
 /** 写快照（隐私模式 / 配额满时静默失败：记不住快照不打断阅读）。 */
@@ -79,25 +69,15 @@ export function writeSnapshot(projectId: string, snap: ReadSnapshot): void {
   }
 }
 
-/**
- * 由 `readmap` + 本地笔记拼一份快照。
- *
- * `noteLocs` 只收文件在索引内的笔记：读不到的路径（已被删 / 被忽略）留在笔记里没问题，
- * 但放进快照只会让「你标注过的地方被改了」这个判断失真。
- */
-export function buildSnapshot(projectId: string, readmap: ReadmapResult, notes: Note[]): ReadSnapshot {
+/** 由 `readmap` 拼一份快照（只含索引内的源码文件）。 */
+export function buildSnapshot(projectId: string, readmap: ReadmapResult): ReadSnapshot {
   const files: Record<string, ChangeSnapshotFile> = {};
   // projectId 是归属守卫：没有项目就没有「哪个项目的阅读基线」这回事
-  if (!projectId) return { at: Date.now(), files, noteLocs: {} };
+  if (!projectId) return { at: Date.now(), files };
   for (const f of readmap.files) {
     files[f.file] = { mtimeMs: f.mtimeMs, size: f.size, lines: f.lines };
   }
-  const noteLocs: ReadSnapshot['noteLocs'] = {};
-  for (const note of notes) {
-    if (!files[note.file]) continue;
-    noteLocs[note.id] = { file: note.file, line: note.line };
-  }
-  return { at: Date.now(), files, noteLocs };
+  return { at: Date.now(), files };
 }
 
 /** 距离「上次阅读」多久（毫秒）；没有快照返回 null。界面据此写「3 天前看过」。 */
@@ -107,13 +87,13 @@ export function snapshotAge(snap: ReadSnapshot | null, now = Date.now()): number
 }
 
 /**
- * 拉 readmap + 读本地笔记 → 写快照。失败返回 null（界面据此说「记不上」，
+ * 拉 readmap → 写快照。失败返回 null（界面据此说「记不上」，
  * 而不是把旧快照当新的用）。
  */
 export async function captureSnapshot(projectId: string): Promise<ReadSnapshot | null> {
   try {
     const readmap = await changesApi.readmap(projectId);
-    const snap = buildSnapshot(projectId, readmap, loadNotes(projectId));
+    const snap = buildSnapshot(projectId, readmap);
     writeSnapshot(projectId, snap);
     return snap;
   } catch {

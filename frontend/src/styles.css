@@ -367,17 +367,44 @@ select {
   position: absolute;
   top: 42px;
   left: 130px;
-  width: 460px;
+  width: 380px;
   background: var(--bg-3);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 10px;
+  padding: 8px;
   box-shadow: 0 8px 24px var(--shadow-md);
   z-index: 30;
 }
 
-.open-folder .text-input {
-  width: 100%;
+/* 一行：路径输入框 + 末尾的文件夹图标（点它开目录选择弹窗，见 FolderBrowser.tsx） */
+.open-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.open-folder-row .text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 27px;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  color: var(--tree-dir);
+  border-color: var(--accent-2);
 }
 
 .hint-row {
@@ -565,60 +592,6 @@ kbd {
   border-bottom-color: var(--accent-2);
 }
 
-/* 侧栏「更多 ▾」：辅助面板收在这里，不再把 10 个入口平铺一排 */
-.panel-more {
-  position: relative;
-  flex: none;
-  display: flex;
-}
-
-.panel-more > button {
-  flex: none;
-  padding: 7px 9px;
-  white-space: nowrap;
-}
-
-.panel-more-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-}
-
-.panel-more-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 41;
-  min-width: 128px;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 32%);
-}
-
-.panel-more-menu button {
-  text-align: left;
-  padding: 6px 10px;
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-  color: var(--fg-dim);
-  cursor: pointer;
-}
-
-.panel-more-menu button:hover {
-  background: var(--row-hover);
-  color: var(--fg);
-}
-
-.panel-more-menu button.active {
-  color: var(--fg);
-  font-weight: 600;
-}
-
 .sidebar-filter {
   margin: 6px 8px;
 }
@@ -705,6 +678,30 @@ kbd {
 .lang-jsx { background: #f1e05a; }
 .lang-go { background: #00add8; }
 .lang-java { background: #b07219; }
+/* 常用文件（2026-10-03）；JSON 用灰而非 Linguist 的 #292929（深色底上看不见） */
+.lang-shell { background: #89e051; }
+.lang-json { background: #8b949e; }
+.lang-yaml { background: #cb171e; }
+.lang-toml { background: #9c4221; }
+.lang-ini { background: #6cb6ff; }
+.lang-dockerfile { background: #4d7c8a; }
+.lang-markdown { background: #519aba; }
+.lang-css { background: #563d7c; }
+.lang-scss { background: #c6538c; }
+.lang-less { background: #2e5c99; }
+.lang-html { background: #e34c26; }
+.lang-sql { background: #e38c00; }
+/* 包依赖 / 构建清单（只高亮预览）；gomod/pip 跟着 go/ini 的颜色 */
+.lang-xml { background: #0060ac; }
+.lang-gomod { background: #00add8; }
+.lang-groovy { background: #4298b8; }
+.lang-kotlin { background: #a97bff; }
+.lang-scala { background: #c22d40; }
+.lang-ruby { background: #701516; }
+.lang-elixir { background: #6e4a7e; }
+.lang-swift { background: #f05138; }
+.lang-pip { background: #6cb6ff; }
+.lang-makefile { background: #427819; }
 
 /* 大纲 */
 .outline,
@@ -777,18 +774,6 @@ kbd {
 .outline-toggle-space {
   flex: none;
   width: 14px;
-}
-
-/* S3b：复制符号摘要（签名 + 位置）—— 悬停才亮，不抢阅读视线 */
-.outline-row .outline-copy {
-  margin-left: auto;
-  opacity: 0;
-  padding: 0 4px;
-  font-size: 11px;
-}
-
-.outline-row:hover .outline-copy {
-  opacity: 1;
 }
 
 .kind-icon {
@@ -1482,6 +1467,31 @@ mark {
   z-index: 60;
 }
 
+/* 命令结果冒泡（2026-10-03）：右下角一句话，几秒后自动消失（不挡阅读、不用点关闭） */
+.toast-run {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  max-width: 620px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--ok);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  z-index: 70;
+  box-shadow: 0 8px 24px var(--shadow-sm);
+  cursor: pointer;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.toast-run.bad {
+  border-left-color: var(--danger);
+}
+
 /* ------------------------------------------------- 跳转失败提示条（N2 / Q9） */
 
 .goto-notice {
@@ -1567,7 +1577,7 @@ mark {
   cursor: pointer;
 }
 
-/* 右侧常驻变更栏（2026-10-03）：变更不再占侧栏 tab，改为一直贴在右边 */
+/* 右侧常驻栏（2026-10-03）：变更与命令并排，默认显示变更 */
 .dock-changes {
   position: relative;
   flex: none;
@@ -1597,20 +1607,61 @@ mark {
   opacity: 0.5;
 }
 
+/* 头部：收起按钮 + 两个并排入口 */
+.dock-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 2px;
+  border-bottom: 1px solid var(--border);
+}
+
 .dock-toggle {
   flex: none;
-  padding: 6px 8px;
+  width: 18px;
+  padding: 2px 0;
   border: 0;
-  border-bottom: 1px solid var(--border);
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-dim);
   font-size: 11px;
-  text-align: left;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dock-toggle:hover {
+  color: var(--fg);
+  background: var(--row-hover);
+}
+
+.dock-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 2px;
+}
+
+.dock-tab {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--fg-dim);
+  font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.dock-toggle:hover {
+.dock-tab:hover {
+  color: var(--fg);
+}
+
+.dock-tab.active {
+  border-color: var(--border);
+  background: var(--bg-2);
   color: var(--fg);
 }
 
@@ -1618,65 +1669,6 @@ mark {
   flex: 1;
   min-height: 0;
   overflow: auto;
-}
-
-/* 目录选择器（打开本机目录）：只列目录，点进去、再确认打开 */
-.folder-picker {
-  margin-top: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.fp-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px;
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-
-.fp-path {
-  flex: 1;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--fg-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fp-list {
-  max-height: 220px;
-  overflow: auto;
-}
-
-.fp-dir {
-  display: block;
-  width: 100%;
-  padding: 5px 10px;
-  border: 0;
-  background: transparent;
-  color: var(--fg);
-  text-align: left;
-  cursor: pointer;
-}
-
-.fp-dir:hover {
-  background: var(--row-hover);
-}
-
-.fp-error {
-  padding: 8px 10px;
-  color: var(--warn);
-  font-size: 12px;
-}
-
-.fp-empty {
-  padding: 8px 10px;
-  color: var(--fg-dim);
-  font-size: 12px;
 }
 
 /* 二次确认对话框（重建索引 / 移除项目）：把代价说清楚再执行 */
@@ -2224,43 +2216,7 @@ mark {
   white-space: nowrap;
 }
 
-/* ---------------------------------------------------------------- P17 常驻隐私角标 */
-
-.privacy-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 2px 9px;
-  color: var(--fg-dim);
-  font-size: 11px;
-  cursor: pointer;
-  flex: none;
-}
-
-.privacy-badge:hover {
-  color: var(--fg);
-  border-color: var(--accent-2);
-}
-
-.privacy-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ok);
-  flex: none;
-}
-
-/* 窄屏不抢按钮位置：只留圆点，承诺在隐私面板里完整可读 */
-@media (max-width: 1100px) {
-  .privacy-badge .privacy-text {
-    display: none;
-  }
-}
-
-/* ------------------------------------------------- 浮层（设置 / 隐私 / 索引报告，P25） */
+/* ------------------------------------------------- 浮层（设置 / 模型，P25） */
 
 .wcr-dialog-backdrop {
   position: fixed;
@@ -2441,14 +2397,6 @@ mark {
   font-size: 13px;
 }
 
-.wp-privacy {
-  margin-top: 22px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-  color: var(--fg-dim);
-  font-size: 12px;
-}
-
 /* ------------------------------------------------- 设置面板（P24） */
 
 .settings-row {
@@ -2503,99 +2451,61 @@ mark {
   margin-top: 8px;
 }
 
-/* ------------------------------------------------- 隐私面板（P17） */
+/* -------------------------------------------------------- 设置面板补充（2026-10-03） */
 
-.privacy-list {
-  margin: 8px 0 0;
-}
-
-.privacy-row {
-  display: flex;
-  gap: 10px;
-  margin: 6px 0;
-  font-size: 12.5px;
-}
-
-.privacy-row dt {
-  flex: none;
-  width: 64px;
-  color: var(--fg-dim);
-}
-
-.privacy-row dd {
-  margin: 0;
-}
-
-.privacy-proof,
-.privacy-runtime {
-  margin: 6px 0;
-  padding-left: 20px;
-  color: var(--fg-dim);
+.settings-ignore {
+  width: 100%;
+  min-height: 74px;
+  resize: vertical;
+  font-family: Consolas, Monaco, monospace;
   font-size: 12px;
 }
 
-/* ------------------------------------------------- 索引报告（P9 / P8） */
-
-.report-summary {
-  margin: 0 0 4px;
-  font-size: 13px;
+.settings-note {
+  align-self: center;
+  color: var(--fg-dim);
+  font-size: 12px;
 }
-
-.report-reasons {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.report-reasons summary {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 3px 0;
+.settings-subtitle {
+  margin: 10px 0 4px;
   font-size: 12.5px;
-  cursor: pointer;
-}
-
-.report-reason-name {
-  flex: 1;
-}
-
-.report-reason-count {
-  color: var(--warn);
   font-weight: 600;
 }
 
-.report-files {
-  list-style: none;
-  margin: 2px 0 6px;
-  padding-left: 16px;
-}
-
-.report-files li {
-  color: var(--fg-dim);
-  font-family: Consolas, Monaco, monospace;
-  font-size: 11.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.report-encodings {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+.settings-shortcuts {
+  margin: 6px 0 0;
   font-size: 12px;
 }
 
-.report-encodings li {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
+.settings-shortcuts summary {
+  color: var(--fg-dim);
+  cursor: pointer;
 }
 
-.report-ignore {
-  margin-top: 4px;
+.settings-shortcuts ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--fg-dim);
+}
+
+.settings-shortcuts li {
+  margin: 3px 0;
+}
+
+.settings-keys {
+  display: inline-block;
+  min-width: 128px;
+  color: var(--fg);
+  font-family: Consolas, Monaco, monospace;
+}
+
+/* ------------------------------------------------- 动效减弱（设置里可开） */
+
+[data-motion='reduced'] *,
+[data-motion='reduced'] *::before,
+[data-motion='reduced'] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
 }

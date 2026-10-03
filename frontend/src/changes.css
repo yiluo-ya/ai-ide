@@ -81,6 +81,44 @@
   color: var(--warn);
 }
 
+/* git 命令条（2026-10-03 用户要求）：四个最常用的写操作，结果走右下角冒泡 */
+.changes-cmds {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.changes-cmds .btn {
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.changes-cmd-busy {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+/* 提交说明输入框（git commit 的 Dialog） */
+.changes-commit-input {
+  width: 100%;
+  min-height: 72px;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 14px;
+}
+
+.changes-commit-input:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
+}
+
 .changes-toolbar {
   display: flex;
   align-items: center;
@@ -107,7 +145,7 @@
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
 }
 
 /* 按目录展示（2026-10-03）：目录行 + 汇总，与文件树同口径（目录有色、可折叠） */
@@ -143,14 +181,13 @@
   font-size: 11px;
 }
 
+/* 一行 = 状态徽标 + 文件 + 增删 + `+`（2026-10-03 用户要求：参考 xchen 的变更列表，紧凑、整行 hover） */
 .changes-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
+  padding: 3px 6px;
+  border-radius: 4px;
   font-size: 12px;
 }
 
@@ -158,41 +195,69 @@
   background: var(--row-hover);
 }
 
-/* M / A / D 状态字母 */
-.changes-status {
-  width: 16px;
-  text-align: center;
-  font-weight: 600;
+/* 状态徽标：中文二字 + 同色底（底色由 currentColor 派生，深浅主题自动跟随） */
+.changes-badge {
+  flex: none;
+  min-width: 40px;
+  padding: 0 4px;
   border-radius: 3px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 16px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
 }
 
-.changes-status.M {
+.changes-badge.mod {
   color: var(--warn);
 }
 
-.changes-status.A {
+.changes-badge.add {
   color: var(--ok);
 }
 
-.changes-status.D {
+.changes-badge.del,
+.changes-badge.conflict {
   color: var(--danger);
 }
 
+.changes-badge.ren {
+  color: var(--accent-2);
+}
+
 .changes-file {
-  flex: 1 1 140px;
+  flex: 1 1 auto;
   min-width: 0;
   text-align: left;
   background: none;
   border: none;
   color: var(--fg);
   cursor: pointer;
-  font: inherit;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .changes-file:hover {
+  text-decoration: underline;
+}
+
+/* 行尾的增删行数：**点它就是看差异**（只读浮层），行末不再多一个「差异」按钮 */
+.changes-delta-btn {
+  flex: none;
+  border: 0;
+  background: none;
+  padding: 0 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+
+.changes-delta-btn:hover {
+  background: var(--row-hover);
+  color: var(--fg);
   text-decoration: underline;
 }
 

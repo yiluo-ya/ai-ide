@@ -1,11 +1,16 @@
 /**
  * 变更面板（2026-10-03 用户要求：**以 git 为基础**，不自己记录变更）。
  *
- * 显示 `git status` 的改动清单 + `git diff --numstat HEAD` 的增删行数。
+ * 显示 `git status` 的改动清单 + `git diff --numstat HEAD` 的增删行数（默认展示，无需点）。
+ * 顶上四个最常用的 git 命令（add all / commit / pull / push）直接执行，结果走右下角冒泡。
  *
- * 展示形态（用户 2026-10-03 追问「git status 可以按目录来展示吗」）：
- * **默认按目录树分组**（目录可折叠、每个目录给出文件数与增删汇总、目录在前文件在后），
- * 这样一眼能看出「哪些目录在动」；需要逐条扫的时候可切到「平铺」。
+ * 行的形态与交互（2026-10-03 用户两次澄清后定稿）：
+ * 一行 = 状态徽标 + 文件 + 增删行数；**点增删行数（`+2 -0` 那块）弹出差异**（只读浮层，
+ * 看完就关 —— 主用途还是看代码，不该让 diff 顶掉阅读位）。行末不再多加一个 `+` 按钮。
+ * 点文件名仍然是打开该文件。
+ *
+ * 默认**平铺**（一行一个文件、完整相对路径，像 git status 那样一眼扫完）；
+ * 需要看「哪些目录在动」时可切「按目录」，那时根目录默认展开、子目录默认折叠。
  *
  * 三条不撒谎的规矩：
  * 1) 不是 git 仓库（或没装 git）→ 如实说，不用别的东西凑一份「变更」；
@@ -14,18 +19,9 @@
  */
 import { useMemo, useState } from 'react';
 import type { GitChangeEntry } from '../../shared/types';
-import { useChangesStore } from './changesState';
+import { statusMeta, useChangesStore } from './changesState';
+import { Dialog } from './Dialog';
 import './changes.css';
-
-/** 状态徽标：一个字母 + 一句人话（悬浮提示）。 */
-const STATUS_TEXT: Record<GitChangeEntry['status'], { mark: string; label: string }> = {
-  modified: { mark: 'M', label: '已修改（未提交）' },
-  added: { mark: 'A', label: '新增（已暂存）' },
-  deleted: { mark: 'D', label: '已删除' },
-  renamed: { mark: 'R', label: '重命名' },
-  untracked: { mark: '?', label: '未跟踪（新文件，尚未 add）' },
-  conflicted: { mark: 'U', label: '冲突（需要解决）' },
-};
 
 /** 行数增减：拿不到数字（未跟踪 / 二进制）就不显示，不写 +0 -0。 */
 function deltaText(entry: GitChangeEntry): string {
@@ -79,24 +75,28 @@ function summarize(group: DirGroup): { files: number; added: number; removed: nu
 
 function FileRow({
   entry,
-  onOpenFile,
-  onOpenDiff,
   indent,
+  full,
+  onOpenDiff,
+  onOpenFile,
 }: {
   entry: GitChangeEntry;
-  onOpenFile: (file: string) => void;
-  onOpenDiff: (file: string) => void;
   /** 缩进层级（按目录展示时跟着目录走）。 */
   indent: number;
+  /** 是否显示完整相对路径（平铺视图要，目录视图不必）。 */
+  full: boolean;
+  /** 点增删行数看差异（只读浮层）。 */
+  onOpenDiff: (file: string) => void;
+  onOpenFile: (file: string) => void;
 }) {
-  const short = entry.file.split('/').pop() ?? entry.file;
+  const shown = full ? entry.file : (entry.file.split('/').pop() ?? entry.file);
+  // statusMeta 自带兜底：未知状态（例如旧后端还在发的 untracked）按「新增」显示，不会白屏
+  const st = statusMeta(entry.status);
+  const delta = deltaText(entry);
   return (
     <div className="changes-row">
-      <span
-        className={`changes-status ${STATUS_TEXT[entry.status].mark}`}
-        title={STATUS_TEXT[entry.status].label}
-      >
-        {STATUS_TEXT[entry.status].mark}
+      <span className={`changes-badge ${st.cls}`} title={st.hint}>
+        {st.label}
       </span>
       <button
         className="changes-file"
@@ -104,12 +104,19 @@ function FileRow({
         title={`${entry.file}${entry.from ? `（原 ${entry.from}）` : ''} — 打开`}
         onClick={() => onOpenFile(entry.file)}
       >
-        {short}
+        {shown}
       </button>
-      <span className="changes-delta">{deltaText(entry)}</span>
-      <button className="btn ghost small" onClick={() => onOpenDiff(entry.file)} title="看差异（git diff）">
-        差异
-      </button>
+      {delta ? (
+        <button
+          className="changes-delta changes-delta-btn"
+          title={`${entry.file} — 看差异（git diff）`}
+          onClick={() => onOpenDiff(entry.file)}
+        >
+          {delta}
+        </button>
+      ) : (
+        <span className="changes-delta" />
+      )}
     </div>
   );
 }
@@ -119,15 +126,15 @@ function DirNode({
   depth,
   expanded,
   onToggle,
-  onOpenFile,
   onOpenDiff,
+  onOpenFile,
 }: {
   group: DirGroup;
   depth: number;
   expanded: Set<string>;
   onToggle: (path: string) => void;
-  onOpenFile: (file: string) => void;
   onOpenDiff: (file: string) => void;
+  onOpenFile: (file: string) => void;
 }) {
   const open = expanded.has(group.path);
   const sub = [...group.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -154,17 +161,18 @@ function DirNode({
               depth={depth + 1}
               expanded={expanded}
               onToggle={onToggle}
-              onOpenFile={onOpenFile}
               onOpenDiff={onOpenDiff}
+              onOpenFile={onOpenFile}
             />
           ))}
           {own.map((entry) => (
             <FileRow
               key={entry.file}
               entry={entry}
-              onOpenFile={onOpenFile}
-              onOpenDiff={onOpenDiff}
               indent={depth + 1}
+              full={false}
+              onOpenDiff={onOpenDiff}
+              onOpenFile={onOpenFile}
             />
           ))}
         </>
@@ -178,16 +186,24 @@ export function ChangesPanel({
   onOpenDiff,
 }: {
   onOpenFile: (file: string) => void;
-  /** 打开只读 diff 浮层（「差异」）。 */
+  /** 打开只读 diff 浮层（点增删行数触发）。 */
   onOpenDiff: (file: string) => void;
 }) {
   const result = useChangesStore((s) => s.result);
   const busy = useChangesStore((s) => s.busy);
+  const running = useChangesStore((s) => s.running);
   const error = useChangesStore((s) => s.error);
   const refresh = useChangesStore((s) => s.refresh);
-  /** 按目录展示时，哪些目录是展开的（默认全折叠，与文件树同口径）。 */
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const [byDir, setByDir] = useState(true);
+  const run = useChangesStore((s) => s.run);
+  /** 默认平铺（一行一个文件、完整路径，像 git status 那样扫）。 */
+  const [byDir, setByDir] = useState(false);
+  /** 按目录展示时，哪些目录是展开的：根目录默认展开，子目录默认折叠。 */
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['']));
+  /** git commit 的提交说明（点按钮时弹输入框，不是 prompt）。 */
+  const [commitOpen, setCommitOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState('');
+  /** git push 对外可见，先确认一次。 */
+  const [pushOpen, setPushOpen] = useState(false);
 
   const entries = result?.entries ?? [];
   const tree = useMemo(() => buildTree(entries), [entries]);
@@ -206,12 +222,49 @@ export function ChangesPanel({
     <div className="changes-panel">
       <div className="changes-head">
         <h3>变更 · git</h3>
-        <button className="btn ghost small" onClick={() => setByDir((v) => !v)} title="切换按目录 / 平铺">
+        <button className="btn ghost small" onClick={() => setByDir((v) => !v)} title="切换平铺 / 按目录">
           {byDir ? '按目录' : '平铺'}
         </button>
         <button className="btn ghost small" onClick={() => void refresh()} disabled={busy}>
           {busy ? '读取中…' : '刷新'}
         </button>
+      </div>
+
+      {/* 四个最常用的写命令（2026-10-03 用户要求）：git status 就是下面的清单，默认已经在那儿了。 */}
+      <div className="changes-cmds">
+        <button
+          className="btn ghost small"
+          disabled={running !== null}
+          title="git add -A：把所有改动（含新文件）加入暂存区"
+          onClick={() => void run('add')}
+        >
+          git add all
+        </button>
+        <button
+          className="btn ghost small"
+          disabled={running !== null}
+          title="git commit -m：写一句提交说明再提交"
+          onClick={() => setCommitOpen(true)}
+        >
+          git commit
+        </button>
+        <button
+          className="btn ghost small"
+          disabled={running !== null}
+          title="git pull --ff-only：只做快进拉取，不产生合并提交"
+          onClick={() => void run('pull')}
+        >
+          git pull
+        </button>
+        <button
+          className="btn ghost small"
+          disabled={running !== null}
+          title="git push：推到远端（对外可见，会先弹一次确认）"
+          onClick={() => setPushOpen(true)}
+        >
+          git push
+        </button>
+        {running && <span className="changes-cmd-busy">git {running} 执行中…</span>}
       </div>
 
       {result?.isRepo && (
@@ -249,17 +302,18 @@ export function ChangesPanel({
               depth={0}
               expanded={expanded}
               onToggle={toggle}
-              onOpenFile={onOpenFile}
               onOpenDiff={onOpenDiff}
+              onOpenFile={onOpenFile}
             />
           ) : (
             flat.map((entry) => (
               <FileRow
                 key={entry.file}
                 entry={entry}
-                onOpenFile={onOpenFile}
-                onOpenDiff={onOpenDiff}
                 indent={0}
+                full
+                onOpenDiff={onOpenDiff}
+                onOpenFile={onOpenFile}
               />
             ))
           )}
@@ -267,6 +321,63 @@ export function ChangesPanel({
             <div className="changes-note-summary">另有 {result.truncated} 个改动未列出（太多）。</div>
           )}
         </div>
+      )}
+
+      {commitOpen && (
+        <Dialog title="提交（git commit）" onClose={() => setCommitOpen(false)}>
+          <p className="confirm-text">
+            提交说明会原样传给 <code>git commit -m</code>（不经 shell）。暂存区为空、或没有可提交的内容时，
+            git 会拒绝 —— 它的原话会冒泡到右下角，不假装成功。
+          </p>
+          <textarea
+            className="changes-commit-input"
+            value={commitMessage}
+            autoFocus
+            rows={4}
+            maxLength={2000}
+            placeholder="一句话说清这次改了什么"
+            onChange={(e) => setCommitMessage(e.target.value)}
+          />
+          <div className="confirm-actions">
+            <button className="btn ghost" onClick={() => setCommitOpen(false)}>
+              取消
+            </button>
+            <button
+              className="btn"
+              disabled={!commitMessage.trim() || running === 'commit'}
+              onClick={() => {
+                const message = commitMessage;
+                setCommitOpen(false);
+                setCommitMessage('');
+                void run('commit', message);
+              }}
+            >
+              提交
+            </button>
+          </div>
+        </Dialog>
+      )}
+
+      {pushOpen && (
+        <Dialog title="推送（git push）？" onClose={() => setPushOpen(false)}>
+          <p className="confirm-text">
+            会把当前分支的提交推到远端 —— 这一步对别人可见。没有远端 / 需要登录 / 被拒绝都会如实冒泡。
+          </p>
+          <div className="confirm-actions">
+            <button className="btn ghost" onClick={() => setPushOpen(false)}>
+              取消
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                setPushOpen(false);
+                void run('push');
+              }}
+            >
+              推送
+            </button>
+          </div>
+        </Dialog>
       )}
     </div>
   );

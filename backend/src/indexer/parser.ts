@@ -15,6 +15,7 @@ import type {
   SerializedParsed,
   SourceTextLike,
 } from './model';
+import type { Range } from '../types';
 
 const parsers = new Map<string, Parser>();
 
@@ -53,7 +54,7 @@ export const PARSE_BUDGET_MIN_BYTES = 64 * 1024;
 /**
  * 单文件解析预算：1KB ≈ 1.5ms，下限 1s，上限 10s。
  * 目的是把「解析成本失控」（如超长注释块让 tree-sitter 超线性）挡在索引之外：
- * 超预算的文件不索引、只留正文，并在索引报告里如实说明。
+ * 超预算的文件不索引、只留正文。
  */
 export function parseBudgetMs(size: number): number {
   return Math.min(10_000, 1_000 + Math.round((size / 1024) * 1.5));
@@ -100,6 +101,9 @@ export function indexSource(
   stat: { mtimeMs: number; size: number },
   opts: IndexOptions = {},
 ): FileIndex {
+  // 行式格式（Dockerfile / ini / env / conf / SQL）：没有可用语法包，直接按行扫顶层符号
+  if (spec.lineSymbols && !spec.grammar) return lineSymbolIndex(relPath, source, spec, stat);
+
   const text = new SourceText(source);
   const topLevelOnly = opts.topLevelOnly === true;
   const budgetMs =
@@ -119,7 +123,7 @@ export function indexSource(
     }
     return buildFileIndex(relPath, source, text, spec, stat, ctx, tree, error, topLevelOnly);
   }
-  // 解析失败 / 超预算：不索引（只保留正文），原因写进 error 供索引报告（P9）说明
+  // 解析失败 / 超预算：不索引（只保留正文），原因写进 error 供排障
   const failed = plainFileIndex(
     relPath,
     source,
@@ -129,6 +133,87 @@ export function indexSource(
   );
   failed.degraded = topLevelOnly ? 'top-level' : null;
   return failed;
+}
+
+/** 行式符号的一行说明的长度上限（与 walker 的签名展示同一口径）。 */
+const LINE_DETAIL_CHARS = 160;
+
+/**
+ * 行式格式索引：只有文件作用域 + 定义（这些格式没有可解析的引用 / 字面量语义）。
+ * 定义一律按「顶层」处理（行式扫描本来就是顶层），`range` 取整行、`nameRange` 取名字本身。
+ */
+function lineSymbolIndex(
+  relPath: string,
+  source: string,
+  spec: LanguageSpec,
+  stat: { mtimeMs: number; size: number },
+): FileIndex {
+  const text = new SourceText(source);
+  const lines = source.split(/\r?\n/);
+  const fileScopeId = `${relPath}#s0`;
+  const definitions: DefRecord[] = [];
+  for (const sym of spec.lineSymbols?.(source) ?? []) {
+    if (!sym.name) continue;
+    const lineText = lines[sym.line - 1] ?? '';
+    const nameRange: Range = {
+      start: { line: sym.line, col: sym.col },
+      end: { line: sym.line, col: sym.endCol ?? sym.col + sym.name.length },
+    };
+    definitions.push({
+      id: `${relPath}!${sym.line}:${sym.col}:${sym.name}`,
+      name: sym.name,
+      kind: sym.kind,
+      file: relPath,
+      range: { start: { line: sym.line, col: 1 }, end: { line: sym.line, col: lineText.length + 1 } },
+      nameRange,
+      scopeId: fileScopeId,
+      containerName: null,
+      detail: sym.detail ?? (lineText.trim().slice(0, LINE_DETAIL_CHARS) || null),
+      local: false,
+      bodyScopeId: null,
+      doc: null,
+    });
+  }
+  const { defsByScope, importsByScope } = buildScopeMaps(definitions, []);
+  const lastLine = lines.length;
+  const scopes = new Map<string, ScopeRecord>([
+    [
+      fileScopeId,
+      {
+        id: fileScopeId,
+        file: relPath,
+        parent: null,
+        kind: 'file',
+        name: null,
+        range: {
+          start: { line: 1, col: 1 },
+          end: { line: lastLine, col: (lines[lastLine - 1]?.length ?? 0) + 1 },
+        },
+      },
+    ],
+  ]);
+  return makeFileIndex(
+    {
+      file: relPath,
+      lang: spec.id,
+      source,
+      tree: null,
+      scopes,
+      definitions,
+      references: [],
+      imports: [],
+      literals: [],
+      defsByScope,
+      importsByScope,
+      meta: {},
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      indexed: true,
+      error: null,
+      degraded: null,
+    },
+    () => text,
+  );
 }
 
 function buildFileIndex(

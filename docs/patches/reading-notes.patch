@@ -1,0 +1,2096 @@
+# 阅读笔记（04 Guide · W2 行级笔记 / G4.1-G4.4）恢复补丁
+# 生成：2026-10-03（与书签/批注一并从代码中移除）
+# 恢复：git apply docs/patches/reading-notes.patch
+# 说明见 docs/patches/reading-notes.md
+
+diff --git a/frontend/src/notes.ts b/frontend/src/notes.ts
+new file mode 100644
+index 0000000..52511ce
+--- /dev/null
++++ b/frontend/src/notes.ts
+@@ -0,0 +1,350 @@
++/**
++ * 向导（04 Guide · W2）的笔记存储与锚定（G4.1–G4.4 / Q9）。
++ *
++ * 存储口径与 `guide.ts` 同源（`04-guide-plan.md` §4）：全部落浏览器 localStorage、
++ * 按项目 id 分片、不写被读目录、不落后端；所有读写包 try/catch，隐私模式静默降级。
++ *
++ * 为什么除了行号还存一份 `anchor`（该行文本快照）：代码在动是本产品的前提
++ * （`04-guide.md:15`），笔记若只绑行号，上面插一行就全体错位 —— 而错位的笔记
++ * 比没有笔记更糟，它会让人相信一句贴错位置的判断（`04-decisions.md` Q9）。
++ * 恢复走三层兜底：① 行号命中且 anchor 匹配 → 直接用；② anchor 不匹配 → 在该行
++ * ±30 行内搜同一 anchor；③ 仍找不到 → 进 `orphans`（待归位），不猜位置、不静默丢弃。
++ *
++ * 本模块是纯存储 + 纯函数，不依赖 React（与 `annotations.ts` 同风格）。
++ */
++
++/** 一条笔记：行级（贴在某一行的行槽上）或文件级（一个文件的整体印象）。 */
++export interface Note {
++  id: string;
++  /** 相对项目根的 POSIX 路径。 */
++  file: string;
++  /** 1-based；`level === 'file'` 时为 0。 */
++  line: number;
++  /** 1-based；`level === 'file'` 时为 0。 */
++  col: number;
++  /** 写笔记那一刻该行的文本快照（去首尾空白，截前 120 字符）。 */
++  anchor: string;
++  body: string;
++  level: NoteLevel;
++  createdAt: number;
++  updatedAt: number;
++}
++
++export type NoteLevel = 'line' | 'file';
++
++/** anchor 取多少个字符（`04-decisions.md` Q9）。 */
++export const ANCHOR_MAX = 120;
++
++/** anchor 失配时在上下多少行内找（Q9 的 ±30）。 */
++export const ANCHOR_SEARCH_RANGE = 30;
++
++/** 恢复出位置的一条笔记：多带一个「实际落在哪一行」和「是否挪过位」。 */
++export interface ResolvedNote extends Note {
++  /** 1-based；`level === 'file'` 时为 0（文件级笔记不参与行定位）。 */
++  resolvedLine: number;
++  /** 行号与记录不一致，位置是靠 anchor 搜回来的。 */
++  moved: boolean;
++}
++
++export interface ResolveResult {
++  /** 能定位的笔记（行级已落到 `resolvedLine`，文件级原样通过）。 */
++  located: ResolvedNote[];
++  /** 找不到原位置的行级笔记（待归位）—— 不猜、不丢。 */
++  orphans: Note[];
++}
++
++/** 新建一条笔记时需要的字段（anchor 由调用方用 `anchorOf` 从正文算好）。 */
++export interface NewNote {
++  file: string;
++  line: number;
++  col: number;
++  anchor: string;
++  body: string;
++  level?: NoteLevel;
++}
++
++const notesKey = (projectId: string): string => `wcr:notes:${projectId}`;
++
++// ------------------------------------------------------------------ localStorage
++
++function readJson(key: string): unknown {
++  try {
++    const raw = window.localStorage.getItem(key);
++    return raw ? (JSON.parse(raw) as unknown) : null;
++  } catch {
++    return null;
++  }
++}
++
++function writeJson(key: string, value: unknown): void {
++  try {
++    window.localStorage.setItem(key, JSON.stringify(value));
++  } catch {
++    /* 隐私模式 / 配额满：不因为记不住笔记而打断阅读 */
++  }
++}
++
++/** 把任意值收成一条合法笔记；收不成返回 null（坏数据不当笔记用）。 */
++function normalize(raw: unknown): Note | null {
++  if (!raw || typeof raw !== 'object') return null;
++  const it = raw as Partial<Note>;
++  if (typeof it.file !== 'string' || !it.file || typeof it.body !== 'string') return null;
++  const level: NoteLevel = it.level === 'file' ? 'file' : 'line';
++  const line = typeof it.line === 'number' && it.line > 0 ? Math.floor(it.line) : 0;
++  const col = typeof it.col === 'number' && it.col > 0 ? Math.floor(it.col) : 0;
++  const at = typeof it.createdAt === 'number' ? it.createdAt : 0;
++  return {
++    id: typeof it.id === 'string' && it.id ? it.id : newNoteId(),
++    file: it.file,
++    // 文件级笔记没有行：即使存量数据带了行号也归零，口径只有一个
++    line: level === 'file' ? 0 : line,
++    col: level === 'file' ? 0 : col,
++    anchor: typeof it.anchor === 'string' ? it.anchor.slice(0, ANCHOR_MAX) : '',
++    body: it.body,
++    level,
++    createdAt: at,
++    updatedAt: typeof it.updatedAt === 'number' ? it.updatedAt : at,
++  };
++}
++
++/** 新笔记 id：时间戳 + 随机后缀（同毫秒连续添加也不会撞）。 */
++export function newNoteId(): string {
++  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
++}
++
++// ------------------------------------------------------------------ 读写
++
++/**
++ * 读某项目的全部笔记（坏数据一律跳过，不让一条脏记录卡住整个面板）。
++ * 返回顺序固定为「文件 → 文件级在前 → 行号升序」，与面板 / 导出的展示顺序一致。
++ */
++export function readNotes(projectId: string): Note[] {
++  const raw = readJson(notesKey(projectId));
++  if (!Array.isArray(raw)) return [];
++  const out: Note[] = [];
++  for (const item of raw) {
++    const note = normalize(item);
++    if (note) out.push(note);
++  }
++  return sortNotes(out);
++}
++
++/** 语义与 `readNotes` 相同（同一实现的命名别名：给「取某项目全部笔记」的调用点用）。 */
++export function loadNotes(projectId: string): Note[] {
++  return readNotes(projectId);
++}
++
++/** 写回全部笔记；写成功通知订阅者（同页内的其它组件据此刷新）。 */
++export function saveNotes(projectId: string, notes: Note[]): void {
++  writeJson(notesKey(projectId), sortNotes(notes));
++  notify(projectId);
++}
++
++/** 按「文件 → 文件级在前 → 行号升序 → 创建时间」排序。 */
++function sortNotes(notes: Note[]): Note[] {
++  return [...notes].sort(
++    (a, b) =>
++      a.file.localeCompare(b.file) ||
++      (a.level === b.level ? 0 : a.level === 'file' ? -1 : 1) ||
++      a.line - b.line ||
++      a.createdAt - b.createdAt,
++  );
++}
++
++type NotesListener = (projectId: string) => void;
++const listeners = new Set<NotesListener>();
++
++/** 订阅笔记变化（本页内）；返回取消函数。 */
++export function subscribeNotes(cb: NotesListener): () => void {
++  listeners.add(cb);
++  return () => {
++    listeners.delete(cb);
++  };
++}
++
++function notify(projectId: string): void {
++  for (const cb of listeners) cb(projectId);
++}
++
++// ------------------------------------------------------------------ 增删改查
++
++/** 新增一条笔记并落盘（返回落盘后的那条）。 */
++export function addNote(projectId: string, input: NewNote): Note {
++  const now = Date.now();
++  const level: NoteLevel = input.level === 'file' ? 'file' : 'line';
++  const note: Note = {
++    id: newNoteId(),
++    file: input.file,
++    line: level === 'file' ? 0 : input.line,
++    col: level === 'file' ? 0 : input.col,
++    anchor: level === 'file' ? '' : input.anchor.slice(0, ANCHOR_MAX),
++    body: input.body,
++    level,
++    createdAt: now,
++    updatedAt: now,
++  };
++  saveNotes(projectId, [...readNotes(projectId), note]);
++  return note;
++}
++
++/** 改正文（只改正文：位置变了就是另一条笔记，不做隐式搬移）。 */
++export function updateNote(projectId: string, id: string, body: string): Note | null {
++  const notes = readNotes(projectId);
++  const i = notes.findIndex((n) => n.id === id);
++  if (i < 0) return null;
++  const next: Note = { ...notes[i], body, updatedAt: Date.now() };
++  notes[i] = next;
++  saveNotes(projectId, notes);
++  return next;
++}
++
++export function removeNote(projectId: string, id: string): boolean {
++  const notes = readNotes(projectId);
++  const next = notes.filter((n) => n.id !== id);
++  if (next.length === notes.length) return false;
++  saveNotes(projectId, next);
++  return true;
++}
++
++/** 取某项目的笔记；给了 `file` 就只取这个文件的。 */
++export function notesOf(projectId: string, file?: string): Note[] {
++  const all = loadNotes(projectId);
++  return file ? all.filter((n) => n.file === file) : all;
++}
++
++/** 文件树 / 列表上的计数用：file → 条数（含文件级）。 */
++export function noteCountByFile(projectId: string): Record<string, number> {
++  const counts: Record<string, number> = {};
++  for (const note of loadNotes(projectId)) counts[note.file] = (counts[note.file] ?? 0) + 1;
++  return counts;
++}
++
++// ------------------------------------------------------------------ 锚定
++
++/** 行文本 → anchor（去首尾空白，截前 `ANCHOR_MAX` 字符）。 */
++export function anchorOfRow(text: string): string {
++  return text.trim().slice(0, ANCHOR_MAX);
++}
++
++/** 取 `text` 的第 `line` 行（1-based）的 anchor；越界返回空串。 */
++export function anchorOf(text: string, line: number): string {
++  const rows = text.split('\n');
++  return anchorOfRow(rows[line - 1] ?? '');
++}
++
++/**
++ * 三层兜底恢复（Q9）：
++ * ① 行号命中且该行 anchor 一致 → 直接用（`moved: false`）；
++ * ② anchor 不一致 → 在该行 ±`ANCHOR_SEARCH_RANGE` 行内搜同一 anchor，取最近的一行；
++ * ③ 搜不到（含 anchor 为空、或整段被改写） → 归入 `orphans`，交给「待归位」。
++ *
++ * 空 anchor 只在第 ① 层生效：空白行到处长得一样，拿它去 ±30 行里搜出来的位置
++ * 是猜的，不如老实进待归位。
++ */
++export function resolveNotes(notes: Note[], fileText: string): ResolveResult {
++  const rows = fileText.split('\n');
++  const located: ResolvedNote[] = [];
++  const orphans: Note[] = [];
++  for (const note of notes) {
++    if (note.level === 'file') {
++      located.push({ ...note, resolvedLine: 0, moved: false });
++      continue;
++    }
++    const idx = note.line - 1;
++    if (idx >= 0 && idx < rows.length && anchorOfRow(rows[idx]) === note.anchor) {
++      located.push({ ...note, resolvedLine: note.line, moved: false });
++      continue;
++    }
++    if (note.anchor) {
++      const from = Math.max(0, idx - ANCHOR_SEARCH_RANGE);
++      const to = Math.min(rows.length - 1, idx + ANCHOR_SEARCH_RANGE);
++      let best = -1;
++      for (let i = from; i <= to; i += 1) {
++        if (anchorOfRow(rows[i]) !== note.anchor) continue;
++        if (best < 0 || Math.abs(i - idx) < Math.abs(best - idx)) best = i;
++      }
++      if (best >= 0) {
++        located.push({ ...note, resolvedLine: best + 1, moved: true });
++        continue;
++      }
++    }
++    orphans.push(note);
++  }
++  return { located, orphans };
++}
++
++// ------------------------------------------------------------------ 导出 / 导入
++
++/** 一条笔记的一行文本：`path:line — 正文`（文件级不带行号）。 */
++export function noteLine(note: Note): string {
++  return note.level === 'file' ? `- ${note.file} — ${note.body}` : `- ${note.file}:${note.line} — ${note.body}`;
++}
++
++/** 导出 Markdown（G4.4）：按文件分组，位置写全 `path:line`，可以直接贴进周报。 */
++export function exportMarkdown(notes: Note[], projectName: string): string {
++  const out: string[] = [`# 阅读笔记 · ${projectName}`, ''];
++  if (notes.length === 0) {
++    out.push('（没有笔记）');
++    return `${out.join('\n')}\n`;
++  }
++  out.push(`共 ${notes.length} 条 · 导出于 ${new Date().toLocaleString()}`);
++  out.push('');
++  const byFile = new Map<string, Note[]>();
++  for (const note of sortNotes(notes)) {
++    const bucket = byFile.get(note.file);
++    if (bucket) bucket.push(note);
++    else byFile.set(note.file, [note]);
++  }
++  for (const [file, list] of byFile) {
++    out.push(`## ${file}`, '');
++    for (const note of list) out.push(noteLine(note));
++    out.push('');
++  }
++  return `${out.join('\n').replace(/\n+$/, '')}\n`;
++}
++
++/** 导出 JSON（G4.4 / Q3）：整包带走，换浏览器也能导回来。 */
++export function exportJson(projectId: string): string {
++  const payload = {
++    version: 1,
++    exportedAt: new Date().toISOString(),
++    notes: loadNotes(projectId),
++  };
++  return JSON.stringify(payload, null, 2);
++}
++
++/**
++ * 导入 JSON（合并去重）：接受 `{notes: [...]}` 与裸数组两种形状。
++ * 去重先看 `id`，再看 `file + line`（文件级看 file）—— 同一条笔记在两个浏览器里
++ * 各写一遍不会变成两条。返回**新增**条数；JSON 坏掉时抛错（调用方负责提示）。
++ */
++export function importJson(projectId: string, json: string): number {
++  const parsed = JSON.parse(json) as unknown;
++  const list = Array.isArray(parsed)
++    ? parsed
++    : Array.isArray((parsed as { notes?: unknown })?.notes)
++      ? ((parsed as { notes: unknown[] }).notes)
++      : null;
++  if (!list) throw new Error('not a notes export');
++
++  const current = readNotes(projectId);
++  const byId = new Set(current.map((n) => n.id));
++  const bySpot = new Set(current.map((n) => spotKey(n)));
++  let added = 0;
++  for (const raw of list) {
++    const note = normalize(raw);
++    if (!note) continue;
++    if (byId.has(note.id) || bySpot.has(spotKey(note))) continue;
++    current.push(note);
++    byId.add(note.id);
++    bySpot.add(spotKey(note));
++    added += 1;
++  }
++  if (added > 0) saveNotes(projectId, current);
++  return added;
++}
++
++/** 同一条笔记的「同一位置」判定键（文件级笔记没有行号）。 */
++function spotKey(note: Note): string {
++  return `${note.file}\u0000${note.level === 'file' ? 'file' : note.line}`;
++}
+diff --git a/frontend/src/notesState.ts b/frontend/src/notesState.ts
+new file mode 100644
+index 0000000..fa10892
+--- /dev/null
++++ b/frontend/src/notesState.ts
+@@ -0,0 +1,164 @@
++/**
++ * 向导（04 Guide · W2）的笔记状态：全部笔记 / 待归位 / 当前文件已定位的笔记。
++ *
++ * 为什么不并入 `state.ts`：与 `guideState.ts` 同理由 —— 那个文件正被其它主题持续改写，
++ * 笔记状态自成一体，放这里既不互相踩，也不必往共享文件里堆东西。
++ *
++ * 与 `guideState` 的一点差别：笔记的「锚定」要靠当前文件的正文才能算，
++ * 所以 Editor 打开文件时会调 `syncFile(file, text)` 把正文同步进来；换项目时 App 调
++ * `reset()`。存储与纯函数都在 `notes.ts`，这里只做状态与派生。
++ */
++import { create } from 'zustand';
++import {
++  addNote as addNoteTo,
++  exportMarkdown as notesMarkdown,
++  importJson as importNotesJson,
++  readNotes,
++  removeNote as removeNoteFrom,
++  resolveNotes,
++  subscribeNotes,
++  updateNote as updateNoteIn,
++  type NewNote,
++  type Note,
++  type ResolvedNote,
++} from './notes';
++
++interface NotesState {
++  projectId: string | null;
++  /** 当前项目的全部笔记（顺序固定：文件 → 文件级在前 → 行号升序）。 */
++  notes: Note[];
++  /** 当前文件里 anchor 失配的行级笔记（「待归位」）。 */
++  orphans: Note[];
++  /**
++   * 当前文件里能定位的行级笔记（`resolvedLine` 是恢复出来的行号）。
++   * 面板的「待归位」只看 `orphans`；这份派生结果是给「按当前文件取已定位笔记」的调用点用的
++   * （编辑器内部按自己的窗口算，分屏时不会互相影响）。
++   */
++  currentFileNotes: ResolvedNote[];
++
++  /** 切项目 / 首屏加载：读本机存储并开始订阅变化。 */
++  load: (projectId: string) => void;
++  reset: () => void;
++  /** Editor 打开 / 重载文件时同步正文（anchor 恢复的唯一依据）。 */
++  syncFile: (file: string | null, fileText: string) => void;
++  /** 新增一条；正文为空时不做（返回 null）。文件级笔记一个文件只留一条。 */
++  add: (input: Omit<NewNote, 'level'> & { level?: 'line' | 'file' }) => Note | null;
++  /** 改正文；正文为空 = 删除这一条（与浮层「空内容保存 = 删除」一致）。 */
++  update: (id: string, body: string) => void;
++  remove: (id: string) => void;
++  /** 导入 JSON（合并去重），返回新增条数；JSON 坏掉时抛错。 */
++  importJson: (json: string) => number;
++  /** 导出 Markdown 文本。 */
++  exportMarkdown: (projectName: string) => string;
++}
++
++/** 当前文件的正文（不进 state：它是几万字符的字符串，放外面避免无谓的重渲染）。 */
++let currentFile: string | null = null;
++let currentText = '';
++
++/** 从「全部笔记 + 当前文件正文」派生待归位与已定位两份清单（三层兜底的入口）。 */
++function derive(
++  notes: Note[],
++  file: string | null,
++  text: string,
++): Pick<NotesState, 'orphans' | 'currentFileNotes'> {
++  if (!file) return { orphans: [], currentFileNotes: [] };
++  const { located, orphans } = resolveNotes(
++    notes.filter((n) => n.file === file),
++    text,
++  );
++  return { orphans, currentFileNotes: located };
++}
++
++export const useNotesStore = create<NotesState>((set, get) => ({
++  projectId: null,
++  notes: [],
++  orphans: [],
++  currentFileNotes: [],
++
++  load(projectId) {
++    if (get().projectId !== projectId) {
++      currentFile = null;
++      currentText = '';
++      set({ projectId, notes: readNotes(projectId), orphans: [], currentFileNotes: [] });
++    } else {
++      set({ notes: readNotes(projectId) });
++    }
++    subscribe();
++  },
++
++  reset() {
++    currentFile = null;
++    currentText = '';
++    set({ projectId: null, notes: [], orphans: [], currentFileNotes: [] });
++  },
++
++  syncFile(file, fileText) {
++    const same = file === currentFile && fileText === currentText;
++    currentFile = file;
++    currentText = fileText;
++    if (same) return; // 正文没变就不重算（避免每次渲染都 set 一轮）
++    set(derive(get().notes, file, fileText));
++  },
++
++  add(input) {
++    const projectId = get().projectId;
++    if (!projectId) return null;
++    const level = input.level ?? 'line';
++    const body = input.body.trim();
++    if (!body) return null;
++
++    // 文件级笔记一个文件只留一条（「一个文件的整体印象」只有一句）：已有就改
++    if (level === 'file') {
++      const existing = get().notes.find((n) => n.file === input.file && n.level === 'file');
++      if (existing) {
++        updateNoteIn(projectId, existing.id, body);
++        return existing;
++      }
++    }
++    return addNoteTo(projectId, { ...input, body, level });
++  },
++
++  update(id, body) {
++    const projectId = get().projectId;
++    if (!projectId) return;
++    // 空内容保存 = 删除（用户把话删干净了，就是不想留着这条）
++    if (!body.trim()) {
++      removeNoteFrom(projectId, id);
++      return;
++    }
++    updateNoteIn(projectId, id, body.trim());
++  },
++
++  remove(id) {
++    const projectId = get().projectId;
++    if (!projectId) return;
++    removeNoteFrom(projectId, id);
++  },
++
++  importJson(json) {
++    const projectId = get().projectId;
++    if (!projectId) return 0;
++    return importNotesJson(projectId, json);
++  },
++
++  exportMarkdown(projectName) {
++    return notesMarkdown(get().notes, projectName);
++  },
++}));
++
++/**
++ * 订阅存储变化一次（本页内其它代码也可能写笔记）；
++ * 回调里按「当前项目」过滤，并顺带重算待归位 / 已定位。
++ */
++let subscribed = false;
++function subscribe(): void {
++  if (subscribed) return;
++  subscribed = true;
++  subscribeNotes((projectId) => {
++    const state = useNotesStore.getState();
++    if (state.projectId !== projectId) return;
++    const notes = readNotes(projectId);
++    useNotesStore.setState({ notes, ...derive(notes, currentFile, currentText) });
++  });
++}
+diff --git a/frontend/src/NoteLayer.tsx b/frontend/src/NoteLayer.tsx
+new file mode 100644
+index 0000000..56f2e33
+--- /dev/null
++++ b/frontend/src/NoteLayer.tsx
+@@ -0,0 +1,274 @@
++/**
++ * 行级笔记的行槽图标 + 编辑浮层 + 文件级笔记条（04 Guide · W2 / G4.1 / G4.2 / Q17）。
++ *
++ * 形态对齐 `docs/04-guide.md` §3.3：笔记贴在行上，以「行槽小点 + 悬浮摘要 + 点开的
++ * 编辑浮层」出现，**不改动源文件一个字节**。
++ *
++ * 两个刻意的取舍：
++ * - 装饰用**第三个独立装饰池**（`Editor.tsx` 的 `notePool`），不复用语义着色 / agent 行
++ *   两个池 —— 三者刷新时机不同，共用一个池会互相清掉（`04-decisions.md` Q17 的注意项）。
++ * - 类名用 `wcr-guide-note-*` 而不是 `wcr-note-*`：后者已被 05 的批注（`annotations.css`）占用，
++ *   同名会让两套标记在样式上互相覆盖。
++ */
++import { useEffect, useMemo, useRef, useState } from 'react';
++import { monaco } from './monaco-setup';
++import { useNotesStore } from './notesState';
++import type { ResolvedNote } from './notes';
++import { useI18n } from './i18n';
++import './guide.css';
++
++/**
++ * 行级笔记 → 行槽装饰（纯函数，装饰池由 Editor 管）。
++ * 同一行有多条笔记时只画一个点，悬浮里把几条都写出来（行槽不是列表）。
++ */
++export function toNoteDecorations(
++  model: monaco.editor.ITextModel,
++  notes: ResolvedNote[],
++): monaco.editor.IModelDeltaDecoration[] {
++  const max = model.getLineCount();
++  const byLine = new Map<number, ResolvedNote[]>();
++  for (const note of notes) {
++    if (note.level !== 'line' || note.resolvedLine <= 0) continue;
++    const line = Math.max(1, Math.min(note.resolvedLine, max));
++    const bucket = byLine.get(line);
++    if (bucket) bucket.push(note);
++    else byLine.set(line, [note]);
++  }
++  const out: monaco.editor.IModelDeltaDecoration[] = [];
++  for (const [line, list] of byLine) {
++    const bodies = list.map((n) => `- ${n.body}`).join('\n');
++    const moved = list.some((n) => n.moved);
++    out.push({
++      range: new monaco.Range(line, 1, line, 1),
++      options: {
++        linesDecorationsClassName: moved ? 'wcr-guide-note-gutter moved' : 'wcr-guide-note-gutter',
++        linesDecorationsTooltip: list.map((n) => n.body).join(' / ').slice(0, 200),
++        hoverMessage: {
++          value: `**笔记**（只存本机）\n\n${bodies}${moved ? '\n\n（代码改动过，位置是按内容锚点找回的）' : ''}`,
++        },
++      },
++    });
++  }
++  return out;
++}
++
++/** 一条笔记的展示时间：只到分钟，避免卡片里塞一串毫秒。 */
++function fmtTime(at: number): string {
++  if (!at) return '';
++  const d = new Date(at);
++  return `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(
++    d.getMinutes(),
++  ).padStart(2, '0')}`;
++}
++
++/**
++ * 行级笔记的编辑浮层（自建 React 组件，与 `Notice.tsx` 同风格）：
++ * 列出这一行已有的笔记（可改 / 可删）+ 一个新建输入框。
++ * 定位由 Editor 用 `getScrolledVisiblePosition` + 容器 `getBoundingClientRect` 算好后传进来
++ * （浮层自己不再碰编辑器，省掉一层耦合）。
++ */
++export function NotePopover({
++  file,
++  line,
++  anchor,
++  notes,
++  position,
++  onClose,
++}: {
++  file: string;
++  /** 1-based：笔记落在这条行槽上。 */
++  line: number;
++  /** 该行当前的 anchor（新建笔记时一并存下）。 */
++  anchor: string;
++  /** 这一行已有的笔记（已按恢复后的行号筛好）。 */
++  notes: ResolvedNote[];
++  /** 视口坐标（fixed 定位）。 */
++  position: { top: number; left: number };
++  onClose: () => void;
++}) {
++  const { t } = useI18n();
++  const add = useNotesStore((s) => s.add);
++  const update = useNotesStore((s) => s.update);
++  const remove = useNotesStore((s) => s.remove);
++  const ref = useRef<HTMLDivElement>(null);
++  /** 正在改的那条（null = 新建）。 */
++  const [editingId, setEditingId] = useState<string | null>(null);
++  const [body, setBody] = useState('');
++
++  useEffect(() => {
++    const onDown = (e: MouseEvent) => {
++      if (!ref.current?.contains(e.target as Node)) onClose();
++    };
++    const onKey = (e: KeyboardEvent) => {
++      if (e.key === 'Escape') onClose();
++    };
++    document.addEventListener('mousedown', onDown);
++    // 捕获阶段：Monaco 也会处理 Esc，这里先一步关掉浮层
++    document.addEventListener('keydown', onKey, true);
++    return () => {
++      document.removeEventListener('mousedown', onDown);
++      document.removeEventListener('keydown', onKey, true);
++    };
++  }, [onClose]);
++
++  const save = () => {
++    const text = body.trim();
++    if (editingId) {
++      if (!text) remove(editingId); // 空内容保存 = 删除
++      else update(editingId, text);
++    } else if (text) {
++      add({ file, line, col: 1, anchor, body: text });
++    }
++    onClose();
++  };
++
++  return (
++    <div className="note-pop" style={{ top: position.top, left: position.left }} ref={ref} role="dialog">
++      <div className="note-pop-head">
++        <span className="note-pop-title">{t('guide.note.popTitle', { line })}</span>
++        <span className="guide-muted">{file}</span>
++        <span className="spacer" />
++        <button className="btn ghost small" onClick={onClose} title={t('guide.note.close')}>
++          ✕
++        </button>
++      </div>
++
++      {notes.length === 0 && <div className="note-pop-empty">{t('guide.note.popEmpty')}</div>}
++      {notes.map((note) => (
++        <div className={`note-pop-item ${editingId === note.id ? 'editing' : ''}`} key={note.id}>
++          <div className="note-pop-body">{note.body}</div>
++          <div className="note-pop-meta">
++            <span className="guide-muted">{fmtTime(note.updatedAt)}</span>
++            {note.moved && <span className="note-pop-moved">{t('guide.note.moved')}</span>}
++            <span className="spacer" />
++            <button
++              className="btn ghost small"
++              onClick={() => {
++                setEditingId(note.id);
++                setBody(note.body);
++              }}
++            >
++              {t('guide.note.edit')}
++            </button>
++            <button className="btn ghost small" onClick={() => remove(note.id)}>
++              {t('guide.note.delete')}
++            </button>
++          </div>
++        </div>
++      ))}
++
++      <textarea
++        className="note-pop-input"
++        autoFocus
++        rows={3}
++        value={body}
++        placeholder={editingId ? t('guide.note.editPlaceholder') : t('guide.note.placeholder')}
++        onChange={(e) => setBody(e.target.value)}
++        onKeyDown={(e) => {
++          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
++            e.preventDefault();
++            save();
++          }
++        }}
++      />
++      <div className="note-pop-foot">
++        <button className="btn small" onClick={save}>
++          {editingId ? t('guide.note.saveEdit') : t('guide.note.save')}
++        </button>
++        {editingId && (
++          <button
++            className="btn ghost small"
++            onClick={() => {
++              setEditingId(null);
++              setBody('');
++            }}
++          >
++            {t('guide.note.newInstead')}
++          </button>
++        )}
++        <span className="guide-muted">{t('guide.note.hint')}</span>
++      </div>
++    </div>
++  );
++}
++
++/**
++ * 文件级笔记（G4.2）：编辑器上方一条 —— 收起时是一行摘要，点开变成一行可编辑文本。
++ * 一个文件只留一条（`notesState.add` 里保证），有笔记时摘要直接可读。
++ */
++export function FileNoteBar({ projectId, file }: { projectId: string | null; file: string | null }) {
++  const { t } = useI18n();
++  const notes = useNotesStore((s) => s.notes);
++  const add = useNotesStore((s) => s.add);
++  const update = useNotesStore((s) => s.update);
++  const remove = useNotesStore((s) => s.remove);
++  const [open, setOpen] = useState(false);
++  const [text, setText] = useState('');
++
++  const note = useMemo(
++    () => (file ? notes.find((n) => n.file === file && n.level === 'file') ?? null : null),
++    [notes, file],
++  );
++
++  // 换文件 / 笔记被别处改掉时，收起编辑态，避免把上一条的正文留在输入框里
++  useEffect(() => {
++    setOpen(false);
++    setText('');
++  }, [file, note?.id]);
++
++  if (!projectId || !file) return null;
++
++  const start = () => {
++    setText(note?.body ?? '');
++    setOpen(true);
++  };
++  const save = () => {
++    const body = text.trim();
++    if (note) {
++      if (body) update(note.id, body);
++      else remove(note.id); // 清空 = 删掉这条文件级笔记
++    } else if (body) {
++      add({ file, line: 0, col: 0, anchor: '', body, level: 'file' });
++    }
++    setOpen(false);
++  };
++
++  return (
++    <div className="guide-filenote">
++      {open ? (
++        <>
++          <span className="fn-label">{t('guide.note.fileLabel')}</span>
++          <input
++            className="text-input small fn-input"
++            autoFocus
++            value={text}
++            placeholder={t('guide.note.filePlaceholder')}
++            onChange={(e) => setText(e.target.value)}
++            onKeyDown={(e) => {
++              if (e.key === 'Enter') {
++                e.preventDefault();
++                save();
++              } else if (e.key === 'Escape') {
++                setOpen(false);
++              }
++            }}
++          />
++          <button className="btn small" onClick={save}>
++            {t('guide.note.save')}
++          </button>
++          <button className="btn ghost small" onClick={() => setOpen(false)}>
++            {t('guide.note.cancel')}
++          </button>
++        </>
++      ) : (
++        <button className="fn-toggle" onClick={start} title={t('guide.note.fileTitle')}>
++          <span className="fn-label">{t('guide.note.fileLabel')}</span>
++          <span className={`fn-body ${note ? '' : 'empty'}`}>
++            {note ? note.body : t('guide.note.fileEmpty')}
++          </span>
++          <span className="fn-edit">{note ? t('guide.note.edit') : t('guide.note.fileAdd')}</span>
++        </button>
++      )}
++    </div>
++  );
++}
+diff --git a/frontend/src/notes.test.ts b/frontend/src/notes.test.ts
+new file mode 100644
+index 0000000..7bd7cd9
+--- /dev/null
++++ b/frontend/src/notes.test.ts
+@@ -0,0 +1,119 @@
++/**
++ * 笔记存储与锚定（04 Guide · W2 / G4.1 / Q9）：三层兜底 + 导出 / 导入去重。
++ *
++ * 这两块是纯逻辑里最容易错的部分（锚点找回的位置错了比没有笔记更糟；导入去重错了会
++ * 把笔记弄丢或弄脏），因此用单测钉住，UI 交互仍归 `npm run test:ui`。
++ */
++import { beforeEach, describe, expect, it } from 'vitest';
++import {
++  addNote,
++  anchorOf,
++  exportJson,
++  exportMarkdown,
++  importJson,
++  loadNotes,
++  noteCountByFile,
++  notesOf,
++  readNotes,
++  removeNote,
++  resolveNotes,
++  updateNote,
++  type Note,
++} from './notes';
++
++const NOTE = (over: Partial<Note> = {}): Note => ({
++  id: 'id1',
++  file: 'src/util.ts',
++  line: 3,
++  col: 1,
++  anchor: 'const x = 1;',
++  body: '这里是为了处理 X',
++  level: 'line',
++  createdAt: 1,
++  updatedAt: 1,
++  ...over,
++});
++
++describe('notes', () => {
++  beforeEach(() => window.localStorage.clear());
++
++  it('anchorOf：去首尾空白 + 截 120', () => {
++    expect(anchorOf('a\n   const x = 1;  \nb', 2)).toBe('const x = 1;');
++    expect(anchorOf('x'.repeat(200), 1).length).toBe(120);
++    expect(anchorOf('a', 9)).toBe('');
++  });
++
++  it('三层兜底：命中 / ±30 行找回 / 待归位', () => {
++    const note = NOTE();
++    // ① 行号命中且 anchor 一致
++    const ok = resolveNotes([note], 'l1\nl2\nconst x = 1;\nl4');
++    expect(ok.located[0].resolvedLine).toBe(3);
++    expect(ok.located[0].moved).toBe(false);
++    expect(ok.orphans.length).toBe(0);
++
++    // ② 上面插了一行 → 该行 anchor 不匹配，往下搜到第 4 行
++    const moved = resolveNotes([note], 'new\nl1\nl2\nconst x = 1;');
++    expect(moved.located[0].resolvedLine).toBe(4);
++    expect(moved.located[0].moved).toBe(true);
++
++    // ③ 整段被改写 → 待归位（不猜位置）
++    const lost = resolveNotes([note], 'a\nb\nc');
++    expect(lost.located.length).toBe(0);
++    expect(lost.orphans.map((n) => n.id)).toEqual(['id1']);
++
++    // 超出 ±30 行也算丢
++    const far = resolveNotes([note], [...Array(40).fill('pad'), 'const x = 1;'].join('\n'));
++    expect(far.orphans.length).toBe(1);
++  });
++
++  it('文件级笔记不参与行定位', () => {
++    const fileNote = NOTE({ id: 'f1', level: 'file', line: 0, col: 0, anchor: '' });
++    const r = resolveNotes([fileNote], 'whatever');
++    expect(r.located[0].resolvedLine).toBe(0);
++    expect(r.orphans.length).toBe(0);
++  });
++
++  it('增删改查 + 计数', () => {
++    const a = addNote('p', { file: 'a.ts', line: 2, col: 1, anchor: 'x', body: 'one' });
++    addNote('p', { file: 'a.ts', line: 5, col: 1, anchor: 'y', body: 'two' });
++    addNote('p', { file: 'b.ts', line: 0, col: 0, anchor: '', body: '文件印象', level: 'file' });
++    expect(loadNotes('p').length).toBe(3);
++    expect(notesOf('p', 'a.ts').length).toBe(2);
++    expect(noteCountByFile('p')).toEqual({ 'a.ts': 2, 'b.ts': 1 });
++
++    updateNote('p', a.id, '改了');
++    expect(loadNotes('p').find((n) => n.id === a.id)?.body).toBe('改了');
++    expect(removeNote('p', a.id)).toBe(true);
++    expect(readNotes('p').length).toBe(2);
++  });
++
++  it('导出 Markdown 带 path:line，文件级不带行号', () => {
++    window.localStorage.setItem(
++      'wcr:notes:p',
++      JSON.stringify([
++        NOTE(),
++        NOTE({ id: 'f1', level: 'file', line: 0, col: 0, anchor: '', body: '老代码，别照抄' }),
++      ]),
++    );
++    const md = exportMarkdown(loadNotes('p'), 'demo');
++    expect(md).toContain('- src/util.ts:3 — 这里是为了处理 X');
++    expect(md).toContain('- src/util.ts — 老代码，别照抄');
++  });
++
++  it('导出 / 导入 JSON：按 id 与 file+line 去重', () => {
++    addNote('p', { file: 'a.ts', line: 2, col: 1, anchor: 'x', body: 'one' });
++    const json = exportJson('p');
++    expect(importJson('p', json)).toBe(0); // 自己导自己：没有新增
++    // 另一台机器加了一条同位置、不同 id 的
++    const other = {
++      version: 1,
++      notes: [
++        { id: 'zzz', file: 'a.ts', line: 2, col: 1, anchor: 'x', body: 'one', level: 'line', createdAt: 1, updatedAt: 1 },
++        { id: 'yyy', file: 'c.ts', line: 9, col: 1, anchor: 'q', body: 'three', level: 'line', createdAt: 2, updatedAt: 2 },
++      ],
++    };
++    expect(importJson('p', JSON.stringify(other))).toBe(1);
++    expect(loadNotes('p').length).toBe(2);
++    expect(() => importJson('p', '{"nope":1}')).toThrow();
++  });
++});
+diff --git b/frontend/src/Editor.tsx a/frontend/src/Editor.tsx
+index f396d32..6fb795e 100644
+--- b/frontend/src/Editor.tsx
++++ a/frontend/src/Editor.tsx
+@@ -1,17 +1,22 @@
+-/** Monaco 编辑器封装：model 池 + 只读显示 + 定位 + 语义着色 + 密度条入口。 */
+-import { useEffect, useRef, useState } from 'react';
++/** Monaco 编辑器封装：model 池 + 只读显示 + 定位 + 语义着色 + 行笔记 + 密度条入口。 */
++import { useEffect, useMemo, useRef, useState } from 'react';
+ import type { RevealRequest } from './state';
+ import { api } from './api';
+ import { mapApi } from './mapApi';
+ import { FileDensityBar } from './FileDensityBar';
+ import { SummaryBar } from './SummaryBar';
++import { FileNoteBar, NotePopover, toNoteDecorations } from './NoteLayer';
++import { useNotesStore } from './notesState';
+ import { useGuideStore } from './guideState';
++import { anchorOf, resolveNotes } from './notes';
+ import { shortAuthor } from './blame';
+ import { translate } from './i18n';
+ import { loadPrefs, resolvedTheme, usePrefs } from './prefs';
+ import { reportCaret } from './bridge';
++import type { AnnotationThread } from './annotations';
+ import type { BlameLine } from '../../shared/types';
+ import './agent-lines.css';
++import './annotations.css';
+ import {
+   monaco,
+   defineReaderTheme,
+@@ -48,13 +53,44 @@ const decorationPool = new Map<monaco.editor.ITextModel, string[]>();
+  * 共用一个池会互相清掉。
+  */
+ const agentLinePool = new Map<monaco.editor.ITextModel, string[]>();
++/** model → S10 批注装饰 id（与着色 / agent 行分开：三者刷新时机各不相同）。 */
++const annotationPool = new Map<monaco.editor.ITextModel, string[]>();
++/**
++ * model → 向导笔记的行槽装饰 id（W2 / G4.1）。
++ * 单独一个池的理由同上：笔记的刷新时机（本机存储 + 当前文件的锚定结果）
++ * 与语义着色（看索引）、agent 行（看宿主上报）、批注都不一样。
++ */
++const notePool = new Map<monaco.editor.ITextModel, string[]>();
+ /**
+  * model → G7.3 blame 行尾作者装饰 id。
+  * 单独一个池的理由同上：blame 只由「打开 blame 视图 / 光标移动」驱动，
+- * 与着色、agent 行的刷新时机都不同。
++ * 与着色、agent 行、批注、笔记的刷新时机都不同。
+  */
+ const blamePool = new Map<monaco.editor.ITextModel, string[]>();
+ 
++/** S10：一条批注 → 整行淡底 + 左侧小点，悬停显示内容与回复。 */
++function toAnnotationDecorations(
++  model: monaco.editor.ITextModel,
++  threads: AnnotationThread[],
++): monaco.editor.IModelDeltaDecoration[] {
++  const max = model.getLineCount();
++  return threads.map((thread) => {
++    const line = Math.max(1, Math.min(thread.line, max));
++    const replies = thread.replies.map((r) => `↳ ${r.text}`).join('\n');
++    return {
++      range: new monaco.Range(line, 1, line, 1),
++      options: {
++        isWholeLine: true,
++        className: thread.resolved ? 'wcr-note-line resolved' : 'wcr-note-line',
++        linesDecorationsClassName: 'wcr-note-gutter',
++        hoverMessage: {
++          value: `**批注**（只存本机）\n\n${thread.text}${replies ? `\n${replies}` : ''}`,
++        },
++      },
++    };
++  });
++}
++
+ /** S7b：选区转成回发给宿主的最小形状（文本截断，不把整文件塞进消息）。 */
+ function selectionOf(
+   editor: monaco.editor.IStandaloneCodeEditor,
+@@ -106,6 +142,8 @@ function acquireModel(key: string, uri: monaco.Uri, content: string, lang: strin
+       if (stale) {
+         decorationPool.delete(stale);
+         agentLinePool.delete(stale);
++        annotationPool.delete(stale);
++        notePool.delete(stale);
+         blamePool.delete(stale);
+         stale.dispose();
+       }
+@@ -161,11 +199,13 @@ interface Props {
+   onExplain?: (file: string, line: number, col: number) => void;
+   /** W5 / G9.4：右键「看调用图」（流视图浮层）。 */
+   onFlow?: (file: string, line: number, col: number) => void;
++  /** S10：本机批注 —— 在编辑器里标出来，悬停看内容（不写回源码）。 */
++  annotations?: AnnotationThread[];
+   /** G6.1：摘要条里点导出符号 / 引用文件时打开（缺省则不跳）。 */
+   onOpenFile?: (file: string, line?: number, col?: number) => void;
+   /**
+    * G7.5：历史版本（只读快照）所在的提交。存在时本窗格用 `wcr-history://` 建 model，
+-   * 并且不参与真实文件的一切：不拉着色 / agent 行 / 摘要 / 密度条，
++   * 并且不参与真实文件的一切：不拉着色 / agent 行 / 笔记 / 摘要 / 密度条，
+    * 也不上报光标与位置 —— 它不是「打开过的文件」（不进最近打开与位置记忆）。
+    */
+   historyRev?: string;
+@@ -189,6 +229,7 @@ export function Editor({
+   onCopySymbol,
+   onExplain,
+   onFlow,
++  annotations,
+   onOpenFile,
+   historyRev,
+   blame,
+@@ -217,6 +258,14 @@ export function Editor({
+   const historicalRef = useRef(historical);
+   historicalRef.current = historical;
+   const positionTimerRef = useRef<number | null>(null);
++  /** W2：正在编辑的行级笔记浮层（行号 + 视口坐标）；null = 不显示。 */
++  const [noteLine, setNoteLine] = useState<number | null>(null);
++  const [noteAnchorPos, setNoteAnchorPos] = useState<{ top: number; left: number } | null>(null);
++  const noteLineRef = useRef<number | null>(null);
++  noteLineRef.current = noteLine;
++  /** W2：本项目全部笔记（本窗格的行槽标记按自己的文件 + 正文算，见 `mineNotes`）。 */
++  const notes = useNotesStore((s) => s.notes);
++  const syncNoteFile = useNotesStore((s) => s.syncFile);
+   /** 密度条距编辑器右缘的像素：minimap + 纵向滚动条宽度。 */
+   const [densityInset, setDensityInset] = useState(0);
+   /** P24：主题与字号来自 wcr:prefs（单一真相）；Monaco 主题全局生效，两个窗格一起切。 */
+@@ -276,6 +325,21 @@ export function Editor({
+       }),
+       editor.onDidScrollChange(() => {
+         reportPosition();
++        // 笔记浮层是按视口坐标摆的：滚动后它就不再贴着那一行了，直接关掉（不跟随）
++        if (noteLineRef.current != null) closeNotePopover();
++      }),
++      // W2 / G4.1：点行槽上的笔记图标 → 打开编辑浮层（只对行槽装饰生效）
++      editor.onMouseDown((e) => {
++        if (e.target.type !== monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS) return;
++        const line = e.target.position?.lineNumber ?? e.target.range?.startLineNumber;
++        if (!line) return;
++        // 行滚出视口就先滚进来，再量坐标；量不到就不开，不猜位置
++        editor.revealLineInCenter(line, monaco.editor.ScrollType.Immediate);
++        const pos = editor.getScrolledVisiblePosition({ lineNumber: line, column: 1 });
++        const rect = hostRef.current?.getBoundingClientRect();
++        if (!pos || !rect) return;
++        setNoteLine(line);
++        setNoteAnchorPos({ top: rect.top + pos.top, left: rect.left + pos.left + 24 });
+       }),
+       editor.onDidChangeCursorSelection((e) => {
+         if (historicalRef.current) return;
+@@ -317,7 +381,7 @@ export function Editor({
+         onCopySnippetRef.current?.(current, sel.startLineNumber, sel.endLineNumber, text);
+       },
+     });
+-    // G3.5：把当前位置加入待读（与文件树共用同一份 wcr:queue:<id>）
++    // W2 / G3.5：把当前位置加入待读（与向导面板 / 文件树共用同一份 wcr:queue:<id>）
+     editor.addAction({
+       id: 'wcr.addToQueue',
+       label: '把当前位置加入待读',
+@@ -370,8 +434,13 @@ export function Editor({
+         onCopySymbolRef.current?.(current, pos.lineNumber, pos.column);
+       },
+     });
++    const closeNotePopover = () => {
++      setNoteLine(null);
++      setNoteAnchorPos(null);
++    };
+     return () => {
+       for (const sub of subs) sub.dispose();
++      closeNotePopover();
+       if (positionTimerRef.current != null) window.clearTimeout(positionTimerRef.current);
+       editor.dispose();
+       editorRef.current = null;
+@@ -379,6 +448,8 @@ export function Editor({
+       // N19：model 由模块级池共享，不随单个 editor 销毁；只清本实例的引用
+       decorationPool.clear();
+       agentLinePool.clear();
++      annotationPool.clear();
++      notePool.clear();
+       blamePool.clear();
+     };
+   }, []);
+@@ -461,6 +532,46 @@ export function Editor({
+     };
+   }, [file, content, projectId, highlightsToken]);
+ 
++  // S10：本机批注 —— 在行上留一个可悬停的标记（只加装饰，不动源码）
++  useEffect(() => {
++    const editor = editorRef.current;
++    const model = editor?.getModel();
++    if (!editor || !model || !file || historical) return;
++    const mine = (annotations ?? []).filter((a) => a.file === file);
++    const previous = annotationPool.get(model) ?? [];
++    annotationPool.set(model, model.deltaDecorations(previous, toAnnotationDecorations(model, mine)));
++  }, [file, annotations, content, historical]);
++
++  // W2：把当前文件正文同步给笔记存储 —— anchor 恢复（三层兜底）只认正文。
++  // 分屏时两个窗格都会同步，store 里那份（供侧栏「待归位」用）指向最后同步的文件，
++  // 这是有意的：面板只有一个，锚点校验以当前阅读的那个文件为准。
++  useEffect(() => {
++    // G7.5：历史版本不是当前文件，不参与笔记锚定
++    if (historical) return;
++    syncNoteFile(file, content);
++  }, [file, content, syncNoteFile, historical]);
++
++  /**
++   * 本窗格的行级笔记（含 anchor 恢复后的行号）。
++   * 不用 store 里那份：分屏时两个窗格各看一个文件，各算各的才都对。
++   */
++  const mineNotes = useMemo(() => {
++    if (!file || historical) return [];
++    return resolveNotes(
++      notes.filter((n) => n.file === file),
++      content,
++    ).located.filter((n) => n.level === 'line');
++  }, [notes, file, content]);
++
++  // W2 / G4.1：行级笔记的行槽图标（第四个装饰池，单独刷新，不与上面三个互清）
++  useEffect(() => {
++    const editor = editorRef.current;
++    const model = editor?.getModel();
++    if (!editor || !model || !file || historical) return;
++    const previous = notePool.get(model) ?? [];
++    notePool.set(model, model.deltaDecorations(previous, toNoteDecorations(model, mineNotes)));
++  }, [file, mineNotes, historical]);
++
+   // G7.3：整文件 blame 视图 —— 每行行尾一个作者短名（数据由 App 按文件缓存后传入：
+   // 光标移动不重新请求，只在换文件 / 显式重取时拉一次）
+   useEffect(() => {
+@@ -492,6 +603,12 @@ export function Editor({
+     editor.focus();
+   }, [reveal, file]);
+ 
++  /** 关闭笔记浮层（点外部 / Esc / 滚动 / 保存后都会调）。 */
++  const closeNote = () => {
++    setNoteLine(null);
++    setNoteAnchorPos(null);
++  };
++
+   /** 密度条点击：只在本文件内滚动定位，不压历史（不是一次「跳转」而是「移到」）。 */
+   const jumpToLine = (line: number) => {
+     const editor = editorRef.current;
+@@ -506,11 +623,24 @@ export function Editor({
+   return (
+     <>
+       {/* G6.1：顶部可折叠的文件摘要条（拿不到摘要时整条不渲染）；G7.4：展开区列提交历史。
+-          G7.5：历史版本窗格不显示摘要 / 密度条 —— 它们都属于「真实文件」。 */}
++          G7.5：历史版本窗格不显示摘要 / 笔记 / 密度条 —— 它们都属于「真实文件」。 */}
+       {!historical && (
+         <SummaryBar projectId={projectId} file={file} onOpenFile={onOpenFile} onOpenHistory={onOpenHistory} />
+       )}
++      {/* G4.2：文件级笔记（一个文件的整体印象，一行） */}
++      {!historical && <FileNoteBar projectId={projectId} file={file} />}
+       <div className="editor-host" ref={hostRef} />
++      {/* W2 / G4.1：行级笔记的编辑浮层（点行槽图标打开） */}
++      {!historical && file && noteLine != null && noteAnchorPos && (
++        <NotePopover
++          file={file}
++          line={noteLine}
++          anchor={anchorOf(content, noteLine)}
++          notes={mineNotes.filter((n) => n.resolvedLine === noteLine)}
++          position={noteAnchorPos}
++          onClose={closeNote}
++        />
++      )}
+       {!historical && file && projectId && (
+         <FileDensityBar
+           projectId={projectId}
+diff --git b/frontend/src/ExplainPanel.tsx a/frontend/src/ExplainPanel.tsx
+index 9c250bc..5100585 100644
+--- b/frontend/src/ExplainPanel.tsx
++++ a/frontend/src/ExplainPanel.tsx
+@@ -7,8 +7,11 @@
+  */
+ import { useEffect, type ReactNode } from 'react';
+ import type { CallNode } from '../../shared/types';
++import { anchorOf } from './notes';
++import { useNotesStore } from './notesState';
++import { useStore, showFlash } from './state';
+ import { useI18n, translate } from './i18n';
+-import { EXPLAIN_SCOPES, kindText, useExplainStore } from './explainState';
++import { EXPLAIN_SCOPES, explainNoteBody, kindText, useExplainStore } from './explainState';
+ import './guide.css';
+ 
+ /** 一条「出处」按钮：`path:line`，点击跳过去。 */
+@@ -130,6 +133,27 @@ export function ExplainPanel({
+ 
+   if (!target) return null;
+ 
++  /** G5.4：把解释的要点存成笔记 —— 位置对得上当前文件写行级，否则写文件级。 */
++  const saveAsNote = () => {
++    const r = useExplainStore.getState().result;
++    if (!r) return;
++    const body = explainNoteBody(r);
++    const store = useStore.getState();
++    const sameFile = store.openFile === r.target.file;
++    const add = useNotesStore.getState().add;
++    const note = sameFile
++      ? add({
++          file: r.target.file,
++          line: r.target.line,
++          col: r.target.col,
++          // 行级笔记要靠 anchor 抗住代码变动（Q9）：当前文件正文才算得出来
++          anchor: anchorOf(store.fileContent, r.target.line),
++          body,
++        })
++      : add({ file: r.target.file, line: 0, col: 0, anchor: '', body, level: 'file' });
++    showFlash(note ? t('explain.saved') : t('explain.saveFailed'));
++  };
++
+   const coverage = result?.coverage;
+ 
+   return (
+@@ -238,6 +262,9 @@ export function ExplainPanel({
+           <span className="ex-coverage">{t('explain.coverageUnknown')}</span>
+         )}
+         <span className="ex-foot-static">{t('explain.staticNote')}</span>
++        <button className="gv-btn" onClick={saveAsNote} disabled={!result}>
++          {t('explain.save')}
++        </button>
+       </footer>
+     </div>
+   );
+diff --git b/frontend/src/GuidePanel.tsx a/frontend/src/GuidePanel.tsx
+index 58a665c..b9f6eea 100644
+--- b/frontend/src/GuidePanel.tsx
++++ a/frontend/src/GuidePanel.tsx
+@@ -1,9 +1,10 @@
+ /**
+- * 侧栏向导面板（04 Guide · W1/W2）：路线 / 进度 / 待读。
++ * 侧栏向导面板（04 Guide · W1/W2）：路线 / 进度 / 待读 / 笔记。
+  *
+  * 形态对齐 `docs/04-guide.md` §3.2：路线是一张可执行的清单 —— 每一步一个文件，
+- * 带序号、一句理由、状态（已读 / 在读 / 待读），底部是行进控制。
+- * 文案全部走 i18n（`guide.*`），状态与存储都在 `guideState.ts` / `guide.ts`。
++ * 带序号、一句理由、状态（已读 / 在读 / 待读），底部是行进控制；
++ * §3.3 的笔记汇总在底部（G4.3 / G4.4）：按文件分组 + 筛选 + 导出。
++ * 文案全部走 i18n（`guide.*`），状态与存储都在 `guideState.ts` / `guide.ts` / `notes.ts`。
+  */
+ import { useMemo, useState } from 'react';
+ import type { FileNode } from '../../shared/types';
+@@ -11,7 +12,11 @@ import { ROUTE_KINDS } from './guide';
+ import { useGuideStore, visibleSteps } from './guideState';
+ import { setRead as setReadMark } from './marks';
+ import { useMapStore } from './mapState';
+-import { useStore } from './state';
++import type { Note } from './notes';
++import { exportJson as exportNotesJson } from './notes';
++import { useNotesStore } from './notesState';
++import { downloadText } from './report';
++import { showFlash, useStore } from './state';
+ import { useI18n } from './i18n';
+ import './guide.css';
+ 
+@@ -270,7 +275,194 @@ export function GuidePanel({
+         )}
+       </section>
+ 
++      {/* ------------------------------------------------------------ 笔记（W2） */}
++      <NotesSection currentFile={openFile} onOpenFile={onOpenFile} />
+     </div>
+   );
+ }
+ 
++/** 文件级笔记在列表里的标记（行级写 `path:line`，文件级只有路径）。 */
++function noteSpot(note: Note): string {
++  return note.level === 'file' ? note.file : `${note.file}:${note.line}`;
++}
++
++/**
++ * G4.3 / G4.4：笔记汇总 —— 按文件分组、三档筛选（全部 / 当前文件 / 待归位）、
++ * 点一条跳回原处、导出 Markdown / JSON、导入 JSON（合并去重）。
++ *
++ * 「待归位」只对**当前打开的文件**成立：锚点校验要靠文件正文，而正文只有编辑器有。
++ * 所以这一档的条数是「当前文件里没找到原位置的笔记」，文案里如实说明。
++ */
++function NotesSection({
++  currentFile,
++  onOpenFile,
++}: {
++  currentFile: string | null;
++  onOpenFile: (file: string, line?: number, col?: number) => void;
++}) {
++  const { t } = useI18n();
++  const projectId = useStore((s) => s.projectId);
++  const projectName = useStore((s) => s.project?.name ?? '');
++  const notes = useNotesStore((s) => s.notes);
++  const orphans = useNotesStore((s) => s.orphans);
++  const remove = useNotesStore((s) => s.remove);
++  const importJson = useNotesStore((s) => s.importJson);
++  const exportMarkdown = useNotesStore((s) => s.exportMarkdown);
++  const [filter, setFilter] = useState<'all' | 'current' | 'orphans'>('all');
++
++  /** 筛过的笔记，按「文件 → 文件级在前 → 行号」分组（顺序与存储一致）。 */
++  const groups = useMemo(() => {
++    const list = filter === 'current' ? notes.filter((n) => n.file === currentFile) : filter === 'orphans' ? orphans : notes;
++    const out: Array<{ file: string; items: Note[] }> = [];
++    for (const note of list) {
++      const last = out[out.length - 1];
++      if (last && last.file === note.file) last.items.push(note);
++      else out.push({ file: note.file, items: [note] });
++    }
++    return out;
++  }, [notes, orphans, filter, currentFile]);
++
++  const shown = groups.reduce((n, g) => n + g.items.length, 0);
++  /** 待归位的那几条（在「全部」视图里也要标出来：它的行号是旧的，不可信）。 */
++  const orphanIds = useMemo(() => new Set(orphans.map((n) => n.id)), [orphans]);
++  // 文件名只带日期：项目名可能含空格 / 路径分隔符，不往文件名里塞
++  const stamp = new Date().toISOString().slice(0, 10);
++
++  const doExportMarkdown = () => {
++    if (!notes.length) {
++      showFlash(t('guide.notes.exportEmpty'));
++      return;
++    }
++    downloadText(`notes-${stamp}.md`, exportMarkdown(projectName || t('app.title')));
++    showFlash(t('guide.notes.exportDone', { n: notes.length }));
++  };
++
++  const doExportJson = () => {
++    if (!projectId) return;
++    downloadText(`notes-${stamp}.json`, exportNotesJson(projectId));
++    showFlash(t('guide.notes.exportDone', { n: notes.length }));
++  };
++
++  return (
++    <section className="guide-section">
++      <header className="guide-sec-head">
++        <h3>{t('guide.notes.title')}</h3>
++        <span className="guide-muted">{t('guide.notes.count', { n: notes.length })}</span>
++      </header>
++
++      <div className="guide-actions">
++        <button
++          className={`btn ghost small ${filter === 'all' ? 'active' : ''}`}
++          onClick={() => setFilter('all')}
++        >
++          {t('guide.notes.filter.all')}
++        </button>
++        <button
++          className={`btn ghost small ${filter === 'current' ? 'active' : ''}`}
++          onClick={() => setFilter('current')}
++          disabled={!currentFile}
++          title={currentFile ?? t('guide.notes.noCurrent')}
++        >
++          {t('guide.notes.filter.current')}
++        </button>
++        <button
++          className={`btn ghost small ${filter === 'orphans' ? 'active' : ''}`}
++          onClick={() => setFilter('orphans')}
++        >
++          {t('guide.notes.filter.orphans', { n: orphans.length })}
++        </button>
++      </div>
++
++      {filter === 'orphans' && (
++        <div className="guide-orphan-note">
++          <b>{t('guide.notes.orphansTitle')}</b> {t('guide.notes.orphansNote')}
++        </div>
++      )}
++
++      {shown === 0 && (
++        <div className="guide-empty">
++          {filter === 'orphans'
++            ? t('guide.notes.orphansEmpty')
++            : notes.length === 0
++              ? t('guide.notes.empty')
++              : t('guide.notes.emptyCurrent')}
++        </div>
++      )}
++
++      {groups.map((group) => (
++        <div className="guide-note-group" key={group.file}>
++          <div className="guide-note-file" title={group.file}>
++            {group.file}
++            <span className="guide-muted"> ({group.items.length})</span>
++          </div>
++          {group.items.map((note) => {
++            // 待归位的行级笔记：原行号已经不可信，跳转只到文件（不把人送到错的一行）
++            const lostHere = orphanIds.has(note.id);
++            const target = lostHere
++              ? { file: note.file, line: undefined, col: undefined }
++              : { file: note.file, line: note.line, col: note.col || 1 };
++            return (
++              <div className="guide-note-row" key={note.id}>
++                <button
++                  className="guide-note-main"
++                  onClick={() => onOpenFile(target.file, target.line, target.col)}
++                  title={lostHere ? `${noteSpot(note)}\n${t('guide.notes.orphanJump')}` : noteSpot(note)}
++                >
++                  <span className="guide-note-spot">
++                    {note.level === 'file'
++                      ? t('guide.notes.fileLevel')
++                      : lostHere
++                        ? t('guide.notes.spotOrphan', { line: note.line })
++                        : `L${note.line}`}
++                  </span>
++                  <span className="guide-note-body">{note.body}</span>
++                </button>
++                <button
++                  className="btn ghost small"
++                  onClick={() => onOpenFile(target.file, target.line, target.col)}
++                  title={lostHere ? t('guide.notes.orphanJump') : t('guide.notes.jump')}
++                >
++                  →
++                </button>
++                <button className="btn ghost small" onClick={() => remove(note.id)} title={t('guide.notes.delete')}>
++                  ✕
++                </button>
++              </div>
++            );
++          })}
++        </div>
++      ))}
++
++      <div className="guide-note-foot">
++        <button className="btn ghost small" onClick={doExportMarkdown}>
++          {t('guide.notes.export')}
++        </button>
++        <button className="btn ghost small" onClick={doExportJson}>
++          {t('guide.notes.exportJson')}
++        </button>
++        <label className="btn ghost small" title={t('guide.notes.importTitle')}>
++          {t('guide.notes.import')}
++          <input
++            type="file"
++            accept=".json,application/json"
++            style={{ display: 'none' }}
++            onChange={(e) => {
++              const f = e.target.files?.[0];
++              e.target.value = '';
++              if (!f) return;
++              void f.text().then((text) => {
++                try {
++                  const added = importJson(text);
++                  showFlash(added > 0 ? t('guide.notes.importOk', { n: added }) : t('guide.notes.importNone'));
++                } catch {
++                  showFlash(t('guide.notes.importFail'));
++                }
++              });
++            }}
++          />
++        </label>
++      </div>
++      <div className="guide-muted">{t('guide.notes.hint')}</div>
++    </section>
++  );
++}
+diff --git b/frontend/src/changes.test.ts a/frontend/src/changes.test.ts
+index 6bce6bb..c7055a5 100644
+--- b/frontend/src/changes.test.ts
++++ a/frontend/src/changes.test.ts
+@@ -1,16 +1,19 @@
+ /**
+- * 04 W3 的纯逻辑（G8.2–G8.4 / G7.3）：阅读快照组装、快照年龄、面板筛选。
++ * 04 W3 的纯逻辑（G8.2–G8.4 / G7.3）：阅读快照组装、快照年龄、面板筛选与
++ * 「笔记过期」的口径。
+  *
+  * 这几处最容易悄悄说错话，所以钉在单测里：
+  * - `buildSnapshot` 只收索引内文件（否则快照里会混进已被删 / 被忽略的路径）；
++ * - 「其中 M 条笔记所在的行已被改动」必须是**笔记条数**，不是文件数
++ *   （后端 `counts.noteStale` 是文件数，口径不同，不能在界面上混用）；
+  * - 浏览器存储 / 请求相关的部分不在这里测（`readSnapshot` 写盘走 try/catch，
+  *   UI 交互归 `npm run test:ui`）。
+  */
+ import { describe, expect, it } from 'vitest';
+-import type { GitChangeEntry, ReadmapResult } from '../../shared/types';
++import type { ReadmapResult } from '../../shared/types';
+ import { buildSnapshot, snapshotAge } from './readSnapshot';
+-import { statusMeta } from './changesState';
+ import { blameAt, shortAuthor } from './blame';
++import type { Note } from './notes';
+ 
+ const readmap: ReadmapResult = {
+   at: 1_700_000_000_000,
+@@ -20,17 +23,38 @@ const readmap: ReadmapResult = {
+   ],
+ };
+ 
++const note = (over: Partial<Note>): Note => ({
++  id: 'n1',
++  file: 'src/a.ts',
++  line: 1,
++  col: 1,
++  anchor: 'x',
++  body: 'x',
++  level: 'line',
++  createdAt: 1,
++  updatedAt: 1,
++  ...over,
++});
++
+ describe('readSnapshot / buildSnapshot', () => {
+-  it('把索引内的文件写进快照', () => {
+-    const snap = buildSnapshot('p1', readmap);
++  it('只把索引内的文件与笔记写进快照', () => {
++    const snap = buildSnapshot('p1', readmap, [
++      note({ id: 'n1' }),
++      note({ id: 'n2', file: 'src/b.ts', line: 3 }),
++      // 笔记指向一个不在索引内的文件（已被删 / 被忽略）：不进快照
++      note({ id: 'n3', file: 'src/gone.ts', line: 1 }),
++    ]);
+     expect(Object.keys(snap.files).sort()).toEqual(['src/a.ts', 'src/b.ts']);
+     expect(snap.files['src/a.ts']).toEqual({ mtimeMs: 100, size: 10, lines: 2 });
++    expect(Object.keys(snap.noteLocs).sort()).toEqual(['n1', 'n2']);
++    expect(snap.noteLocs.n2).toEqual({ file: 'src/b.ts', line: 3 });
+     expect(Number.isFinite(snap.at)).toBe(true);
+   });
+ 
+   it('没有项目 id 就不生成快照（归属守卫）', () => {
+-    const snap = buildSnapshot('', readmap);
++    const snap = buildSnapshot('', readmap, [note({})]);
+     expect(snap.files).toEqual({});
++    expect(snap.noteLocs).toEqual({});
+   });
+ });
+ 
+@@ -38,35 +62,14 @@ describe('snapshotAge', () => {
+   it('没有快照返回 null；有快照返回毫秒差，未来时间归 0', () => {
+     expect(snapshotAge(null)).toBeNull();
+     const now = 1_000_000;
+-    expect(snapshotAge({ at: now - 3000, files: {} }, now)).toBe(3000);
+-    expect(snapshotAge({ at: now + 5000, files: {} }, now)).toBe(0);
++    expect(snapshotAge({ at: now - 3000, files: {}, noteLocs: {} }, now)).toBe(3000);
++    expect(snapshotAge({ at: now + 5000, files: {}, noteLocs: {} }, now)).toBe(0);
+   });
+ });
+ 
+ // 2026-10-03：变更改成「以 git 为准」后，visibleChanges / 笔记过期那套（自记录快照对比）
+ // 连同实现一起删除，对应的用例也删掉 —— 测已经不存在的功能没有意义。
+ 
+-/**
+- * 2026-10-03 实际踩的坑：后端还是旧版本、仍发 `untracked`，而前端已删掉这一档，
+- * `STATUS_META[status].cls` 直接抛错 —— 渲染期异常会把整棵 React 树卸载，页面白屏。
+- * 所以这里钉住「未知状态不崩，按新增显示」这条承诺。
+- */
+-describe('变更徽标 statusMeta', () => {
+-  it('已知状态给出对应中文标签', () => {
+-    expect(statusMeta('modified').label).toBe('修改');
+-    expect(statusMeta('added').label).toBe('新增');
+-    expect(statusMeta('deleted').label).toBe('删除');
+-  });
+-
+-  it('未知状态（旧后端还在发的 untracked）不崩，按新增显示', () => {
+-    const meta = statusMeta('untracked' as unknown as GitChangeEntry['status']);
+-    expect(meta.label).toBe('新增');
+-    expect(meta.cls).toBe('add');
+-    expect(typeof meta.hint).toBe('string');
+-    expect(meta.hint.length).toBeGreaterThan(0);
+-  });
+-});
+-
+ describe('blame 的一行摘要', () => {
+   it('作者短名过长时截断；找不到那一行返回 null（不猜）', () => {
+     expect(shortAuthor('  张三  ')).toBe('张三');
+diff --git b/frontend/src/explainState.ts a/frontend/src/explainState.ts
+index 9917cba..fc1c698 100644
+--- b/frontend/src/explainState.ts
++++ a/frontend/src/explainState.ts
+@@ -12,7 +12,7 @@
+  * （`request` 只抛出人话 message，丢掉了错误码）。
+  */
+ import { create } from 'zustand';
+-import type { ExplainResult, ExplainScope } from '../../shared/types';
++import type { CallNode, ExplainResult, ExplainScope } from '../../shared/types';
+ import { translate } from './i18n';
+ import { showFlash } from './state';
+ 
+@@ -64,6 +64,50 @@ export function kindText(kind: string): string {
+   return text === key ? kind : text;
+ }
+ 
++/**
++ * 把解释拼成一段可留档的正文（G5.4）。
++ *
++ * 确定性拼装、不加形容词：目标一行 + 四段清单，每条都是 `path:line`。
++ * 覆盖率如实写在末尾（未解析不隐藏）—— 存下来的笔记也必须能自证。
++ */
++export function explainNoteBody(result: ExplainResult): string {
++  const out: string[] = [];
++  const t = result.target;
++  out.push(`【结构性解释】${t.name}（${kindText(t.kind)}）· ${t.file}:${t.line}`);
++  if (t.containerName) out.push(`所属：${t.containerName}`);
++  if (t.signature) out.push(`签名：${t.signature.trim()}`);
++  out.push(`范围：${translate(`explain.scope.${result.scope}`)} · 行 ${result.lines.start}-${result.lines.end}`);
++
++  const section = (title: string, rows: string[]) => {
++    out.push('', `${title}（${rows.length}）：`);
++    if (!rows.length) out.push('- （无）');
++    for (const row of rows) out.push(row);
++  };
++  const callRows = (nodes: CallNode[]) =>
++    nodes.map((n) => {
++      const at = `${n.file}:${n.location.range.start.line}`;
++      const tag = n.external ? '（外部）' : n.unresolved ? '（未解析）' : '';
++      return `- ${n.name}${tag} — ${n.file ? at : '（无出处）'}`;
++    });
++
++  section(translate('explain.callees'), callRows(result.callees));
++  section(translate('explain.callers'), callRows(result.callers));
++  section(
++    translate('explain.projectRefs'),
++    result.projectRefs.map((r) => `- ${r.name}（${kindText(r.kind)}）— ${r.file}:${r.line}`),
++  );
++  section(
++    translate('explain.externalModules'),
++    result.externalModules.map((m) => `- ${m.module || translate('explain.builtin')} — ${m.file}:${m.line}`),
++  );
++  out.push('', translate('explain.coverageText', {
++    resolved: result.coverage.resolved,
++    unresolved: result.coverage.unresolved,
++    external: result.coverage.external,
++  }));
++  return out.join('\n');
++}
++
+ interface ExplainState {
+   projectId: string | null;
+   /** 当前解释的目标；null = 面板关闭。 */
+diff --git b/frontend/src/guide.css a/frontend/src/guide.css
+index 8e7a432..0a758d5 100644
+--- b/frontend/src/guide.css
++++ a/frontend/src/guide.css
+@@ -434,6 +434,255 @@
+   opacity: 0.85;
+ }
+ 
++/* ---------------------------------------------------------------- 行级笔记（G4.1 / W2）
++   类名带 guide 前缀：`wcr-note-*` 已被 05 的批注（annotations.css）占用，
++   同名会让两套标记在样式上互相覆盖。 */
++
++.wcr-guide-note-gutter::after {
++  content: '';
++  display: inline-block;
++  width: 7px;
++  height: 7px;
++  margin-left: 3px;
++  border-radius: 50%;
++  background: var(--accent-2);
++}
++
++/* 位置是按内容锚点找回来的（不是原行号）：画成空心，一眼能看出来 */
++.wcr-guide-note-gutter.moved::after {
++  background: transparent;
++  border: 1px solid var(--accent-2);
++}
++
++/* 编辑浮层：fixed + 视口坐标（由 Editor 用 getScrolledVisiblePosition 算好） */
++.note-pop {
++  position: fixed;
++  z-index: 40;
++  width: 300px;
++  max-width: 90vw;
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  padding: 8px;
++  border: 1px solid var(--border);
++  border-radius: 8px;
++  background: var(--bg-2);
++  color: var(--fg);
++  font-size: 12px;
++  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
++}
++
++.note-pop-head {
++  display: flex;
++  align-items: center;
++  gap: 6px;
++}
++
++.note-pop-title {
++  font-weight: 600;
++}
++
++.note-pop-head .spacer,
++.note-pop-meta .spacer {
++  flex: 1;
++}
++
++.note-pop-empty {
++  color: var(--fg-dim);
++}
++
++.note-pop-item {
++  border-left: 2px solid var(--accent-2);
++  padding: 2px 0 2px 6px;
++}
++
++.note-pop-item.editing {
++  border-left-color: var(--ok);
++}
++
++.note-pop-body {
++  white-space: pre-wrap;
++  word-break: break-word;
++}
++
++.note-pop-meta {
++  display: flex;
++  align-items: center;
++  gap: 6px;
++  color: var(--fg-dim);
++}
++
++.note-pop-moved {
++  color: var(--code-ref);
++}
++
++.note-pop-input {
++  width: 100%;
++  resize: vertical;
++  padding: 4px 6px;
++  border: 1px solid var(--border);
++  border-radius: 4px;
++  background: var(--chip-bg);
++  color: var(--fg);
++  font: inherit;
++  font-size: 12px;
++}
++
++.note-pop-foot {
++  display: flex;
++  align-items: center;
++  gap: 6px;
++  flex-wrap: wrap;
++}
++
++/* ---------------------------------------------------------------- 文件级笔记（G4.2） */
++
++.guide-filenote {
++  flex: none;
++  display: flex;
++  align-items: center;
++  gap: 6px;
++  padding: 2px 8px;
++  border-bottom: 1px solid var(--border);
++  background: var(--bg-2);
++  font-size: 12px;
++  color: var(--fg);
++}
++
++.guide-filenote .fn-toggle {
++  flex: 1;
++  min-width: 0;
++  display: flex;
++  align-items: center;
++  gap: 6px;
++  padding: 2px 0;
++  background: none;
++  border: none;
++  color: inherit;
++  font: inherit;
++  text-align: left;
++  cursor: pointer;
++}
++
++.guide-filenote .fn-label {
++  flex: none;
++  color: var(--code-ref);
++}
++
++.guide-filenote .fn-body {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.guide-filenote .fn-body.empty {
++  color: var(--fg-dim);
++}
++
++.guide-filenote .fn-edit {
++  flex: none;
++  margin-left: auto;
++  color: var(--fg-dim);
++}
++
++.guide-filenote .fn-input {
++  flex: 1;
++  min-width: 0;
++}
++
++/* 文件级笔记条与摘要条一样占一行：有它时窗格改成纵向 flex（没有则布局原样不变） */
++.pane:has(> .guide-filenote) {
++  display: flex;
++  flex-direction: column;
++}
++
++.pane:has(> .guide-filenote) > .editor-host,
++.panes.split .pane.secondary:has(> .guide-filenote) > .editor-host {
++  position: relative;
++  inset: auto;
++  top: auto;
++  flex: 1;
++  min-height: 0;
++}
++
++/* ---------------------------------------------------------------- 面板「笔记」段（G4.3 / G4.4） */
++
++.guide-orphan-note {
++  margin-bottom: 6px;
++  padding: 4px 6px;
++  border: 1px dashed var(--border);
++  border-radius: 4px;
++  font-size: 11px;
++  color: var(--fg-dim);
++}
++
++.guide-note-group {
++  margin-bottom: 6px;
++}
++
++.guide-note-file {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++  font-size: 12px;
++  color: var(--fg-dim);
++}
++
++.guide-note-row {
++  display: flex;
++  align-items: center;
++  gap: 4px;
++  padding: 2px 0;
++  min-width: 0;
++}
++
++.guide-note-row:hover {
++  background: var(--row-hover);
++}
++
++.guide-note-main {
++  flex: 1;
++  min-width: 0;
++  display: flex;
++  align-items: baseline;
++  gap: 6px;
++  padding: 0;
++  background: none;
++  border: none;
++  color: inherit;
++  font: inherit;
++  text-align: left;
++  cursor: pointer;
++}
++
++.guide-note-spot {
++  flex: none;
++  font-size: 11px;
++  color: var(--fg-dim);
++  font-variant-numeric: tabular-nums;
++}
++
++.guide-note-body {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++  font-size: 12px;
++}
++
++.guide-note-main:hover .guide-note-body {
++  color: var(--code-ref);
++  text-decoration: underline;
++}
++
++.guide-note-foot {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++  margin-top: 6px;
++  padding-top: 6px;
++  border-top: 1px solid var(--border);
++}
++
+ /* ---------------------------------------------------------------- 文件树右键菜单（G3.5） */
+ 
+ .tree-menu-backdrop {
+diff --git b/frontend/src/i18n/en.ts a/frontend/src/i18n/en.ts
+index cdc1d50..4e15313 100644
+--- b/frontend/src/i18n/en.ts
++++ a/frontend/src/i18n/en.ts
+@@ -165,6 +165,33 @@ export const en: Record<string, string> = {
+   'guide.queue.clear': 'Clear all',
+   'guide.queue.remove': 'Remove',
+ 
++  'guide.notes.title': 'Notes',
++  'guide.notes.count': '{n} total',
++  'guide.notes.filter.all': 'All',
++  'guide.notes.filter.current': 'Current file',
++  'guide.notes.filter.orphans': 'Needs anchoring ({n})',
++  'guide.notes.noCurrent': 'Open a file first',
++  'guide.notes.empty': 'No notes yet: click the gutter next to a line to write one.',
++  'guide.notes.emptyCurrent': 'This file has no notes yet (click the gutter next to a line).',
++  'guide.notes.orphansTitle': 'Needs anchoring:',
++  'guide.notes.orphansNote':
++    'After code changes these notes could not be found at their old spot (line mismatch, and the same line text was not within ±30 lines). We do not guess a position - it is yours to place.',
++  'guide.notes.orphansEmpty': 'Nothing needs anchoring (anchors are re-checked whenever a file is opened).',
++  'guide.notes.spotOrphan': 'was L{line}',
++  'guide.notes.orphanJump': 'Position unconfirmed: open the file and locate it yourself',
++  'guide.notes.jump': 'Jump to this line',
++  'guide.notes.delete': 'Delete this note',
++  'guide.notes.fileLevel': 'file-level',
++  'guide.notes.export': 'Export Markdown',
++  'guide.notes.exportJson': 'Export JSON',
++  'guide.notes.import': 'Import JSON',
++  'guide.notes.importTitle': 'Import a notes JSON (merged and deduped by id / position)',
++  'guide.notes.importOk': 'Imported {n} new notes',
++  'guide.notes.importNone': 'Import finished: no new notes (all already local)',
++  'guide.notes.importFail': 'Import failed: this is not a notes export JSON',
++  'guide.notes.exportEmpty': 'No notes to export yet',
++  'guide.notes.exportDone': 'Exported {n} notes',
++  'guide.notes.hint': 'Notes live in this browser only; nothing is written into the read folder',
+ 
+   // Notes inside the editor (G4.1 line / G4.2 file)
+   'guide.note.popTitle': 'Notes on line {line}',
+@@ -352,6 +379,9 @@ export const en: Record<string, string> = {
+   'explain.projectRefs': 'In-project definitions it references',
+   'explain.externalModules': 'External modules it uses',
+   'explain.none': '(none)',
++  'explain.save': 'Save as note',
++  'explain.saved': 'Saved as a note (see the Notes section of the Guide panel)',
++  'explain.saveFailed': 'Could not save the note (open a project first)',
+   'explain.noSymbol': 'No explainable symbol here',
+   'explain.closeTitle': 'Close (Esc)',
+   'explain.openAt': 'Open {at}',
+diff --git b/frontend/src/i18n/zh.ts a/frontend/src/i18n/zh.ts
+index 6fa9dd4..66f23cd 100644
+--- b/frontend/src/i18n/zh.ts
++++ a/frontend/src/i18n/zh.ts
+@@ -165,6 +165,33 @@ export const zh: Record<string, string> = {
+   'guide.queue.clear': '全部清空',
+   'guide.queue.remove': '移除',
+ 
++  'guide.notes.title': '笔记',
++  'guide.notes.count': '共 {n} 条',
++  'guide.notes.filter.all': '全部',
++  'guide.notes.filter.current': '当前文件',
++  'guide.notes.filter.orphans': '待归位（{n}）',
++  'guide.notes.noCurrent': '先打开一个文件',
++  'guide.notes.empty': '还没有笔记：在编辑器行槽上点一下就能写一条。',
++  'guide.notes.emptyCurrent': '这个文件还没有笔记（在编辑器行槽上点一下就能写）。',
++  'guide.notes.orphansTitle': '待归位：',
++  'guide.notes.orphansNote':
++    '代码改动后这些笔记没找到原位置（行号对不上，±30 行内也没有同一行文本）。位置不猜，交给你认领。',
++  'guide.notes.orphansEmpty': '没有待归位的笔记（打开文件时会按内容锚点自动校验）。',
++  'guide.notes.spotOrphan': '原 L{line}',
++  'guide.notes.orphanJump': '位置待确认：打开文件后请自己找到那一处',
++  'guide.notes.jump': '跳到这一行',
++  'guide.notes.delete': '删除这条笔记',
++  'guide.notes.fileLevel': '文件级',
++  'guide.notes.export': '导出 Markdown',
++  'guide.notes.exportJson': '导出 JSON',
++  'guide.notes.import': '导入 JSON',
++  'guide.notes.importTitle': '导入笔记 JSON（按 id / 位置合并去重）',
++  'guide.notes.importOk': '导入完成：新增 {n} 条',
++  'guide.notes.importNone': '导入完成：没有新笔记（都已在本地）',
++  'guide.notes.importFail': '导入失败：这不是笔记导出的 JSON',
++  'guide.notes.exportEmpty': '还没有笔记可以导出',
++  'guide.notes.exportDone': '已导出 {n} 条笔记',
++  'guide.notes.hint': '笔记只存本机浏览器，不写被读目录',
+ 
+   // 编辑器里的笔记交互（G4.1 行级 / G4.2 文件级）
+   'guide.note.popTitle': '第 {line} 行的笔记',
+@@ -349,6 +376,9 @@ export const zh: Record<string, string> = {
+   'explain.projectRefs': '引用了本项目哪些定义',
+   'explain.externalModules': '依赖了哪些外部模块',
+   'explain.none': '（无）',
++  'explain.save': '保存为笔记',
++  'explain.saved': '已存为笔记（向导面板的「笔记」里能查到）',
++  'explain.saveFailed': '没能存下这条笔记（先打开一个项目）',
+   'explain.noSymbol': '这里没有可解释的符号',
+   'explain.closeTitle': '关闭（Esc）',
+   'explain.openAt': '打开 {at}',
+diff --git b/frontend/src/readSnapshot.ts a/frontend/src/readSnapshot.ts
+index a85d52a..91c58ca 100644
+--- b/frontend/src/readSnapshot.ts
++++ a/frontend/src/readSnapshot.ts
+@@ -1,7 +1,7 @@
+ /**
+  * 阅读快照存储（04 Guide · W3 / G8.2）：把「上次阅读时代的代码是什么样」记在本机。
+  *
+- * 存储口径与 `guide.ts` 同源（`04-guide-plan.md` §4）：落浏览器 localStorage、
++ * 存储口径与 `guide.ts` / `notes.ts` 同源（`04-guide-plan.md` §4）：落浏览器 localStorage、
+  * 按项目 id 分片（`wcr:readsnapshot:<id>`）、不写被读目录、不落后端；全部读写包 try/catch。
+  *
+  * 只存**索引内的源码文件**（`readmap` 已按这一口径过滤）——非源码文件不进快照，
+@@ -21,11 +21,14 @@ import type {
+   ReadmapResult,
+ } from '../../shared/types';
+ import { request } from './api';
++import { loadNotes, type Note } from './notes';
+ 
+ /** 一次阅读快照：`at` = 记录时间（客户端时钟，界面写「上次阅读」用的就是它）。 */
+ export interface ReadSnapshot {
+   at: number;
+   files: Record<string, ChangeSnapshotFile>;
++  /** 笔记 id → 它当时锚在哪个文件的哪一行（文件级笔记 line=0）。 */
++  noteLocs: Record<string, { file: string; line: number }>;
+ }
+ 
+ /** openFileAt 之后写快照的防抖（阅读时频繁翻文件，不该每个文件都写一次）。 */
+@@ -57,7 +60,14 @@ export function readSnapshot(projectId: string | null): ReadSnapshot | null {
+       lines: Number.isFinite(s.lines) ? Number(s.lines) : 0,
+     };
+   }
+-  return { at: raw.at, files };
++  const noteLocs: ReadSnapshot['noteLocs'] = {};
++  if (raw.noteLocs && typeof raw.noteLocs === 'object') {
++    for (const [id, loc] of Object.entries(raw.noteLocs)) {
++      if (!loc || typeof loc.file !== 'string') continue;
++      noteLocs[id] = { file: loc.file, line: typeof loc.line === 'number' ? loc.line : 0 };
++    }
++  }
++  return { at: raw.at, files, noteLocs };
+ }
+ 
+ /** 写快照（隐私模式 / 配额满时静默失败：记不住快照不打断阅读）。 */
+@@ -69,15 +79,25 @@ export function writeSnapshot(projectId: string, snap: ReadSnapshot): void {
+   }
+ }
+ 
+-/** 由 `readmap` 拼一份快照（只含索引内的源码文件）。 */
+-export function buildSnapshot(projectId: string, readmap: ReadmapResult): ReadSnapshot {
++/**
++ * 由 `readmap` + 本地笔记拼一份快照。
++ *
++ * `noteLocs` 只收文件在索引内的笔记：读不到的路径（已被删 / 被忽略）留在笔记里没问题，
++ * 但放进快照只会让「你标注过的地方被改了」这个判断失真。
++ */
++export function buildSnapshot(projectId: string, readmap: ReadmapResult, notes: Note[]): ReadSnapshot {
+   const files: Record<string, ChangeSnapshotFile> = {};
+   // projectId 是归属守卫：没有项目就没有「哪个项目的阅读基线」这回事
+-  if (!projectId) return { at: Date.now(), files };
++  if (!projectId) return { at: Date.now(), files, noteLocs: {} };
+   for (const f of readmap.files) {
+     files[f.file] = { mtimeMs: f.mtimeMs, size: f.size, lines: f.lines };
+   }
+-  return { at: Date.now(), files };
++  const noteLocs: ReadSnapshot['noteLocs'] = {};
++  for (const note of notes) {
++    if (!files[note.file]) continue;
++    noteLocs[note.id] = { file: note.file, line: note.line };
++  }
++  return { at: Date.now(), files, noteLocs };
+ }
+ 
+ /** 距离「上次阅读」多久（毫秒）；没有快照返回 null。界面据此写「3 天前看过」。 */
+@@ -87,13 +107,13 @@ export function snapshotAge(snap: ReadSnapshot | null, now = Date.now()): number
+ }
+ 
+ /**
+- * 拉 readmap → 写快照。失败返回 null（界面据此说「记不上」，
++ * 拉 readmap + 读本地笔记 → 写快照。失败返回 null（界面据此说「记不上」，
+  * 而不是把旧快照当新的用）。
+  */
+ export async function captureSnapshot(projectId: string): Promise<ReadSnapshot | null> {
+   try {
+     const readmap = await changesApi.readmap(projectId);
+-    const snap = buildSnapshot(projectId, readmap);
++    const snap = buildSnapshot(projectId, readmap, loadNotes(projectId));
+     writeSnapshot(projectId, snap);
+     return snap;
+   } catch {

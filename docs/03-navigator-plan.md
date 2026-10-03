@@ -380,7 +380,7 @@ UI 回归脚本从临时目录迁到正式目录并纳入 npm 脚本：`tests/ui
 | N13 搜索历史 | 完成 | `state.ts`（localStorage，按项目分片，上限 20）+ 搜索框下拉 | 手工验证 |
 | N14 范围限定 | 完成 | `SearchOptions.dirs` + 目录胶囊 | 单测 + UI |
 | N19 标签 / 分屏 | 完成 | 模块级 model 池、`App.tsx` 标签条与 panes | UI 2 例 |
-| N20 书签 | 完成 | `state.ts` 书签 + localStorage + 导出/导入、侧栏「书签」tab、`Ctrl/Cmd+Shift+B` | UI 用例 |
+| N20 书签 | 已移除（2026-10-03） | 曾落地（`state.ts` + localStorage + 导出/导入 + 侧栏「书签」tab + `Ctrl/Cmd+Shift+B`），用户判定与位置记忆/大纲/搜索重叠后摘除 | — |
 | N21 最近打开 | 完成 | `QuickOpen.tsx`（空查询展示最近 + 「最近」徽标） | 手工验证 |
 | N22 位置记忆 | 完成 | 每文件 `{line,col,scrollTop}`（localStorage，上限 200）、`Editor.onPosition`、无行号打开时恢复 | UI 用例（切回回到第 11 行） |
 | N25 正文可点击 | 完成 | `monaco-setup.ts` 的 `registerLinkProviders` + link opener | UI 用例（悬停路径出现链接） |
@@ -421,8 +421,8 @@ UI 回归脚本从临时目录迁到正式目录并纳入 npm 脚本：`tests/ui
 | 4. 调用链双向且诚实报告覆盖 | ✔ in/out 双向、深度 1~3、底部固定显示「已解析/未归属/外部」 |
 | 5. 标签、最近、位置记忆三层都在 | ✔ |
 | 6. 每处位置可点（含复制 `path:line:col`） | ✔ 可点已具备；光标处与面板每一行都有「复制位置」（编辑器内 `Ctrl/Cmd+Alt+C`，行尾 ⧉），状态栏回显 |
-| 7. 不上传、不写被读目录、可导出 | ✔ 书签/位置/历史只写 `localStorage`；书签可导出 JSON |
-| 8. 自动化守着 | ✔ 94 单测 + 19 UI 用例（`npm run test:ui` 已入脚本：跳转失败提示、引用面板、调用/类型层级、分屏、书签、位置记忆、后退、正文链接、面包屑同级、搜索历史、最近打开、复制位置） |
+| 7. 不上传、不写被读目录、可导出 | ✔ 位置/历史只写 `localStorage`；位置记忆可复制为 `path:line:col` |
+| 8. 自动化守着 | ✔ 94 单测 + 19 UI 用例（`npm run test:ui` 已入脚本：跳转失败提示、引用面板、调用/类型层级、分屏、位置记忆、后退、正文链接、面包屑同级、搜索历史、最近打开、复制位置） |
 
 ## 9.6 明确不做（与 `03-navigator.md` §6 边界同源）
 

@@ -1,0 +1,295 @@
+/**
+ * 「添加项目」目录选择弹窗的样式（2026-10-03）。
+ *
+ * 这份 CSS 会被注进两处：
+ * 1. 全局（`import './folderbrowser.css'`）—— 只有 `.fb-host` 一条规则生效（宿主铺满视口）；
+ * 2. 影子树内（`import fbCss from './folderbrowser.css?inline'`）—— 下面的弹窗与深色覆盖都在这儿生效。
+ * 组件 @cubone/react-file-manager 自带的 dist/style.css 也只在影子树内注入，避免它的
+ * `.active` / `.file` / `.open` 这些全局类打到主界面。
+ *
+ * 颜色全部走项目已有的 CSS 变量（自定义属性会继承进影子树），深浅主题自动跟随。
+ */
+
+.fb-host {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+
+/* ---------------------------------------------------------------- 弹窗外壳 */
+
+.fb-backdrop {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mask-bg);
+}
+
+.fb-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(880px, 92vw);
+  max-height: 88vh;
+  overflow: hidden;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 18px 48px var(--shadow-lg);
+}
+
+.fb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fb-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.fb-close {
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.fb-close:hover {
+  background: var(--row-hover);
+  color: var(--fg);
+}
+
+.fb-jump {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+
+.fb-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+
+.fb-input:focus {
+  border-color: var(--accent-2);
+}
+
+.fb-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--fg);
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fb-btn:hover:not(:disabled) {
+  border-color: var(--accent-2);
+}
+
+.fb-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.fb-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.fb-btn.primary:hover:not(:disabled) {
+  background: var(--accent-2);
+}
+
+.fb-body {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 14px;
+}
+
+.fb-error {
+  margin: 0 14px 8px;
+  padding: 6px 9px;
+  font-size: 12px;
+  color: var(--warn);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 4px;
+}
+
+.fb-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.fb-picked {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------- @cubone 组件的深色化覆盖
+   它的样式表按浅色写死在类上（#cfcfcf 边框、白底），这里统一压成项目配色。
+   选择器都带 .fb-dialog 前缀，既提高优先级，也说明只服务这个弹窗。 */
+
+.fb-dialog .file-explorer {
+  --file-manager-primary-color: var(--accent-2);
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* 工具栏：只留视图切换与刷新（写操作权限已全关） */
+.fb-dialog .file-explorer .toolbar {
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.fb-dialog .file-explorer .fm-toolbar .item-action {
+  color: var(--fg-dim);
+  background: transparent;
+}
+
+.fb-dialog .file-explorer .fm-toolbar .item-action:hover:not(:disabled) {
+  background: var(--row-hover) !important;
+  color: var(--fg);
+}
+
+.fb-dialog .file-explorer .item-separator,
+.fb-dialog .file-explorer .divider {
+  background: var(--border);
+  border-color: var(--border);
+}
+
+/* 面包屑（点它可回上层目录） */
+.fb-dialog .file-explorer .bread-crumb-container {
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.fb-dialog .file-explorer .breadcrumb,
+.fb-dialog .file-explorer .folder-name {
+  color: var(--fg);
+}
+
+.fb-dialog .file-explorer .folder-name {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.fb-dialog .file-explorer .folder-name:hover {
+  background: var(--row-hover);
+}
+
+.fb-dialog .file-explorer .folder-name svg,
+.fb-dialog .file-explorer .folder-name-btn svg {
+  color: var(--tree-dir);
+  fill: currentColor;
+}
+
+/* 目录列表 */
+.fb-dialog .file-explorer .files-container,
+.fb-dialog .file-explorer .folders-preview {
+  background: transparent;
+}
+
+/* 列表表头：组件写死了浅灰底（#f5f5f5），排序列还带外链蓝，这里一并压回项目配色 */
+.fb-dialog .file-explorer .files-header {
+  background: var(--bg-2);
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.fb-dialog .file-explorer .files-header .file-name.active {
+  background: transparent;
+  color: var(--fg);
+}
+
+/* 表头的「全选」勾选框：这里不做批量操作，去掉 */
+.fb-dialog .file-explorer .file-select-all {
+  display: none;
+}
+
+/* 这里只选目录，后端也没给大小 / 修改时间：把这两列去掉，列表更干净 */
+.fb-dialog .file-explorer .files-header .file-date,
+.fb-dialog .file-explorer .files-header .file-size,
+.fb-dialog .file-explorer .file-item-container .modified-date,
+.fb-dialog .file-explorer .file-item-container .size {
+  display: none;
+}
+
+.fb-dialog .file-explorer .files {
+  background: transparent;
+}
+
+.fb-dialog .file-explorer .file-item-container {
+  color: var(--tree-file);
+  border-radius: 4px;
+}
+
+.fb-dialog .file-explorer .file-item-container:hover {
+  background: var(--row-hover);
+}
+
+.fb-dialog .file-explorer .file-item-container.file-selected,
+.fb-dialog .file-explorer .file-item-container.item-selected {
+  background: var(--row-active);
+  color: var(--fg);
+}
+
+/* 目录图标：跟主界面文件树的目录色一致 */
+.fb-dialog .file-explorer .file-icon svg,
+.fb-dialog .file-explorer .file-item svg {
+  color: var(--tree-dir);
+  fill: currentColor;
+}
+
+.fb-dialog .file-explorer .empty-folder {
+  color: var(--fg-dim);
+}
+
+/* 左侧导航树在这个弹窗里不需要（只列目录 + 面包屑已够） */
+.fb-dialog .file-explorer .navigation-pane,
+.fb-dialog .file-explorer .selection-checkbox {
+  display: none;
+}
+
+/* 加载 / 提示 */
+.fb-dialog .file-explorer .loader-container {
+  background: var(--overlay);
+}
+
+.fb-dialog .file-explorer .spinner {
+  color: var(--accent-2);
+}

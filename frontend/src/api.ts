@@ -3,6 +3,10 @@ import type {
   CallDirection,
   CallHierarchyResult,
   CallNode,
+  CommandKind,
+  CommandPlan,
+  CommandRisk,
+  CommandRun,
   DefinitionResult,
   DensitySegment,
   ExternalSource,
@@ -10,14 +14,14 @@ import type {
   FileNode,
   FindReferencesRequest,
   GitChangesResult,
+  GitRunResult,
+  GitWriteAction,
   HighlightResult,
   HoverDefinition,
   HoverLiteral,
   HoverReason,
   HoverResult,
   ImplementationsResult,
-  IgnoreInfo,
-  IndexReport,
   IndexStatus,
   IntegrationManifest,
   Location,
@@ -90,14 +94,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   manifest: () => request<IntegrationManifest>('/integration/manifest'),
 
-  /** P17：服务自述里的隐私段；后端未提供时为 null（面板回落内置文案）。 */
-  privacy: () => request<IntegrationManifest>('/integration/manifest').then((m) => m.privacy ?? null),
+  /** 设置里的自定义忽略规则（存后端 data 目录，对所有项目生效）。 */
+  customIgnore: () => request<{ text: string }>('/settings/ignore'),
 
-  /** P9：索引报告（哪些文件没进索引、为什么）。旧后端 404，调用方自行容错。 */
-  indexReport: (id: string) => request<IndexReport>(`/projects/${id}/index-report`),
-
-  /** P8：生效的忽略规则与统计。旧后端 404，调用方自行容错。 */
-  ignoreInfo: (id: string) => request<IgnoreInfo>(`/projects/${id}/ignore`),
+  /** 保存自定义忽略规则；保存后需重建索引才生效。 */
+  saveCustomIgnore: (text: string) =>
+    request<{ ok: true; text: string }>('/settings/ignore', { method: 'POST', body: JSON.stringify({ text }) }),
 
   listProjects: () => request<{ projects: ProjectInfo[] }>('/projects').then((r) => r.projects),
 
@@ -128,11 +130,46 @@ export const api = {
   /** 变更（2026-10-03）：以 git 为准的工作区改动清单。 */
   gitChanges: (id: string) => request<GitChangesResult>(`/projects/${id}/git-changes`),
 
+  /** 变更栏的写操作（2026-10-03）：add all / commit / pull / push 四个；push 要 confirm=1。 */
+  gitWrite: (id: string, action: GitWriteAction, message?: string) =>
+    request<GitRunResult>(`/projects/${id}/git-write${action === 'push' ? '?confirm=1' : ''}`, {
+      method: 'POST',
+      body: JSON.stringify({ action, message }),
+    }),
+
   /** 命令管理（2026-10-03）：服务状态与启停（重启 / 停止都要 confirm=1）。 */
   serviceStatus: () => request<ServiceStatus>('/service/status'),
   serviceRestart: () =>
     request<{ ok: boolean; restartedBy: string; note?: string }>('/service/restart?confirm=1', { method: 'POST' }),
   serviceStop: () => request<{ ok: boolean; pid: number; note?: string }>('/service/stop?confirm=1', { method: 'POST' }),
+
+  /**
+   * 项目命令（FR-0005）：一句话让 code agent 读本项目，得出编译 / 启动 / 停止 / 测试命令。
+   * discover 很慢（要等 agent 读完项目），signal 用来「停止等待」。
+   */
+  projectCommands: (id: string) => request<{ plan: CommandPlan | null }>(`/projects/${id}/commands`),
+  discoverCommands: (id: string, prompt: string, signal?: AbortSignal) =>
+    request<{ plan: CommandPlan; sessionId: string }>(`/projects/${id}/commands/discover`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+      ...(signal ? { signal } : {}),
+    }),
+  commandRisk: (id: string, command: string) =>
+    request<{ risk: CommandRisk; reason?: string }>(
+      `/projects/${id}/commands/risk?command=${encodeURIComponent(command)}`,
+    ),
+  /** 跑一条命令（cwd 一律是项目根）；confirm=1 是后端的二次确认要求。 */
+  runCommand: (id: string, input: { command: string; kind?: CommandKind; background?: boolean }) =>
+    request<{ run: CommandRun }>(`/projects/${id}/commands/run?confirm=1`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  stopCommand: (id: string, runId: string) =>
+    request<{ run: CommandRun }>(`/projects/${id}/commands/stop`, {
+      method: 'POST',
+      body: JSON.stringify({ runId }),
+    }),
+  commandRuns: (id: string) => request<{ runs: CommandRun[] }>(`/projects/${id}/commands/runs`),
 
   /** 目录选择器：列本机目录（共享模式下后端会 403）。 */
   fsDirs: (path?: string) =>

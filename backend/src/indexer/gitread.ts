@@ -78,8 +78,8 @@ export async function diffNumstat(root: string, rev = 'HEAD'): Promise<NumstatEn
 
 // ---------------------------------------------------------------- 工作区状态（2026-10-03）
 
-/** 归一化后的改动状态：只保留人能直接理解的六种。 */
-export type WorktreeStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflicted';
+/** 归一化后的改动状态：只保留人能直接理解的五种。 */
+export type WorktreeStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'conflicted';
 
 export interface WorktreeEntry {
   file: string;
@@ -94,9 +94,15 @@ export interface WorktreeChanges {
   entries: WorktreeEntry[];
 }
 
-/** 两个状态字符 → 一种人话状态（顺序即优先级：未跟踪 / 冲突 > 重命名 > 新增 / 删除 > 修改）。 */
+/**
+ * 两个状态字符 → 一种人话状态（顺序即优先级：冲突 > 重命名 > 新增 / 删除 > 修改）。
+ *
+ * 未跟踪（`??`）按**新增**报（2026-10-03 用户要求）：没被 add 过的新文件本来就是「新增」，
+ * 再单列一种「未跟踪」只多一层噪音。被 `.gitignore` 忽略的文件根本不会出现在 status 里
+ * （见 `worktreeChanges`），所以不必再区分「被忽略」与「未跟踪」。
+ */
 function classifyStatus(x: string, y: string): WorktreeStatus {
-  if (x === '?' || y === '?') return 'untracked';
+  if (x === '?' || y === '?') return 'added';
   if (x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) return 'conflicted';
   if (x === 'R' || y === 'R' || x === 'C' || y === 'C') return 'renamed';
   if (x === 'A' || y === 'A') return 'added';
@@ -116,6 +122,9 @@ function unquotePath(raw: string): string {
  *
  * 2026-10-03 用户要求「变更以 git 为基础，不自己记录变更」—— 这份清单就是变更面板的唯一来源：
  * git 说改了才算改了，不再让阅读器自己存快照去比对。非 git 仓库 / 没装 git 一律 isRepo=false。
+ *
+ * 命令里**没有** `--ignored`：被 `.gitignore` 忽略的文件压根不出现在输出里，也就不会进变更清单
+ * （2026-10-03 用户要求「在 ignore 就直接忽略，不显示」）；剩下的未跟踪文件是真正的新增，按 added 报。
  */
 export async function worktreeChanges(root: string): Promise<WorktreeChanges> {
   const statusOut = await git(root, ['status', '--porcelain', '-uall']);

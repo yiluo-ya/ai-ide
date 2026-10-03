@@ -5,7 +5,8 @@ import { serve } from '@hono/node-server';
 import { createApp } from './api/routes';
 import { ProjectRegistry } from './registry';
 import { DATA_DIR, HOST, PORT, CORS_ORIGINS, SHARE_NOTE_LOCAL, SHARE_NOTE_SHARED, shareHintFor } from './config';
-import { installNoWatch, installProjectHint } from './bootstrap';
+import { installNoWatch, installProjectHint, migrateLegacyDataDir } from './bootstrap';
+import { primeUserIgnore } from './indexer/user-ignore';
 import { logError, logInfo } from './log';
 
 export interface ServerOptions {
@@ -31,7 +32,11 @@ export interface ServerHandle {
 export async function createServer(opts: ServerOptions): Promise<ServerHandle> {
   installProjectHint();
   installNoWatch();
+  // 设置里的自定义忽略规则：在建任何项目索引之前装进判定器
+  await primeUserIgnore();
   const dataDir = opts.dataDir ?? DATA_DIR;
+  // 老版本的 <仓库根>/data 一次性搬到新默认位置（~/.ide）；只复制不删。
+  await migrateLegacyDataDir(dataDir);
   const registry = new ProjectRegistry(dataDir);
   await registry.load();
 
@@ -79,7 +84,7 @@ function logSharing(registry: ProjectRegistry, port: number) {
     const url = sample ? hint.url.replace('{projectId}', sample.id) : hint.url;
     logInfo('server.share-hint', { url, note: SHARE_NOTE_SHARED });
   } else {
-    logInfo('server.privacy', { note: SHARE_NOTE_LOCAL });
+    logInfo('server.share-note', { note: SHARE_NOTE_LOCAL });
   }
   if (CORS_ORIGINS.includes('*')) {
     logInfo('server.cors', { origins: '*', hint: '共享前可用 READER_CORS_ORIGIN=a.com,b.com 收紧' });

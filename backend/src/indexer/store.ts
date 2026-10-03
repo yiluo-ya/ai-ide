@@ -34,7 +34,7 @@ import {
   type SnapshotHeader,
 } from './snapshot';
 import { logInfo, logTiming, logWarn } from '../log';
-import { specForFile } from '../languages';
+import { langForFile, specForFile } from '../languages';
 import { DATA_DIR, PARSE_WORKERS, PERSIST_ENABLED } from '../config';
 import type { ModuleHint } from './walker';
 
@@ -60,6 +60,17 @@ export interface EntryInfo {
   dir: boolean;
   size: number;
   mtimeMs: number;
+}
+
+/**
+ * 一次扫描的暂存结果（2026-10-03）：scan 先建后换，见 scan() 注释。
+ * 只写这里，扫完再整体替换到 this.*，避免扫描期间对外露出空树。
+ */
+interface ScanAcc {
+  entries: Map<string, EntryInfo>;
+  dirs: Set<string>;
+  allFiles: Map<string, { size: number; mtimeMs: number; binary: boolean }>;
+  ignored: number;
 }
 
 /** 按扩展名判断「二进制 / 资源文件」（文件树里只展示、不预览）。 */
@@ -150,6 +161,8 @@ export class ProjectIndex {
   private persistTimer: NodeJS.Timeout | null = null;
 
   private running = false;
+  /** 进行中的扫描：并发调用复用同一次，避免重复读盘与互相覆盖（见 scan()）。 */
+  private scanInFlight: Promise<void> | null = null;
   private listeners = new Set<(e: IndexEvent) => void>();
 
   constructor(
@@ -194,22 +207,50 @@ export class ProjectIndex {
    * 同一层的目录与文件并发处理（上限 16），供 P4 指纹校验与 P7 对账共用。
    */
   async scan(): Promise<void> {
+    if (!this.scanInFlight) {
+      this.scanInFlight = this.doScan().finally(() => {
+        this.scanInFlight = null;
+      });
+    }
+    return this.scanInFlight;
+  }
+
+  /**
+   * 扫描本体（2026-10-03 改为「先建后换」）。此前是先把 this.entries/dirs/allFiles 清空、
+   * 再逐层填回，于是每次扫描（首次索引、每 10 分钟的 P7 对账）都会开一个「文件树是空的」
+   * 窗口：用户恰在此刻切换项目，左侧文件面板就一片空白。现在全程只写暂存结构 acc，
+   * 扫完一次性替换，任何时刻对外看到的都是上一份完整结果。
+   */
+  private async doScan(): Promise<void> {
     await this.ignore.reload(this.root);
-    this.entries.clear();
-    this.dirs.clear();
-    this.allFiles.clear();
-    this.ignoredCount = 0;
+    const acc: ScanAcc = { entries: new Map(), dirs: new Set(), allFiles: new Map(), ignored: 0 };
     let level: string[] = [''];
     while (level.length) {
       const next: string[] = [];
-      const results = await mapLimit(level, IO_CONCURRENCY, (dir) => this.readDir(dir));
+      const results = await mapLimit(level, IO_CONCURRENCY, (dir) => this.readDir(dir, acc));
       for (const children of results) next.push(...children);
       level = next;
     }
+    this.entries.clear();
+    for (const [rel, info] of acc.entries) this.entries.set(rel, info);
+    this.dirs.clear();
+    for (const dir of acc.dirs) this.dirs.add(dir);
+    this.allFiles.clear();
+    for (const [rel, info] of acc.allFiles) this.allFiles.set(rel, info);
+    this.ignoredCount = acc.ignored;
   }
 
-  /** 读一层目录：填 entries / dirs，返回需要继续下探的子目录。 */
-  private async readDir(rel: string): Promise<string[]> {
+  /**
+   * 内存里还没有任何扫描结果时先扫一次（冷启动后第一次访问、或项目被释放后回来）。
+   * 已有结果则立即返回 —— 文件树请求不该为了等索引而空白，但更不能给空树。
+   */
+  async ensureScanned(): Promise<void> {
+    if (this.entries.size || this.allFiles.size) return;
+    await this.scan();
+  }
+
+  /** 读一层目录：把结果写进暂存区 acc，返回需要继续下探的子目录。 */
+  private async readDir(rel: string, acc: ScanAcc): Promise<string[]> {
     let dirents;
     try {
       dirents = await fsp.readdir(this.abs(rel), { withFileTypes: true });
@@ -222,19 +263,19 @@ export class ProjectIndex {
       const childRel = rel ? `${rel}/${d.name}` : d.name;
       if (d.isDirectory()) {
         if (this.ignore.ignoresDir(childRel, d.name)) {
-          this.ignoredCount++;
+          acc.ignored++;
           continue;
         }
-        this.entries.set(childRel, { dir: true, size: 0, mtimeMs: 0 });
-        this.dirs.add(childRel);
+        acc.entries.set(childRel, { dir: true, size: 0, mtimeMs: 0 });
+        acc.dirs.add(childRel);
         children.push(childRel);
         continue;
       }
       if (!d.isFile()) continue;
       if (this.ignore.ignoresFile(childRel)) {
         // 被规则忽略的也记进 allFiles（文件树要显示「所有文件」），但不进 entries
-        this.allFiles.set(childRel, { size: 0, mtimeMs: 0, binary: isBinaryName(childRel) });
-        this.ignoredCount++;
+        acc.allFiles.set(childRel, { size: 0, mtimeMs: 0, binary: isBinaryName(childRel) });
+        acc.ignored++;
         continue;
       }
       files.push(childRel);
@@ -248,8 +289,8 @@ export class ProjectIndex {
       }
     });
     for (const st of stats) {
-      if (st) this.entries.set(st.rel, { dir: false, size: st.size, mtimeMs: st.mtimeMs });
-      if (st) this.allFiles.set(st.rel, { size: st.size, mtimeMs: st.mtimeMs, binary: isBinaryName(st.rel) });
+      if (st) acc.entries.set(st.rel, { dir: false, size: st.size, mtimeMs: st.mtimeMs });
+      if (st) acc.allFiles.set(st.rel, { size: st.size, mtimeMs: st.mtimeMs, binary: isBinaryName(st.rel) });
     }
     return children;
   }
@@ -1049,8 +1090,7 @@ export class ProjectIndex {
   langOf(rel: string): LangId {
     const fi = this.files.get(rel);
     if (fi) return fi.lang;
-    const spec = specForFile(rel);
-    return spec ? spec.id : 'plaintext';
+    return langForFile(rel);
   }
 
   /** 取正文（供查看）：源码走索引缓存，其它按需读取并按 LRU 缓存。 */
@@ -1091,7 +1131,7 @@ export class ProjectIndex {
     }
     this.noteEncoding(encoding);
     const spec = specForFile(rel);
-    const lang: LangId = spec ? spec.id : 'plaintext';
+    const lang: LangId = langForFile(rel);
     const fi = plainFileIndex(rel, source, lang, { mtimeMs: stat.mtimeMs, size: stat.size });
     fi.encoding = encoding;
     this.cacheText(fi);
@@ -1142,14 +1182,13 @@ export class ProjectIndex {
       const parent = dirNodes.get(parts.slice(0, -1).join('/'));
       if (!parent) continue;
       const info = this.allFiles.get(rel)!;
-      const spec = specForFile(rel);
       const indexed = this.files.has(rel) || this.textCache.has(rel);
       parent.children?.push({
         name: parts[parts.length - 1],
         path: rel,
         type: 'file',
         size: info.size,
-        lang: spec ? spec.id : 'plaintext',
+        lang: langForFile(rel),
         binary: info.binary,
         indexed,
       });

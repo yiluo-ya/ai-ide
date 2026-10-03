@@ -116,7 +116,7 @@ async function main() {
     await page.goto(`${BASE}/?project=${PROJECT}`, { waitUntil: 'networkidle', timeout: 30_000 });
     // 复制位置用例会用到剪贴板（只在 127.0.0.1 这个安全上下文中生效）
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE });
-    // 干净起步：清掉上一轮遗留的书签 / 位置记忆
+    // 干净起步：清掉上一轮遗留的位置记忆
     await page.evaluate(() => window.localStorage.clear());
     await page.reload({ waitUntil: 'networkidle', timeout: 30_000 });
     // 等文件树就绪（索引 / 地图数据加载完）
@@ -296,21 +296,6 @@ async function main() {
     return `${where} + 围栏 ts`;
   });
 
-  await step('S3b：复制符号摘要（大纲 ⧉ → 名字 + 种类 + 签名 + 位置）', async () => {
-    await openFile('util.ts');
-    await sidebar('outline');
-    const row = page.locator('.outline-row', { hasText: 'helper' }).first();
-    assert((await row.count()) > 0, '大纲里没有 helper');
-    await row.hover();
-    await row.locator('.outline-copy').click();
-    await page.waitForTimeout(500);
-    const flash = await page.locator('.statusbar .flash-text').innerText().catch(() => '');
-    assert(/已复制符号摘要 helper/.test(flash), `状态栏没给符号摘要反馈：${flash}`);
-    const clip = await readClipboard();
-    assert(/^helper \(function\) src\/util\.ts:\d+:\d+/.test(clip.trim()), `符号摘要首行不对：${JSON.stringify(clip.split('\n')[0])}`);
-    return clip.trim().split('\n')[0];
-  });
-
   await step('S1：分享菜单复制带行号的深链', async () => {
     await openFile('util.ts');
     await gotoLine(12);
@@ -324,27 +309,6 @@ async function main() {
     await page.mouse.click(8, 500);
     await page.waitForTimeout(300);
     return clip.slice(0, 90);
-  });
-
-  await step('S10：批注面板可添加、刷新后仍在（只存本机）', async () => {
-    await openFile('util.ts');
-    await sidebar('notes');
-    // 光标停在哪行都行：断言只用界面自己报出来的位置
-    await gotoLine(3);
-    await page.locator('.notes-compose textarea').first().fill('这里要处理越界');
-    await page.locator('.notes-compose button').first().click();
-    await page.waitForTimeout(400);
-    let rows = await page.locator('.notes-row').count();
-    assert(rows >= 1, '批注没有出现在面板里');
-    const text = await page.locator('.notes-row .notes-text').first().innerText();
-    assert(text.includes('这里要处理越界'), `批注正文不对：${text}`);
-
-    // 重载后仍在（localStorage，按项目分片）
-    await page.reload({ waitUntil: 'networkidle' });
-    await sidebar('notes');
-    rows = await page.locator('.notes-row').count();
-    assert(rows >= 1, '刷新后批注丢了');
-    return `${rows} 条批注，刷新后仍在`;
   });
 
   await step('S4c：打印视图页眉与 @media print 规则已就绪', async () => {
@@ -368,8 +332,11 @@ async function main() {
     return '页眉 + @media print 规则就位';
   });
 
-  await step('CMD：命令面板看得到服务状态（不点重启）', async () => {
-    await openPanel(page, 'service');
+  await step('CMD：右侧栏「命令」tab 看得到服务状态（不点重启）', async () => {
+    // 2026-10-03 用户要求：命令面板从侧栏 tab 搬到右侧常驻栏，与「变更」并排（默认变更）。
+    const dockTab = page.locator('.dock-changes .dock-tab', { hasText: '命令' }).first();
+    await dockTab.waitFor({ timeout: 15_000 });
+    await dockTab.click();
     await page.waitForSelector('.service-panel .sv-facts', { timeout: 15_000 });
     const text = await page.locator('.service-panel').innerText();
     assert(/pid\s*\d+/.test(text), `没显示进程 pid：${text.slice(0, 120)}`);

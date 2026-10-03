@@ -9,7 +9,7 @@
  * 纯格式化：无 IO、无 React。碰浏览器 API 的只有文件末尾的下载 / 复制两个小工具。
  */
 import type { HotMetric, SymbolInfo } from '../../shared/types';
-import { fenceLang, formatLineRange, formatLocation } from './share';
+import { fenceLang, formatLocation } from './share';
 import type { SearchHit } from './state';
 
 /**
@@ -26,18 +26,6 @@ export interface HighlightItem {
   tier: 'project' | 'local' | 'external';
   /** 命中区间的原文片段。 */
   text: string;
-}
-
-/** 一条阅读批注（可带一条回复）。 */
-export interface Annotation {
-  /** 缺省取所在文件的 file。 */
-  file?: string;
-  /** 1-based。 */
-  line: number;
-  /** 1-based，可选：报告里位置只到行，列留着做更精确的对照。 */
-  col?: number;
-  text: string;
-  reply?: string;
 }
 
 // ------------------------------------------------------------------ 小工具
@@ -180,7 +168,6 @@ export function fileReportMarkdown(input: {
   content: string;
   symbols: SymbolInfo[];
   highlights?: HighlightItem[];
-  annotations?: Annotation[];
 }): string {
   const file = tidyPath(input.file);
   const lines = splitLines(input.content);
@@ -207,17 +194,6 @@ export function fileReportMarkdown(input: {
     out.push('## 着色（本项目 vs 外部）', '');
     if (tiers.project.length) out.push(`- 本项目符号：${tiers.project.join('、')}`);
     if (tiers.external.length) out.push(`- 外部依赖：${tiers.external.join('、')}`);
-    out.push('');
-  }
-
-  const notes = input.annotations ?? [];
-  if (notes.length > 0) {
-    out.push('## 批注', '');
-    for (const note of notes) {
-      const where = formatLineRange(tidyPath(note.file ?? file), note.line, note.line);
-      const reply = note.reply?.trim() ? `（回复：${note.reply.trim()}）` : '';
-      out.push(`- ${where} — ${note.text.trim()}${reply}`);
-    }
     out.push('');
   }
 

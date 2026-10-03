@@ -1,22 +1,17 @@
-/** Monaco 编辑器封装：model 池 + 只读显示 + 定位 + 语义着色 + 行笔记 + 密度条入口。 */
-import { useEffect, useMemo, useRef, useState } from 'react';
+/** Monaco 编辑器封装：model 池 + 只读显示 + 定位 + 语义着色 + 密度条入口。 */
+import { useEffect, useRef, useState } from 'react';
 import type { RevealRequest } from './state';
 import { api } from './api';
 import { mapApi } from './mapApi';
 import { FileDensityBar } from './FileDensityBar';
 import { SummaryBar } from './SummaryBar';
-import { FileNoteBar, NotePopover, toNoteDecorations } from './NoteLayer';
-import { useNotesStore } from './notesState';
 import { useGuideStore } from './guideState';
-import { anchorOf, resolveNotes } from './notes';
 import { shortAuthor } from './blame';
 import { translate } from './i18n';
 import { loadPrefs, resolvedTheme, usePrefs } from './prefs';
 import { reportCaret } from './bridge';
-import type { AnnotationThread } from './annotations';
 import type { BlameLine } from '../../shared/types';
 import './agent-lines.css';
-import './annotations.css';
 import {
   monaco,
   defineReaderTheme,
@@ -53,43 +48,12 @@ const decorationPool = new Map<monaco.editor.ITextModel, string[]>();
  * 共用一个池会互相清掉。
  */
 const agentLinePool = new Map<monaco.editor.ITextModel, string[]>();
-/** model → S10 批注装饰 id（与着色 / agent 行分开：三者刷新时机各不相同）。 */
-const annotationPool = new Map<monaco.editor.ITextModel, string[]>();
-/**
- * model → 向导笔记的行槽装饰 id（W2 / G4.1）。
- * 单独一个池的理由同上：笔记的刷新时机（本机存储 + 当前文件的锚定结果）
- * 与语义着色（看索引）、agent 行（看宿主上报）、批注都不一样。
- */
-const notePool = new Map<monaco.editor.ITextModel, string[]>();
 /**
  * model → G7.3 blame 行尾作者装饰 id。
  * 单独一个池的理由同上：blame 只由「打开 blame 视图 / 光标移动」驱动，
- * 与着色、agent 行、批注、笔记的刷新时机都不同。
+ * 与着色、agent 行的刷新时机都不同。
  */
 const blamePool = new Map<monaco.editor.ITextModel, string[]>();
-
-/** S10：一条批注 → 整行淡底 + 左侧小点，悬停显示内容与回复。 */
-function toAnnotationDecorations(
-  model: monaco.editor.ITextModel,
-  threads: AnnotationThread[],
-): monaco.editor.IModelDeltaDecoration[] {
-  const max = model.getLineCount();
-  return threads.map((thread) => {
-    const line = Math.max(1, Math.min(thread.line, max));
-    const replies = thread.replies.map((r) => `↳ ${r.text}`).join('\n');
-    return {
-      range: new monaco.Range(line, 1, line, 1),
-      options: {
-        isWholeLine: true,
-        className: thread.resolved ? 'wcr-note-line resolved' : 'wcr-note-line',
-        linesDecorationsClassName: 'wcr-note-gutter',
-        hoverMessage: {
-          value: `**批注**（只存本机）\n\n${thread.text}${replies ? `\n${replies}` : ''}`,
-        },
-      },
-    };
-  });
-}
 
 /** S7b：选区转成回发给宿主的最小形状（文本截断，不把整文件塞进消息）。 */
 function selectionOf(
@@ -142,8 +106,6 @@ function acquireModel(key: string, uri: monaco.Uri, content: string, lang: strin
       if (stale) {
         decorationPool.delete(stale);
         agentLinePool.delete(stale);
-        annotationPool.delete(stale);
-        notePool.delete(stale);
         blamePool.delete(stale);
         stale.dispose();
       }
@@ -193,19 +155,15 @@ interface Props {
   onCopyLocation?: (file: string, line: number, col: number) => void;
   /** S3a：复制选中代码为「带出处的片段」（出处行 + 围栏代码块）。 */
   onCopySnippet?: (file: string, startLine: number, endLine: number, text: string) => void;
-  /** S3b：复制光标处符号的摘要（名字 + 种类 + 签名 + 位置）。 */
-  onCopySymbol?: (file: string, line: number, col: number) => void;
   /** W4 / G5.1：右键「解释这段」（Ctrl/Cmd+Alt+E）—— 结构性解释，不使用模型。 */
   onExplain?: (file: string, line: number, col: number) => void;
   /** W5 / G9.4：右键「看调用图」（流视图浮层）。 */
   onFlow?: (file: string, line: number, col: number) => void;
-  /** S10：本机批注 —— 在编辑器里标出来，悬停看内容（不写回源码）。 */
-  annotations?: AnnotationThread[];
   /** G6.1：摘要条里点导出符号 / 引用文件时打开（缺省则不跳）。 */
   onOpenFile?: (file: string, line?: number, col?: number) => void;
   /**
    * G7.5：历史版本（只读快照）所在的提交。存在时本窗格用 `wcr-history://` 建 model，
-   * 并且不参与真实文件的一切：不拉着色 / agent 行 / 笔记 / 摘要 / 密度条，
+   * 并且不参与真实文件的一切：不拉着色 / agent 行 / 摘要 / 密度条，
    * 也不上报光标与位置 —— 它不是「打开过的文件」（不进最近打开与位置记忆）。
    */
   historyRev?: string;
@@ -226,10 +184,8 @@ export function Editor({
   onPosition,
   onCopyLocation,
   onCopySnippet,
-  onCopySymbol,
   onExplain,
   onFlow,
-  annotations,
   onOpenFile,
   historyRev,
   blame,
@@ -247,8 +203,6 @@ export function Editor({
   onCopyRef.current = onCopyLocation;
   const onCopySnippetRef = useRef(onCopySnippet);
   onCopySnippetRef.current = onCopySnippet;
-  const onCopySymbolRef = useRef(onCopySymbol);
-  onCopySymbolRef.current = onCopySymbol;
   const onExplainRef = useRef(onExplain);
   onExplainRef.current = onExplain;
   const onFlowRef = useRef(onFlow);
@@ -258,14 +212,6 @@ export function Editor({
   const historicalRef = useRef(historical);
   historicalRef.current = historical;
   const positionTimerRef = useRef<number | null>(null);
-  /** W2：正在编辑的行级笔记浮层（行号 + 视口坐标）；null = 不显示。 */
-  const [noteLine, setNoteLine] = useState<number | null>(null);
-  const [noteAnchorPos, setNoteAnchorPos] = useState<{ top: number; left: number } | null>(null);
-  const noteLineRef = useRef<number | null>(null);
-  noteLineRef.current = noteLine;
-  /** W2：本项目全部笔记（本窗格的行槽标记按自己的文件 + 正文算，见 `mineNotes`）。 */
-  const notes = useNotesStore((s) => s.notes);
-  const syncNoteFile = useNotesStore((s) => s.syncFile);
   /** 密度条距编辑器右缘的像素：minimap + 纵向滚动条宽度。 */
   const [densityInset, setDensityInset] = useState(0);
   /** P24：主题与字号来自 wcr:prefs（单一真相）；Monaco 主题全局生效，两个窗格一起切。 */
@@ -276,22 +222,33 @@ export function Editor({
   }, [prefs.theme]);
 
   useEffect(() => {
-    editorRef.current?.updateOptions({ fontSize: prefs.fontSize });
-  }, [prefs.fontSize]);
+    editorRef.current?.updateOptions({
+      fontSize: prefs.fontSize,
+      wordWrap: prefs.wrap ? 'on' : 'off',
+      tabSize: prefs.tabSize,
+      minimap: { enabled: prefs.minimap, renderCharacters: false },
+      renderWhitespace: prefs.whitespace ? 'all' : 'none',
+      guides: { indentation: prefs.whitespace },
+    });
+  }, [prefs.fontSize, prefs.wrap, prefs.tabSize, prefs.minimap, prefs.whitespace]);
 
   useEffect(() => {
     if (!hostRef.current) return;
+    const initial = loadPrefs();
     const editor = monaco.editor.create(hostRef.current, {
       readOnly: true,
       domReadOnly: true,
       automaticLayout: true,
-      theme: themeNameFor(resolvedTheme(loadPrefs().theme)),
-      fontSize: loadPrefs().fontSize,
-      minimap: { enabled: true, renderCharacters: false },
+      theme: themeNameFor(resolvedTheme(initial.theme)),
+      fontSize: initial.fontSize,
+      minimap: { enabled: initial.minimap, renderCharacters: false },
       scrollBeyondLastLine: false,
       renderLineHighlight: 'all',
       smoothScrolling: true,
-      tabSize: 4,
+      wordWrap: initial.wrap ? 'on' : 'off',
+      tabSize: initial.tabSize,
+      renderWhitespace: initial.whitespace ? 'all' : 'none',
+      guides: { indentation: initial.whitespace },
       contextmenu: true,
       fixedOverflowWidgets: true,
       occurrencesHighlight: 'off',
@@ -325,21 +282,6 @@ export function Editor({
       }),
       editor.onDidScrollChange(() => {
         reportPosition();
-        // 笔记浮层是按视口坐标摆的：滚动后它就不再贴着那一行了，直接关掉（不跟随）
-        if (noteLineRef.current != null) closeNotePopover();
-      }),
-      // W2 / G4.1：点行槽上的笔记图标 → 打开编辑浮层（只对行槽装饰生效）
-      editor.onMouseDown((e) => {
-        if (e.target.type !== monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS) return;
-        const line = e.target.position?.lineNumber ?? e.target.range?.startLineNumber;
-        if (!line) return;
-        // 行滚出视口就先滚进来，再量坐标；量不到就不开，不猜位置
-        editor.revealLineInCenter(line, monaco.editor.ScrollType.Immediate);
-        const pos = editor.getScrolledVisiblePosition({ lineNumber: line, column: 1 });
-        const rect = hostRef.current?.getBoundingClientRect();
-        if (!pos || !rect) return;
-        setNoteLine(line);
-        setNoteAnchorPos({ top: rect.top + pos.top, left: rect.left + pos.left + 24 });
       }),
       editor.onDidChangeCursorSelection((e) => {
         if (historicalRef.current) return;
@@ -381,7 +323,7 @@ export function Editor({
         onCopySnippetRef.current?.(current, sel.startLineNumber, sel.endLineNumber, text);
       },
     });
-    // W2 / G3.5：把当前位置加入待读（与向导面板 / 文件树共用同一份 wcr:queue:<id>）
+    // G3.5：把当前位置加入待读（与文件树共用同一份 wcr:queue:<id>）
     editor.addAction({
       id: 'wcr.addToQueue',
       label: '把当前位置加入待读',
@@ -421,26 +363,8 @@ export function Editor({
         onFlowRef.current?.(current, pos.lineNumber, pos.column);
       },
     });
-    // S3b：不贴整段，只贴「谁、在哪、签名是什么」
-    editor.addAction({
-      id: 'wcr.copySymbol',
-      label: '复制符号摘要（签名 + 位置）',
-      contextMenuGroupId: '9_cutcopypaste',
-      contextMenuOrder: 6,
-      run: (ed) => {
-        const current = fileRef.current;
-        const pos = ed.getPosition();
-        if (!current || !pos) return;
-        onCopySymbolRef.current?.(current, pos.lineNumber, pos.column);
-      },
-    });
-    const closeNotePopover = () => {
-      setNoteLine(null);
-      setNoteAnchorPos(null);
-    };
     return () => {
       for (const sub of subs) sub.dispose();
-      closeNotePopover();
       if (positionTimerRef.current != null) window.clearTimeout(positionTimerRef.current);
       editor.dispose();
       editorRef.current = null;
@@ -448,8 +372,6 @@ export function Editor({
       // N19：model 由模块级池共享，不随单个 editor 销毁；只清本实例的引用
       decorationPool.clear();
       agentLinePool.clear();
-      annotationPool.clear();
-      notePool.clear();
       blamePool.clear();
     };
   }, []);
@@ -532,46 +454,6 @@ export function Editor({
     };
   }, [file, content, projectId, highlightsToken]);
 
-  // S10：本机批注 —— 在行上留一个可悬停的标记（只加装饰，不动源码）
-  useEffect(() => {
-    const editor = editorRef.current;
-    const model = editor?.getModel();
-    if (!editor || !model || !file || historical) return;
-    const mine = (annotations ?? []).filter((a) => a.file === file);
-    const previous = annotationPool.get(model) ?? [];
-    annotationPool.set(model, model.deltaDecorations(previous, toAnnotationDecorations(model, mine)));
-  }, [file, annotations, content, historical]);
-
-  // W2：把当前文件正文同步给笔记存储 —— anchor 恢复（三层兜底）只认正文。
-  // 分屏时两个窗格都会同步，store 里那份（供侧栏「待归位」用）指向最后同步的文件，
-  // 这是有意的：面板只有一个，锚点校验以当前阅读的那个文件为准。
-  useEffect(() => {
-    // G7.5：历史版本不是当前文件，不参与笔记锚定
-    if (historical) return;
-    syncNoteFile(file, content);
-  }, [file, content, syncNoteFile, historical]);
-
-  /**
-   * 本窗格的行级笔记（含 anchor 恢复后的行号）。
-   * 不用 store 里那份：分屏时两个窗格各看一个文件，各算各的才都对。
-   */
-  const mineNotes = useMemo(() => {
-    if (!file || historical) return [];
-    return resolveNotes(
-      notes.filter((n) => n.file === file),
-      content,
-    ).located.filter((n) => n.level === 'line');
-  }, [notes, file, content]);
-
-  // W2 / G4.1：行级笔记的行槽图标（第四个装饰池，单独刷新，不与上面三个互清）
-  useEffect(() => {
-    const editor = editorRef.current;
-    const model = editor?.getModel();
-    if (!editor || !model || !file || historical) return;
-    const previous = notePool.get(model) ?? [];
-    notePool.set(model, model.deltaDecorations(previous, toNoteDecorations(model, mineNotes)));
-  }, [file, mineNotes, historical]);
-
   // G7.3：整文件 blame 视图 —— 每行行尾一个作者短名（数据由 App 按文件缓存后传入：
   // 光标移动不重新请求，只在换文件 / 显式重取时拉一次）
   useEffect(() => {
@@ -603,12 +485,6 @@ export function Editor({
     editor.focus();
   }, [reveal, file]);
 
-  /** 关闭笔记浮层（点外部 / Esc / 滚动 / 保存后都会调）。 */
-  const closeNote = () => {
-    setNoteLine(null);
-    setNoteAnchorPos(null);
-  };
-
   /** 密度条点击：只在本文件内滚动定位，不压历史（不是一次「跳转」而是「移到」）。 */
   const jumpToLine = (line: number) => {
     const editor = editorRef.current;
@@ -623,24 +499,11 @@ export function Editor({
   return (
     <>
       {/* G6.1：顶部可折叠的文件摘要条（拿不到摘要时整条不渲染）；G7.4：展开区列提交历史。
-          G7.5：历史版本窗格不显示摘要 / 笔记 / 密度条 —— 它们都属于「真实文件」。 */}
+          G7.5：历史版本窗格不显示摘要 / 密度条 —— 它们都属于「真实文件」。 */}
       {!historical && (
         <SummaryBar projectId={projectId} file={file} onOpenFile={onOpenFile} onOpenHistory={onOpenHistory} />
       )}
-      {/* G4.2：文件级笔记（一个文件的整体印象，一行） */}
-      {!historical && <FileNoteBar projectId={projectId} file={file} />}
       <div className="editor-host" ref={hostRef} />
-      {/* W2 / G4.1：行级笔记的编辑浮层（点行槽图标打开） */}
-      {!historical && file && noteLine != null && noteAnchorPos && (
-        <NotePopover
-          file={file}
-          line={noteLine}
-          anchor={anchorOf(content, noteLine)}
-          notes={mineNotes.filter((n) => n.resolvedLine === noteLine)}
-          position={noteAnchorPos}
-          onClose={closeNote}
-        />
-      )}
       {!historical && file && projectId && (
         <FileDensityBar
           projectId={projectId}

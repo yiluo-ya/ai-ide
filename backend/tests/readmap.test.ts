@@ -2,7 +2,8 @@
  * 04 W3：阅读快照的数据源（G8.2）—— `GET /api/projects/:id/readmap`。
  *
  * 两个必须成立的点：
- * 1) 只列索引内的源码文件（README / package.json 这类非源码不进快照，否则快照会虚胖）；
+ * 1) 只列已进符号索引的源码文件（2026-10-03 起 README.md / package.json 也算源码，
+ *    notes.txt 这类无解析器的不算，否则快照会虚胖）；
  * 2) 用它写出的快照拿回 `compareSnapshot` 必须报「没有变化」——
  *    这是 readmap 与变更对比共用同一行数口径的自证，口径一偏就会立刻误报 M。
  */
@@ -18,7 +19,8 @@ import type { ReadmapResult } from '../../shared/types';
 
 const FILES = {
   'package.json': `${JSON.stringify({ name: 'readmap-demo' }, null, 2)}\n`,
-  'README.md': '# readmap demo\n\n非源码文件不该进阅读快照。\n',
+  'README.md': '# readmap demo\n\n文档也是可读内容，进快照。\n',
+  'notes.txt': '没有解析器的文件不该进阅读快照。\n',
   'src/a.ts': 'export const a = 1;\n',
   'src/b.py': 'b = 2\n',
 };
@@ -60,8 +62,12 @@ test('readmap: 只列索引内源码文件，且字段齐全', async () => {
     assert.ok(Number.isFinite(body.at) && body.at > 0, 'at 是取数时间');
 
     const names = body.files.map((f) => f.file);
-    assert.deepEqual(names, ['src/a.ts', 'src/b.py'], '只有源码文件，且按路径排序');
-    assert.ok(!names.includes('package.json') && !names.includes('README.md'), '非源码文件不进快照');
+    assert.deepEqual(
+      names,
+      ['package.json', 'README.md', 'src/a.ts', 'src/b.py'],
+      '已索引的源码文件都进快照，按路径排序',
+    );
+    assert.ok(!names.includes('notes.txt'), '没有解析器的文件不进快照');
 
     const a = body.files.find((f) => f.file === 'src/a.ts')!;
     assert.ok(a.mtimeMs > 0 && a.size > 0);

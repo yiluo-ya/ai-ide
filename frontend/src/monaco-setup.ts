@@ -61,6 +61,29 @@ const MONACO_LANG: Record<string, string> = {
   jsx: 'javascript',
   go: 'go',
   java: 'java',
+  shell: 'shell',
+  json: 'json',
+  yaml: 'yaml',
+  toml: 'ini', // Monaco 没有 TOML 语法，用最接近的 ini
+  ini: 'ini',
+  dockerfile: 'dockerfile',
+  markdown: 'markdown',
+  css: 'css',
+  scss: 'scss',
+  less: 'less',
+  html: 'html',
+  sql: 'sql',
+  // 包依赖 / 构建清单（只高亮预览，见后端 languages/manifests.ts）：Monaco 没有的语法借最接近的
+  xml: 'xml',
+  gomod: 'go',
+  groovy: 'java',
+  kotlin: 'kotlin',
+  scala: 'scala',
+  ruby: 'ruby',
+  elixir: 'elixir',
+  swift: 'swift',
+  pip: 'ini',
+  makefile: 'shell',
 };
 
 export function monacoLangFor(lang: string | undefined): string {
@@ -68,8 +91,28 @@ export function monacoLangFor(lang: string | undefined): string {
   return MONACO_LANG[lang] ?? 'plaintext';
 }
 
-/** 有 Provider 的语言（与后端 LanguageSpec 对应）。 */
-export const PROVIDER_LANGUAGES = ['python', 'typescript', 'javascript', 'go', 'java'];
+/** 有引用能力的语言：hover / 跳到定义 / 查找引用（与后端 LanguageSpec 的引用索引对应）。 */
+export const PROVIDER_LANGUAGES = ['python', 'typescript', 'javascript', 'go', 'java', 'shell'];
+
+/**
+ * 有符号索引的语言：文件大纲（Ctrl+Shift+O）。比上面多出只有键 / 标题 / 名字的文件类型。
+ * 这里是 Monaco 语言 id：toml 与 ini 共用 `ini`。
+ */
+export const SYMBOL_LANGUAGES = [
+  ...new Set([
+    ...PROVIDER_LANGUAGES,
+    'json',
+    'yaml',
+    'ini',
+    'dockerfile',
+    'markdown',
+    'css',
+    'scss',
+    'less',
+    'html',
+    'sql',
+  ]),
+];
 
 export const MODEL_SCHEME = 'wcr';
 
@@ -651,7 +694,9 @@ export function registerCodeProviders() {
         return res.locations.map((loc) => toLocation(loc.file, loc.range));
       },
     });
+  }
 
+  for (const lang of SYMBOL_LANGUAGES) {
     monaco.languages.registerDocumentSymbolProvider(lang, {
       async provideDocumentSymbols(model) {
         if (!ctx.projectId) return null;
@@ -693,6 +738,8 @@ export function registerCodeProviders() {
   monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions(diagnostics);
   monaco.languages.typescript.typescriptDefaults.setEagerModelSync(false);
   monaco.languages.typescript.javascriptDefaults.setEagerModelSync(false);
+  // JSON 同样不诊断：只读阅读器里带注释的 .jsonc / 配置不该满屏报错
+  monaco.languages.json.jsonDefaults.setDiagnosticsOptions({ validate: false, allowComments: true });
 
   // §6：悬停不引入 LSP / TS 语言服务猜类型，只陈述索引里确定的事实。
   // 关掉内置 TS/JS hover，避免同一符号同时出现两份签名（内置的 + 本产品的卡片）。

@@ -41,10 +41,13 @@
   font-size: 12px;
 }
 
+/* 列数跟着**主区实际宽度**走（左右栏开合会变），不用看视口宽的媒体查询：
+   840px 主区 → 两列，窄到一列时自动落回单列（2026-10-03 布局优化）。 */
 .ov-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(280px, 1fr));
-  gap: 12px;
+  /* min(330px, 100%)：主区窄到 330 以下时（左右栏都开 + 窄窗）也不会横向溢出 */
+  grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr));
+  gap: 12px 14px;
   align-items: start;
 }
 
@@ -53,20 +56,97 @@
 }
 
 .ov-card {
+  --ov-tone: var(--border);
   background: var(--bg-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px 12px 12px;
+  border-radius: 8px;
+  padding: 12px 14px 14px;
   min-width: 0;
 }
+
+/* 每张卡一个色调小条，扫一眼就知道是「身份 / 起点 / 结构」哪一类。 */
+.ov-card.tone-guide { --ov-tone: var(--accent-2); }
+.ov-card.tone-changes { --ov-tone: var(--agent); }
+.ov-card.tone-identity { --ov-tone: var(--tree-dir); }
+.ov-card.tone-entry { --ov-tone: var(--ok); }
+.ov-card.tone-structure { --ov-tone: var(--warn); }
 
 .ov-card h3 {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-size: 13px;
+  font-weight: 600;
   color: var(--fg);
+}
+
+.ov-card h3::before {
+  content: '';
+  flex: none;
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--ov-tone);
+}
+
+.ov-h3-note {
+  color: var(--fg-dim);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------ 首屏指标带 */
+
+.ov-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ov-stat-block {
+  /* 均分整行宽度：6 个方块铺满，右边不留空档；max-width 防换行后最后一块被拉成整行 */
+  flex: 1 1 104px;
+  max-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 12px 9px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.ov-stat-block b {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--fg);
+}
+
+.ov-stat-block span {
+  font-size: 11px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-stat-block.is-clickable {
+  cursor: pointer;
+}
+
+.ov-stat-block.is-clickable:hover {
+  border-color: var(--fg-dim);
+  background: var(--bg-3);
+}
+
+.ov-stat-block.warn b {
+  color: var(--warn);
 }
 
 .ov-h3-actions {
@@ -117,16 +197,17 @@
 }
 
 .ov-lang-name {
-  width: 78px;
+  width: 72px;
   color: var(--fg-dim);
   flex: none;
 }
 
 .ov-lang-bar {
   flex: 1;
-  height: 8px;
+  min-width: 40px;
+  height: 10px;
   background: var(--bg);
-  border-radius: 4px;
+  border-radius: 5px;
   overflow: hidden;
 }
 
@@ -143,9 +224,22 @@
 .ov-lang-seg[data-lang='jsx'] { background: #f1e05a; }
 .ov-lang-seg[data-lang='go'] { background: #00add8; }
 .ov-lang-seg[data-lang='java'] { background: #b07219; }
+/* 常用文件（2026-10-03），与 styles.css 的 .lang-* 同一套颜色 */
+.ov-lang-seg[data-lang='shell'] { background: #89e051; }
+.ov-lang-seg[data-lang='json'] { background: #8b949e; }
+.ov-lang-seg[data-lang='yaml'] { background: #cb171e; }
+.ov-lang-seg[data-lang='toml'] { background: #9c4221; }
+.ov-lang-seg[data-lang='ini'] { background: #6cb6ff; }
+.ov-lang-seg[data-lang='dockerfile'] { background: #4d7c8a; }
+.ov-lang-seg[data-lang='markdown'] { background: #519aba; }
+.ov-lang-seg[data-lang='css'] { background: #563d7c; }
+.ov-lang-seg[data-lang='scss'] { background: #c6538c; }
+.ov-lang-seg[data-lang='less'] { background: #2e5c99; }
+.ov-lang-seg[data-lang='html'] { background: #e34c26; }
+.ov-lang-seg[data-lang='sql'] { background: #e38c00; }
 
 .ov-lang-num {
-  width: 132px;
+  font-size: 11px;
   text-align: right;
   color: var(--fg-dim);
   flex: none;
@@ -201,8 +295,22 @@
   text-decoration: underline;
 }
 
+.ov-entry {
+  flex-wrap: wrap;
+}
+
 .ov-entry .ov-row-main {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 16ch;
+}
+
+/* 推荐理由：宽度够就同行（宽卡片），挤不下（半宽 / 窄窗）才换行另起一行，
+   换行后缩进 26px 与文件名对齐。 */
+.ov-entry-why {
+  flex: 1 1 auto;
+  min-width: 20ch;
+  padding-left: 26px;
+  font-size: 11px;
 }
 
 .ov-file {
@@ -289,8 +397,7 @@
   color: var(--fg);
 }
 
-.ov-cycle,
-.ov-batch {
+.ov-cycle {
   margin: 6px 0;
 }
 
@@ -354,10 +461,6 @@
   font-size: 12px;
   white-space: pre-wrap;
   color: var(--fg-dim);
-}
-
-.ov-recent {
-  margin-top: 6px;
 }
 
 /* -------------------------------------------------- 可点开的数字与口径 */
@@ -580,10 +683,4 @@
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-}
-
-@media (max-width: 900px) {
-  .ov-grid {
-    grid-template-columns: 1fr;
-  }
 }

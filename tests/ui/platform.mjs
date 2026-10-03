@@ -8,7 +8,9 @@
  * 4. P24：设置里切「亮色」→ 真的换主题（data-theme + 背景色）；
  * 5. P24：字号滑到 16 → 落 wcr:prefs 且 --ui-font-size 即时生效；
  * 6. P25：语言切 English → documentElement.lang 与界面文案都变；
- * 7. 全程无 console error。
+ * 7. LAY：左栏四个常驻 tab（文件 / 大纲 / 搜索 / code会话）、右栏三个（变更 / 命令 / 总览）；
+ * 8. AP：顶栏「添加项目」→ 文件夹图标 → 弹窗选目录（Shadow DOM 隔离 + 手敲路径跳转 + 确认真实路径）；
+ * 9. 全程无 console error。
  *
  * 跑法：npm run build && npm run test:ui（run.mjs 在 navigator / guide 之后跑本脚本）。
  * 说明：React 受控组件（range / select）必须走原生 value setter 才能触发 onChange，
@@ -103,40 +105,36 @@ async function main() {
   await page.goto(`${BASE}/?project=${PROJECT}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.waitForTimeout(1500);
 
-  await step('P17 顶栏常驻隐私承诺', async () => {
-    const badge = page.locator('.privacy-badge');
-    await badge.waitFor({ state: 'visible', timeout: 10_000 });
-    const text = (await badge.innerText()).trim();
-    assert(text.includes('代码不出本机'), `角标文案不符：${text}`);
-    return text;
+  await step('顶栏「模型」与设置并列，点开是模型配置', async () => {
+    const clicked = await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('header button')].find((b) => b.innerText.trim() === '模型');
+      if (!btn) return false;
+      btn.click();
+      return true;
+    });
+    assert(clicked, '顶栏找不到「模型」按钮');
+    await page.waitForTimeout(500);
+    const title = await page.evaluate(() => document.querySelector('.wcr-dialog-title')?.textContent ?? '');
+    assert(title.includes('模型'), `浮层标题不符：${title}`);
+    const body = await page.evaluate(() => document.querySelector('.wcr-dialog-body')?.innerText ?? '');
+    assert(/provider|Base URL|模型/.test(body), `模型面板内容可疑：${body.slice(0, 80)}`);
+    await page.evaluate(() => document.querySelector('.wcr-dialog-head button')?.click());
+    await page.waitForTimeout(300);
+    return `标题「${title}」`;
   });
 
-  await step('P17 隐私面板是可追证的（读/写/传/谁在用 + 可自证）', async () => {
-    await page.evaluate(() => document.querySelector('.privacy-badge')?.click());
-    await page.waitForTimeout(400);
-    const text = await page.locator('body').innerText();
-    for (const key of ['隐私与数据', '读什么', '写什么', '传什么', '谁在用', '可自证']) {
-      assert(text.includes(key), `面板缺「${key}」`);
+  await step('设置面板：外观 / 编辑器 / 界面 / 索引 / 关于 都在', async () => {
+    await page.evaluate(() => {
+      [...document.querySelectorAll('header button')].find((b) => b.innerText.trim() === '设置')?.click();
+    });
+    await page.waitForTimeout(600);
+    const text = await page.evaluate(() => document.querySelector('.wcr-dialog-body')?.innerText ?? '');
+    for (const key of ['外观', '编辑器', '自动换行', '缩进宽度', '界面', '动效减弱', '索引', '自定义忽略规则', '关于']) {
+      assert(text.includes(key), `设置缺「${key}」`);
     }
     await page.evaluate(() => document.querySelector('.wcr-dialog-head button')?.click());
-    await page.waitForTimeout(400);
-    const open = await page.evaluate(() => !!document.querySelector('.wcr-dialog-backdrop'));
-    assert(!open, '面板没能关闭');
-    return '六个小节齐全，关闭正常';
-  });
-
-  await step('P9 索引报告入口可用', async () => {
-    await page.evaluate(() => {
-      [...document.querySelectorAll('header button')].find((b) => b.innerText.trim() === '索引报告')?.click();
-    });
-    await page.waitForTimeout(800);
-    const title = await page.evaluate(() => document.querySelector('.wcr-dialog-title')?.textContent ?? null);
-    assert(title !== null, '索引报告面板没打开');
-    const text = await page.locator('.wcr-dialog-body').innerText();
-    assert(/索引|文件/.test(text), `报告内容可疑：${text.slice(0, 80)}`);
-    await page.evaluate(() => document.querySelector('.wcr-dialog-head button')?.click());
-    await page.waitForTimeout(400);
-    return `面板标题「${title}」`;
+    await page.waitForTimeout(300);
+    return '五个分组齐全';
   });
 
   await step('P24 设置：切亮色真的换主题', async () => {
@@ -189,6 +187,63 @@ async function main() {
     assert(lang === 'en', `lang=${lang}`);
     assert(text.includes('Settings') || text.includes('Read-only'), '文案没切英文');
     return `lang=${lang}`;
+  });
+
+  // 设置弹窗从 P24 起一直开着：先关掉（它的遮罩会拦住顶栏按钮的点击）
+  await page.evaluate(() => document.querySelector('.wcr-dialog-head button')?.click());
+  await page.waitForTimeout(300);
+
+  await step('LAY：左栏四个常驻 tab、右栏「总览」与变更 / 命令并排', async () => {
+    // 2026-10-03 用户要求：文件 / 大纲 / 搜索 / code会话 在左栏并排；总览从左栏搬去右栏。
+    // 把布局本身钉住 —— 以后再动 tab 集合，先撞到这条。
+    const left = (await page.locator('.sidebar .panel-tabs > button').allInnerTexts()).map((s) => s.trim());
+    assert(left.join(',') === '文件,大纲,搜索,code会话', `左栏 tab 不对：${left.join(',')}`);
+
+    // 右栏可能被收着（收着时只剩一个 ◂ 按钮）：先展开，否则看不到 tab
+    if (await page.locator('.dock-changes.collapsed').count()) {
+      await page.locator('.dock-changes .dock-toggle').click();
+    }
+    const dock = (await page.locator('.dock-changes .dock-tab').allInnerTexts()).map((s) => s.trim());
+    assert(dock.join(',') === '变更,命令,总览', `右栏 tab 不对：${dock.join(',')}`);
+
+    // 点「总览」要真出面板（不是只换高亮）；看完点回「变更」，别把后续用例留在总览上
+    await page.locator('.dock-changes .dock-tab', { hasText: '总览' }).first().click();
+    await page.waitForSelector('.dock-changes .ov-panel, .dock-changes .panel-empty', { timeout: 8000 });
+    await page.locator('.dock-changes .dock-tab', { hasText: '变更' }).first().click();
+    return `左栏 ${left.join(' / ')}；右栏 ${dock.join(' / ')}`;
+  });
+
+  await step('AP：「添加项目」= 顶栏图标 → 弹窗选目录（Shadow DOM 隔离 + 手敲路径跳转）', async () => {
+    // 前一条用例把语言切成了英文，两种文案都认
+    await page.locator('header button', { hasText: /添加项目|Add project/ }).first().click();
+    const icon = page.locator('.open-folder .icon-btn');
+    await icon.waitFor({ state: 'visible', timeout: 8000 });
+    await icon.click();
+
+    const dialog = page.locator('.fb-dialog');
+    await dialog.waitFor({ state: 'visible', timeout: 8000 });
+    // 弹窗挂在 Shadow DOM 里（隔离第三方组件 CSS）：宿主节点在，且弹窗本体真渲染出来了
+    assert((await page.locator('.fb-host').count()) === 1, '没有 Shadow 宿主节点');
+    assert((await page.locator('.fb-dialog .file-item-container').count()) > 0, '起点列表里没有可点的目录');
+
+    // 手敲真实路径 → 跳转 → 确认区必须给**真实**本机路径（虚拟路径不该漏到界面上）
+    const info = await fetch(`${BASE}/api/projects`).then((r) => r.json());
+    const list = Array.isArray(info) ? info : (info.projects ?? []);
+    const root = list.find((p) => p.id === PROJECT)?.root;
+    assert(root, '拿不到夹具项目的根目录');
+    await page.locator('.fb-input').fill(root.split(path.sep).join('/'));
+    await page.locator('.fb-input').press('Enter');
+    await page.locator('.fb-picked').filter({ hasText: path.basename(root) }).waitFor({ timeout: 8000 });
+    const picked = await page.locator('.fb-picked').innerText();
+    const norm = (s) => s.replace(/\\/g, '/').toLowerCase();
+    assert(norm(picked).includes(norm(root)), `确认区不是真实路径：${picked}`);
+
+    // 确认：弹窗关掉，项目选择不被换掉（同一目录永远同一个 id，不会多出一条）
+    const before = await page.locator('.project-select').inputValue();
+    await page.locator('.fb-btn.primary').click();
+    await dialog.waitFor({ state: 'detached', timeout: 8000 });
+    assert((await page.locator('.project-select').inputValue()) === before, '项目选择被换掉了');
+    return `确认区「${picked}」`;
   });
 
   await step('全程无 console error', async () => {

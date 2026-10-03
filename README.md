@@ -1,13 +1,19 @@
 # 网页版代码阅读器（web-code-reader）
 
-浏览器里的只读代码阅读器：后端用 tree-sitter 建索引，前端用 Monaco 只做渲染与查询，
+浏览器里的代码阅读器：后端用 tree-sitter 建索引，前端用 Monaco 只做渲染与查询，
 F12 / Shift+F12 / Ctrl+Shift+O 等 VS Code 习惯的导航全部可用。
 
-定位见 `FR/FR-0002-fr.md`：**只读**，不做编译、运行、调试、重构与类型检查。
+定位见 `FR/FR-0002-fr.md`：面向阅读，不做编译、运行、调试、重构与类型检查。
+
+> **2026-10-03 新增：可选的 code-agent。** 阅读器本身不改动磁盘；新增的 **Code Agent 模式**
+> （工具条「Agent 对话」）会按你的要求读代码 / 改代码 / 生成代码 —— 这是用户显式要的能力。
+> 后端可选：**内置 agent**（用你自己配的 provider，顶栏「模型」里填）或 **本机 pi**
+> （`pi --mode rpc`，用 pi 自己的凭证与工具集）。不进这个模式就不会有任何模型请求。
+> 下面「能力」与「已知限制」都按这个口径描述。
 
 ## 能力
 
-- 以「本机目录」为单位打开项目（只读，不改动磁盘任何文件）
+- 以「本机目录」为单位打开项目（不改动磁盘任何文件）
 - 文件树 + 文件过滤、Monaco 语法高亮、面包屑、大纲
 - 跳转到定义（F12）、查找引用（Shift+F12）、文件大纲（Ctrl+Shift+O）
 - 文件搜索（Ctrl+P）、工作区符号搜索（Ctrl+T）、全项目文本搜索（Ctrl+Shift+F，支持正则 / 大小写 / 整词 / 文件名 glob）
@@ -20,6 +26,16 @@ F12 / Shift+F12 / Ctrl+Shift+O 等 VS Code 习惯的导航全部可用。
 - **时间与来源**：只读 git（最近提交 / 未提交改动）+ 文件 mtime 热力，叠加在文件树上；
   宿主可上报「本轮 agent 产出的文件」（`POST /origin`），树上一眼区分 agent 产出与项目原有
 - 语言：Python、TypeScript/TSX、JavaScript/JSX、Go、Java、Rust（每种语言模块独立，加语言 = 加一个 spec 文件）
+- **常用文件**（2026-10-03）：Shell（`.sh/.bash/.zsh`）、JSON、YAML、TOML、INI / `.env`、Dockerfile、
+  Markdown、CSS / SCSS / Less、HTML、SQL —— 同样有语法高亮、文件大纲（Ctrl+Shift+O）与符号搜索；
+  Shell 还能跳转（函数 / 变量、`source` 依赖）。这些格式没有 tree-sitter 语法包的走
+  `LanguageSpec.lineSymbols` 行式扫描（Dockerfile / ini·env / SQL），其余走 AST
+- **包依赖 / 构建清单**（2026-10-03 追加，**只做高亮与预览**，不进符号索引）：`go.mod`/`go.sum`、
+  `requirements*.txt`/`constraints*.txt`、`Pipfile`(`.lock`)、`poetry.lock`/`uv.lock`、`pom.xml`/`*.csproj`/`*.props`/`NuGet.config`、
+  `build.gradle`/`*.gradle.kts`/`*.sbt`、`Gemfile`/`*.gemspec`/`*.podspec`、`mix.exs`/`mix.lock`、`Package.swift`、
+  `Cargo.lock`/`composer.lock`/`pubspec.lock`、`.npmrc`/`.yarnrc`、`Makefile` —— 语言识别在
+  `languages/manifests.ts`（与「可索引的语言」的 `specForFile` 分开），文件树可见、点开即高亮预览，
+  不产生符号、不进语言分布与阅读路线
 - **导航（03 Navigator）**：
   - 按 F12 **永远不会「什么都没发生」**：跳不动时提示条给出人话解释 + 下一步动作
     （外部依赖可「跳到 import 行」；解析不了可「搜 xxx」；索引中只解释）
@@ -28,19 +44,29 @@ F12 / Shift+F12 / Ctrl+Shift+O 等 VS Code 习惯的导航全部可用。
   - **类型层级 / 跳到实现**：显式 `extends` / `implements` / Go 嵌入字段双向可见；接口方法 → 实现类
   - 搜索：结果**边出边看**（流式）、可随时停止、按目录归类、可限定目录范围、排除测试、历史下拉
   - 正文里的 `src/api/client.ts` 与反引号符号名**可直接点**（路径先校验存在，避免误跳）
-  - **标签页 + 分屏对照**（上限 8，中键 /「旁边打开」分屏）、**书签**（Ctrl/Cmd+Shift+B，可导出 JSON）、
+  - **标签页 + 分屏对照**（上限 8，中键 /「旁边打开」分屏）、
     **最近打开**（Ctrl+P 空查询）、**位置记忆**（切回文件回到上次读到的行与滚动位置）、
     **复制位置**（Ctrl/Cmd+Alt+C 或面板行尾 ⧉ → `path:line:col`）
 - **信使（05 Share）**：
   - **带得走**：顶栏「分享 ▾」一个下拉收口 —— 复制**带行号的分享链接**、复制**选中代码（带出处）**
     （出处行 + 围栏代码块）、大纲行尾 ⧉ 复制**符号摘要**（名字 + 种类 + 签名 + 位置）
-  - **导出**：Markdown 报告（当前文件 / 当前搜索结果 / 项目概览，含大纲、带行号正文、着色结论与批注）、
+  - **导出**：Markdown 报告（当前文件 / 当前搜索结果 / 项目概览，含大纲、带行号正文、着色结论）、
     截图 PNG（自绘 canvas，保语法色与三档语义色，底部带出处，可复制到剪贴板）、打印友好视图（带页眉）
-  - **批注（Ctrl/Cmd+0）**：在行上留一句、可回复 / 标为已解决，**只存本机 localStorage**（不写被读目录），
-    随报告一起导出
   - **接得上宿主**：`wcr:open`（跳转）/ `wcr:dispose`（收起面板）→ 回发 `wcr:ready`（就绪 + 索引进度）、
     `wcr:state`（在读哪一行 / 选区）、`wcr:bye`（资源已释放）；消息按**来源白名单**校验
   - **接得上 agent**：只读 HTTP 工具（`/api/agent/tools`）—— 让 agent 查符号 / 定义 / 引用，而不是 grep 猜
+- **Code Agent（2026-10-03）**：工具条「Agent 对话」把主区切成 Agent 模式 —— **左栏管会话、中间看内容**，
+  说人话让它读 / 改 / 生成代码；点「回到代码」就切回阅读模式（同一个页面，不是新窗口）。
+  - 内置一个**最简** agent：**一个循环 + 一个工具包**（不放 skill、不接 MCP、无沙箱），参考 pi 的最核心部分；
+    循环就是「调模型 → 有工具就执行 → 结果回灌 → 再调」，事件流式推给界面
+  - 工具分两类：**索引类**（`find_symbol` / `goto_definition` / `find_references` / `file_outline` / `search_text`）
+    直接复用本项目已有的 `/api/agent` 工具 —— agent 查「定义在哪 / 谁在调用」用的是 tree-sitter 索引，
+    不是 grep 猜；**文件类**（`read_file` / `write_file` / `edit_file` / `list_dir` / `glob` / `grep`）让它真能改代码
+  - **适配层**：`backend/src/agent/types.ts` 定接口与归一化事件（事件名沿用 pi 的
+    `agent_start` / `message_*` / `tool_execution_*` / `agent_settled`），`adapter.ts` 是工厂；
+    接自己的 agent（pi / OpenHands / 自研）只需写一个 `AgentAdapter` 实现 + 在工厂注册，**前端不用改**
+  - 模型在「设置 → 模型」里配（OpenAI 兼容 base URL + API key + 模型 id，可设默认模型）；
+    明文 key 只落 `~/.ide/model-config.json`（权限 0o600），界面只回显打码值
 - **向导（04 Guide）**：
   - **第一分钟不空转**：没选文件时的首屏就是项目地图 + 「从这里开始」（入口候选 / 推荐路线 / 继续阅读），
     点「开始阅读」直接进入路线第 1 步
@@ -48,31 +74,29 @@ F12 / Shift+F12 / Ctrl+Shift+O 等 VS Code 习惯的导航全部可用。
     每步带一句「为什么是它」；可「上一步 / 下一步」行进、手动重排并存成「我的路线」
   - **读到哪了**：打开即已读（可手动改）、`已读 N / M 个源码文件`进度、待读队列（文件树右键 / 搜索结果行尾 /
     编辑器右键）、`Ctrl/Cmd+Shift+R` 回到上次位置
-  - **笔记贴在代码上**：行槽图标 + 编辑浮层、文件级笔记；行号 + 行文本双锚定（代码改动后按内容找回，
-    找不到进「待归位」）；可导出 Markdown / 导出导入 JSON；**不修改源文件一个字节**
   - **变更有感**：`自上次阅读以来`对比基线（本机快照；在 git 仓库里叠加 `git diff --numstat` 的增删行），
     标出「你的笔记可能已过期」；只读 diff 浮层、行级 blame（`Ctrl/Cmd+Alt+B`）、文件历史与历史版本只读快照
   - **解释这段（纯静态）**：选中 / 所在符号 / 连带调用方三档范围，给出「它调用了谁 / 谁调用它 / 引用了本项目哪些
-    定义 / 依赖哪些外部模块」+ 覆盖率，可一键存成笔记；固定标注「结构性解释 · 未使用模型」
+    定义 / 依赖哪些外部模块」+ 覆盖率；固定标注「结构性解释 · 未使用模型」
   - **文件摘要条**：导出数 / 依赖数 / 被引用数 + 模板化一句话摘要，标出「基于索引版本 <rev>」
   - **调用流视图**：从一个符号展开调用链（正向 / 反向 / 数据流）、深度 1~3、外部依赖可折叠；
     数据流只做**名字级近似**（虚线 + 「近似」标注），不做类型推断
 - **底座（06 Platform）**：
-  - **二次打开秒开**：索引快照（NDJSON + gzip，**只存符号事实、不存正文**）落 `data/index/<id>/`；
+  - **二次打开秒开**：索引快照（NDJSON + gzip，**只存符号事实、不存正文**）落 `~/.ide/index/<id>/`；
     指纹一致时**不重解析、不重写**。实测 1000 文件合成仓：二次打开文件树 **71ms**、符号可跳转 **1.0s**
   - **正文按需读盘**：hover / 密度 / 搜索时才读源码，恢复期**零读盘**（`files/<rel>` 懒读带缓存）
   - **并行解析**：多 worker 解析（`READER_PARSE_WORKERS`，0 = 串行），worker 不可用自动回落串行
-  - **忽略规则可配置**：`.gitignore` + `.wcrignore`（`!` 取反、`**`、`/` 锚定；`node_modules` / `.git` 不可被打开）
-  - **索引报告**：`GET /index-report` 说清每个文件为什么没进索引（大文件 / 二进制 / 解析失败 / 读失败）与编码分布；
-    `GET /ignore` 显示生效的忽略规则。界面上从「已索引」状态处点开
+  - **忽略规则可配置**：`.gitignore` + `.wcrignore`（`!` 取反、`**`、`/` 锚定；`node_modules` / `.git` 不可被打开）；
+    设置面板里还能写一份**全局自定义规则**（对所有项目生效，存 `~/.ide/ignore-user.txt`），保存后重建索引生效
   - **大文件降级索引**：1–5MB 的源码走「顶层符号模式」（只取顶层定义与导入），仍出现在大纲 / 符号搜索里
   - **非 UTF-8 编码**：BOM / UTF-8 / UTF-16 / GBK 探测解码，GBK 中文注释不乱码、符号位置正确
   - **一致性对账**：默认每 10 分钟比对索引与磁盘（`READER_VERIFY_MS`），监听漏事件可自愈；`POST /verify` 手动触发
   - **一键启动 / 单实例**：`wcr [目录]`（或 `npm run cli -- [目录]`）—— 端口被占用自动让位，重复启动复用已有实例
-  - **交付两条路径**：`npm pack` 产物可 `npx ./web-code-reader-0.1.0.tgz [目录]`；`Dockerfile` 一条命令起只读服务
-  - **常驻隐私承诺 + 首次引导**：顶栏常驻「只读 · 不上传 · 代码不出本机」（点开是可追证的隐私面板）；
-    未打开项目时首屏为三步引导（填路径 / 最近项目 / 索引进度 + 索引报告入口）
-  - **偏好与语言**：主题（深 / 亮 / 跟随系统）、编辑器字号 12–18、侧栏宽可拖拽，存 `wcr:prefs`；
+  - **交付两条路径**：`npm pack` 产物可 `npx ./web-code-reader-0.1.0.tgz [目录]`；`Dockerfile` 一条命令起服务
+  - **首次引导**：未打开项目时首屏为三步引导（填路径 / 最近项目 / 索引进度）
+  - **设置与模型**：顶栏「模型」与「设置」两个入口并列 —— 「模型」里配 code-agent 的 provider；
+    「设置」里分 外观（主题 / 字号 / 侧栏宽 / 语言）、编辑器（自动换行 / 缩进宽度 / minimap / 空白字符与参考线）、
+    界面（动效减弱 / 变更栏默认展开）、索引（自定义忽略规则）、关于（版本 + 快捷键表）；
     中英文切换；键盘可走完主流程，关键控件带 `aria-*` 与可见焦点
   - **monorepo**：tsconfig `paths`/`baseUrl`、`go.work`、Python src 布局 / `package-dir` 都能跨包解析（不再落 external）
   - **工程化**：`npm run lint`（ESLint 9，0 error）、`npm run format`（Prettier）、`npm run test:unit`（vitest 42 例）、
@@ -132,16 +156,16 @@ npm run dev:frontend   # 终端 2 → http://127.0.0.1:5173
 http://127.0.0.1:8787/?project=<项目id>&file=src/app.py&line=42&col=5
 ```
 
-环境变量：`PORT`、`HOST`、`READER_DATA_DIR`（项目列表与索引快照的存放目录，默认 `data/`）、
+环境变量：`PORT`、`HOST`、`READER_DATA_DIR`（项目列表、模型配置、索引快照、命令清单的存放目录，默认用户主目录下的 `.ide/`；老版本的 `<仓库根>/data` 会在启动时自动复制过去，只复制不删）、
 `READER_CORS_ORIGIN`（默认 `*`，可写逗号分隔白名单）、`READER_WATCH=0`（关闭文件监听）、
 `READER_PERSIST=0`（关闭索引快照持久化）、`READER_PARSE_WORKERS`（解析 worker 数，0 = 串行）、
 `READER_VERIFY_MS`（索引对账间隔，0 = 关闭）、`READER_IGNORE_BUILTIN=0`（关闭内置忽略黑名单）、
+`READER_USER_IGNORE`（自定义忽略规则文件路径，默认 `~/.ide/ignore-user.txt`）、
 `READER_LOG_LEVEL=error|warn|info|debug`、`READER_LOG_FILE=<路径>`（可选，同时落日志文件）。
 
 **同机同目录分享（S5a）**：默认只监听 `127.0.0.1`（只有本机能开）。想让同一台机器上的同事也能读，
 用 `HOST=0.0.0.0 npm start` 重启 —— 启动日志会打印可分享地址（`http://<本机IP>:8787/?project=<id>`），
-同一局域网内的人打开即**只读**阅读，工具仍然不会写被读目录里的任何文件；
-担心来源时用 `READER_CORS_ORIGIN=https://host-a,https://host-b` 收紧。
+同一局域网内的人打开链接即可阅读；担心来源时用 `READER_CORS_ORIGIN=https://host-a,https://host-b` 收紧。
 
 ## 目录结构
 
@@ -152,13 +176,16 @@ backend/src/
   indexer/graph.ts     依赖图与反向依赖（目录聚合、展开、Tarjan SCC）
   indexer/timeline.ts  时间与来源（只读 git + mtime + 宿主上报）
   languages/   python.ts / typescript.ts / go.ts / java.ts / rust.ts（每语言：定义·引用提取 + 模块说明符解析）
+               shell.ts / json.ts / yaml.ts / toml.ts / markdown.ts / css.ts / html.ts / ini.ts / dockerfile.ts / sql.ts
+               （常用文件；后三者用 lineSymbols 行式扫描）
+               manifests.ts（包依赖 / 构建清单 → 着色语言，只高亮预览不索引）
   indexer/ignore.ts / encoding.ts / snapshot.ts / parse-pool.ts / parse-worker.ts / index-report.ts
                底座（06）：忽略规则 / 编码探测 / 索引快照（NDJSON+gzip，不含正文）/ 并行解析 / 索引报告
   cli.ts / bootstrap.ts  一键启动、自动选端口、单实例复用、浏览器唤起
   log.ts        结构化日志（key=value；READER_LOG_LEVEL / READER_LOG_FILE）
   api/routes.ts HTTP 路由
   api/agent.ts  agent 只读工具（find_symbol / goto_definition / find_references / file_outline / search_text / read_file / list_projects / index_project）
-  registry.ts  项目注册表（以本机目录为单位，持久化到 data/projects.json；含 dispose 资源释放）
+  registry.ts  项目注册表（以本机目录为单位，持久化到 ~/.ide/projects.json；含 dispose 资源释放）
   watcher.ts   文件监听 + 防抖 + 增量更新
 frontend/src/
   Editor.tsx        Monaco 封装（model 池、只读、定位、位置上报）
@@ -166,13 +193,12 @@ frontend/src/
   SidePanel.tsx     大纲 + 引用面板 + 搜索面板（容器无关：侧栏 / 全屏）
   NavPanels.tsx     调用层级 / 类型层级 + 实现清单（N16/N17/N15）
   Notice.tsx        跳转失败提示条（N2：解释 + 动作）
-  state.ts          zustand 状态（项目、文件、标签、书签、位置记忆、流式搜索、引用/层级）
-  Overview.tsx      项目地图首页 + 侧栏总览面板（含 overview.css）
+  state.ts          zustand 状态（项目、文件、标签、位置记忆、流式搜索、引用/层级）
+  Overview.tsx      项目地图首页 + 「总览」面板（右侧常驻栏，含 overview.css）
   GraphView.tsx     依赖图画布（d3-force 静态布局 + 反向依赖面板，含 graph.css）
   mapApi.ts / mapState.ts  地图的请求与状态（含已读 / 忽略标记，localStorage）
   FileTree.tsx / QuickOpen.tsx / TopBar.tsx
   share.ts / report.ts / snapshot.ts  信使（05）：位置·片段格式化 / Markdown 报告 / 自绘代码截图
-  annotations.ts / AnnotationsPanel.tsx  批注（S10）：只存本机的讨论线程 + 侧栏面板
   bridge.ts / ShareMenu.tsx  宿主双向桥（wcr:* 消息、来源白名单）+ 分享菜单
   state.ts          zustand 状态（项目、文件、符号、历史、搜索）
 shared/types.ts     前后端共享的 API 契约（位置统一 1-based、列按 UTF-16）
@@ -211,8 +237,9 @@ shared/types.ts     前后端共享的 API 契约（位置统一 1-based、列�
 | POST | `/api/projects/:id/hover` | `{ file, line, col }` → 悬停解释（定义 / 字面量 / 失败态） |
 | GET | `/api/projects/:id/density?file=<相对路径>` | 整文件密度（每 20 行一段的代码 / 注释 / 空白占比） |
 | GET | `/api/projects/:id/events` | SSE：`status` / `file-changed` / `file-deleted` / `index-ready` |
-| GET | `/api/projects/:id/index-report` | 索引报告（P9）：扫描 / 已索引 / 降级 / 未索引归类（大文件·二进制·解析失败·读失败·非源码）+ 编码分布 |
 | GET | `/api/projects/:id/ignore` | 忽略规则（P8）：生效的 `.gitignore` / `.wcrignore`、规则数、命中数、被 `!` 找回的路径 |
+| GET | `/api/settings/ignore` | 自定义忽略规则（全局）：读 `~/.ide/ignore-user.txt` 的文本 |
+| POST | `/api/settings/ignore` | `{ text }` 保存自定义忽略规则（对所有项目生效，需重建索引） |
 | GET | `/api/projects/:id/snapshot` | 索引快照状态（P4）：是否存在 / 写入时间 / 文件数 / schema / 指纹是否命中 / 落盘目录 |
 | POST | `/api/projects/:id/verify` | 对账（P7）：重新比对索引与磁盘，返回 added / changed / deleted 并自动修复 |
 | GET | `/api/projects/:id/resources` | S9c：资源视图 `{ watcher, streams, indexed, filesIndexed }`（宿主自证「没有残留」） |
@@ -222,6 +249,24 @@ shared/types.ts     前后端共享的 API 契约（位置统一 1-based、列�
 | GET | `/api/agent/:id/symbols?q=&kind=&limit=` | S8 便捷入口：按名字找符号定义 |
 | GET | `/api/agent/:id/outline?file=` | S8 便捷入口：文件大纲 |
 | GET | `/api/agent/:id/file?path=&start=&end=` | S8 便捷入口：读指定行范围（默认上限 400 行，超出置 `truncated`） |
+| GET | `/api/agent/model-config` | Code Agent 的模型 provider 列表（key 打码）+ 默认模型 |
+| POST | `/api/agent/model-config` | `{ id?, name?, baseUrl, apiKey?, models? }` 新增 / 更新 provider（不传 `apiKey` 就沿用原值） |
+| POST | `/api/agent/model-config/remove` | `{ id }` 删除 provider |
+| POST | `/api/agent/model-config/default` | `{ provider, modelId }` 设默认模型；`{ clear: true }` 取消 |
+| GET | `/api/agent/sessions` | Code Agent 会话列表 |
+| POST | `/api/agent/sessions` | `{ projectId, name?, backend?, provider?, modelId? }` 起一个会话（当前只实现 `backend: 'builtin'`） |
+| DELETE | `/api/agent/sessions/:id` | 结束并移除会话 |
+| GET | `/api/agent/sessions/:id/messages` | 会话历史（`user` / `assistant` / `toolResult`） |
+| POST | `/api/agent/sessions/:id/prompt` | `{ message }` 发一条消息（进度走 SSE，不等整轮跑完） |
+| POST | `/api/agent/sessions/:id/abort` | 中止当前一轮 |
+| POST | `/api/agent/sessions/:id/model` | `{ provider, modelId }` 换这个会话的模型 |
+| GET | `/api/agent/sessions/:id/events` | SSE：`session_state` 起手一发，随后 `agent_start` / `message_start\|update\|end` / `tool_execution_start\|end` / `agent_settled` |
+| GET | `/api/projects/:id/commands` | 命令面板：该项目已存的命令清单（没分析过为 null） |
+| POST | `/api/projects/:id/commands/discover` | `{ prompt }` 让**只读**的 code agent 读项目，得出编译 / 启动 / 停止 / 测试命令（默认 180s 上限） |
+| POST | `/api/projects/:id/commands/run?confirm=1` | `{ command, kind?, background? }` 在项目根执行；自毁级命令 400 拒绝 |
+| POST | `/api/projects/:id/commands/stop` | `{ runId }` 停掉一条后台运行 |
+| GET | `/api/projects/:id/commands/runs` | 运行记录（运行中的后台任务带日志尾部） |
+| GET | `/api/projects/:id/commands/risk?command=` | 危险级别（`none` / `warn` / `block`）与原因 |
 
 `reason` 取值：`resolved`（已解析）/ `external`（外部依赖或内置符号，不跳转）/
 `unresolved`（未能解析，通常是类型推断才能确定的调用）/ `no-symbol`（光标处没有符号）。
@@ -317,13 +362,11 @@ shared/types.ts     前后端共享的 API 契约（位置统一 1-based、列�
 | 分享一个位置 | 「复制分享链接」（含 `line`/`col`）或 `Ctrl/Cmd+Alt+C` | `http://…/?project=…&file=…&line=…&col=…`，打开就落在同一行 |
 | 贴一段代码 | 编辑器里选中 → 右键「复制选中代码（带出处）」 | 第一行是 `path:行范围`，随后是带语言围栏的代码块 |
 | 贴一个接口 | 大纲行尾 ⧉（或顶栏「复制符号」） | `name (kind) path:line:col` + 签名，不贴整段实现 |
-| 给同事一份理解 | 「Markdown：当前文件 / 当前搜索结果 / 项目概览」 | 大纲 + **带行号正文** + 着色结论（本项目 vs 外部）+ 批注；纯文本环境仍可读、位置可核对 |
+| 给同事一份理解 | 「Markdown：当前文件 / 当前搜索结果 / 项目概览」 | 大纲 + **带行号正文** + 着色结论（本项目 vs 外部）；纯文本环境仍可读、位置可核对 |
 | 贴进文档 / PR | 「截图 PNG」（或截图并复制到剪贴板） | 自绘 canvas：行号栏 + 语法色 + 三档语义色 + 底部出处条 |
 | 评审前存档 | 「打印 / 存 PDF」 | 打印视图只留代码与页眉（`path:line` + 项目名），黑白可辨 |
-| 讨论 | 侧栏「批注」（Ctrl/Cmd+0） | 行上的旁注 + 回复 + 已解决；**只存本机**，可随报告一起交付 |
 
 - **导出不降级**：报告与截图都会保留「哪是本项目符号、哪是外部依赖」这个结论 —— 否则导出等于退化成纯文本。
-- **批注不碰源码**：批注写进浏览器 localStorage（按项目分片），被读目录里不会多出任何文件。
 - **给 agent 用**：`GET /api/agent/tools` 是给 agent（或 xchen 宿主）的可调用清单；它只查代码，改代码仍由 agent 自己完成。
 
 ## 快捷键补充说明
@@ -332,9 +375,8 @@ shared/types.ts     前后端共享的 API 契约（位置统一 1-based、列�
 **Ctrl/Cmd+Click**（跳定义）、编辑器**右键菜单**（Go to Definition / Go to References）、
 `Ctrl+F12`。页面右上角「?」里有完整清单。
 
-导航（03）新增的键：`Ctrl/Cmd+1..9` 切侧栏面板（总览/向导/文件/大纲/引用/层级/搜索/书签/变更，
-顺序就是侧栏里看到的顺序）、`Ctrl/Cmd+0` 批注面板、
-`Ctrl/Cmd+Shift+B` 在光标处加 / 去书签、`Ctrl/Cmd+Alt+C` 复制当前位置为 `path:line:col`
+导航（03）新增的键：`Ctrl/Cmd+1..9` 切侧栏面板（总览/文件/大纲/搜索…，顺序就是侧栏里看到的顺序）、
+`Ctrl/Cmd+Alt+C` 复制当前位置为 `path:line:col`
 （编辑器右键菜单里也有）；引用面板里 `↑`/`↓` 移动、`Enter` 跳过去、`Esc` 回到原点、`T` 只看测试；
 标签条中键 = 在旁边打开（分屏）。
 
@@ -347,7 +389,7 @@ shared/types.ts     前后端共享的 API 契约（位置统一 1-based、列�
 - `require('...')` 形式的 CommonJS 导入不解析（ESM `import` 正常）。
 - 超过 1MB（且 ≤5MB）的源码文件走**降级索引**：只取顶层定义与导入（没有引用与字面量），
   仍能出现在大纲 / 符号搜索里；超过 5MB 只做文本查看与文本搜索。降级与跳过的理由都在索引报告里可见。
-- 索引**有快照但不落正文**：符号事实与文件条目落 `data/index/<id>/snapshot.ndjson.gz`，正文按需从磁盘读
+- 索引**有快照但不落正文**：符号事实与文件条目落 `~/.ide/index/<id>/snapshot.ndjson.gz`，正文按需从磁盘读
   （懒读带缓存）。二次打开实测（1000 文件合成仓）：文件树 71ms、符号可跳转 1.0s、恢复期零读盘；
   **万级文件**（10k 实测）文件树 0.48s、符号可跳转 11.5s —— 瓶颈是 18 万条记录的 JSON 解析，
   下一步用列式二进制格式（见 `docs/06-platform-plan.md` §8）。旧格式快照升级后第一次打开会重写一遍。
@@ -360,9 +402,9 @@ shared/types.ts     前后端共享的 API 契约（位置统一 1-based、列�
 - **导航（03）的范围边界**：调用层级的完整性上限 = 引用解析率；类型层级只看源码里**显式写出**的
   `extends` / `implements` / 嵌入字段，动态注册与鸭子类型不覆盖（界面上如实标注，不伪造边）；
   搜索中止的最坏延迟 = 单个文件的最大扫描耗时。
-- **本机数据**：书签 / 位置记忆 / 搜索历史 / **批注** / **阅读路线 / 待读 / 笔记 / 阅读基线**只写浏览器
-  `localStorage`（按项目 id 分片），不写被读目录、不上传；书签与笔记可导出 / 导入 JSON，笔记另有 Markdown
-  —— 代价是换机器就没了（04 的决策：数据与 03 同一层，口径单一）。
+- **本机数据**：位置记忆 / 搜索历史 / 阅读路线 / 待读 / 阅读基线只写浏览器
+  `localStorage`（按项目 id 分片），不写被读目录 —— 代价是换机器就没了
+  （04 的决策：数据与 03 同一层，口径单一）。
 - **向导（04）的范围边界**：**不引入模型** ——「解释这段」是结构性解释（定义 / 调用 / 引用 + 覆盖率），
   摘要是模板化句子，都固定标注「未使用模型」；数据流只做名字级近似（匹配不上不画边）；
   「已读」只表示「打开过」这一事实，不代表读懂；`自上次阅读以来`的基线会被「打开文件」刷新，
@@ -371,14 +413,38 @@ shared/types.ts     前后端共享的 API 契约（位置统一 1-based、列�
   - 分享只做「**同一台机器 / 同一目录**」（S5a）；「把源码打包随阅读器交付」（S5b）尚未做。
   - 截图是 canvas 自绘，**覆盖当前可见范围**，不是整文件分页；超宽 / 超 400 行会截断并在底部注明。
   - 打印视图受 Monaco 限制，只能打当前渲染出来的视口，不是「整文件导出 PDF」。
-  - **agent 工具只读**：只开放「查」（符号 / 定义 / 引用 / 大纲 / 文本搜索 / 读行范围），不开改文件、执行命令、跑测试。
+  - **对外的 agent 工具仍只读**（S8）：`/api/agent/tools` 只开放「查」（符号 / 定义 / 引用 / 大纲 / 文本搜索 / 读行范围），
+    不开改文件、执行命令、跑测试。**内置的 Code Agent 是另一层**（见下一条），它按用户要求改文件。
   - 宿主消息默认**只认白名单来源**（同源或 `?hostOrigin=` 声明 / 登记过的宿主源）；
     被忽略的来源会在**控制台**留一条说明，不在界面上打断阅读。
+
+- **Code Agent（2026-10-03）的范围边界**：
+  - 它会**写项目文件** —— 这是本工具唯一会写被读目录的入口；所有写路径必须落在项目根内，越界直接拒绝（400 `path_escape`）。
+  - **不执行命令**：工具包里没有 bash，所以它不是完整的 shell agent（要跑测试 / 装依赖得你自己来）。
+  - **会话历史只在内存**：重启后端即清（不落盘）；会话也不跨项目共享（一个会话绑一个项目）。
+  - **后端可选**（`backend/src/agent/adapter.ts`）：`builtin` 用本项目配置的 OpenAI 兼容端点；
+    `pi` 起本机 `pi --mode rpc --no-session` 子进程（JSONL 协议；凭证与工具集都由 pi 自己管，历史不落盘）；
+    界面上在左栏选后端（内置 agent / pi / OpenHands（占位，调用时给出「怎么接」的指引））。
+  - **pi 后端的能力边界 = pi 自己的能力边界**：它会执行命令、按需读写文件，比内置 agent（不带 bash）更宽。
+  - **明文 key 落盘**：`~/.ide/model-config.json`（0o600；Windows 上 chmod 基本无效，靠目录权限）。
+  - 消息按纯文本渲染，没有 markdown / 代码高亮；一个会话同一时刻只跑一轮（连发会被拒，先停止或等它结束）。
+  - 没做：权限询问、沙箱、token 预算控制（只有「一轮最多 N 次工具调用」的硬上限，`READER_AGENT_MAX_STEPS`，默认 24）。
+
+- **命令面板（FR-0005，2026-10-03）：一句话拿本项目命令，点一下真跑**：
+  - 「分析」发起的是**只读** code agent 会话（工具集里没有 `write_file` / `edit_file`），所以「仓库里没有的命令」
+    只会给建议、不会往仓库写文件；分析过程可以在 Agent 面板打开那条会话（名字「命令分析 · <项目名>」）看。
+  - 结果落 `~/.ide/commands/plans/<projectId>.json`，刷新 / 重启后还在，可「重新分析」覆盖。
+  - 点「运行 / 后台运行」是**真执行**：一律在项目根、二次确认；`warn` 级（`rm -rf` / `git push` /
+    `npm publish` / `sudo`…）要在确认框里额外勾选；自毁级（`rm -rf /`、`mkfs`、fork 炸弹…）后端直接拒绝。
+  - **只在监听本机时可用**（共享模式 403），与「命令 · 服务」同一道门槛。
+  - 后台运行交给独立 worker（`bin/run-with-log.mjs`）托管，日志实时落 `~/.ide/commands/logs/<runId>.log`
+    （Windows 下 `cmd` 的文件重定向会丢输出、stdio 直给文件句柄会全缓冲，所以由 worker 收 pipe 自己写）。
+  - **不跨 IDE 后端重启**：运行列表只在内存里，重启后既看不到也停不掉（后台进程本身可能还在跑）。
 
 ## 测试
 
 ```bash
-npm test              # 后端全部用例（node:test + tsx）：语言解析 / 存储层 / 地图 / 导航 / 透镜 / 底座（快照·忽略·编码·并行·报告）
+npm test              # 后端全部用例（node:test + tsx）：语言解析 / 存储层 / 地图 / 导航 / 透镜 / 底座（快照·忽略·编码·并行）
 npm run typecheck     # 前后端类型检查
 npm run lint          # ESLint 9（要求 0 error）
 npm run format:check  # Prettier 格式检查
@@ -389,9 +455,11 @@ npm run bench         # 性能基准：合成仓首开 / 索引 / 二次打开 /
 
 UI 回归用例在 `tests/ui/`，三套都由 `run.mjs` 统一起夹具项目与后端：`navigator.mjs` 是导航·信使断言主体
 （跳转失败提示、引用面板、调用/类型层级、搜索、复制位置、**复制选中代码（带出处）**、**复制符号摘要**、
-**分享深链**、**批注添加与刷新后仍在**、**打印视图样式**），`guide.mjs` 是向导断言主体
+**分享深链**、**打印视图样式**），`guide.mjs` 是向导断言主体
 （首屏起点与推荐路线、开始阅读进第 1 步、「下一步」前进、打开即已读与进度跨刷新、待读跨刷新、
 阅读基线报「没有变化」、解释这段出结构性解释、层级面板展开为调用流图），`platform.mjs` 是底座断言主体
-（常驻隐私承诺与可追证面板、索引报告入口、切亮色真的换主题、字号落 `wcr:prefs` 并即时生效、切 English）。
-后端另有 `tests/dispose.test.ts`（S9c 资源视图 / 释放 / 幂等 / 断 SSE）与
-`tests/agent.test.ts`（S8 工具清单与各工具）两份专用用例。
+（顶栏「模型」入口、设置面板五个分组、切亮色真的换主题、字号落 `wcr:prefs` 并即时生效、切 English、Agent 会话摊在主界面）。
+后端另有 `tests/dispose.test.ts`（S9c 资源视图 / 释放 / 幂等 / 断 SSE）、
+`tests/agent.test.ts`（S8 工具清单与各工具）与 `tests/agent-builtin.test.ts`
+（Code Agent：模型配置打码 / 循环真执行工具并写出文件 / 结果回灌 / 错误路径 / 路径越界 / glob 语义）
+三份专用用例；`agent-builtin` 用本地假的 OpenAI 端点，不需要任何真实 key。

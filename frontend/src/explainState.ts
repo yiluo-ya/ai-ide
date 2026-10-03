@@ -12,7 +12,7 @@
  * （`request` 只抛出人话 message，丢掉了错误码）。
  */
 import { create } from 'zustand';
-import type { CallNode, ExplainResult, ExplainScope } from '../../shared/types';
+import type { ExplainResult, ExplainScope } from '../../shared/types';
 import { translate } from './i18n';
 import { showFlash } from './state';
 
@@ -62,50 +62,6 @@ export function kindText(kind: string): string {
   const key = `kind.${kind}`;
   const text = translate(key);
   return text === key ? kind : text;
-}
-
-/**
- * 把解释拼成一段可留档的正文（G5.4）。
- *
- * 确定性拼装、不加形容词：目标一行 + 四段清单，每条都是 `path:line`。
- * 覆盖率如实写在末尾（未解析不隐藏）—— 存下来的笔记也必须能自证。
- */
-export function explainNoteBody(result: ExplainResult): string {
-  const out: string[] = [];
-  const t = result.target;
-  out.push(`【结构性解释】${t.name}（${kindText(t.kind)}）· ${t.file}:${t.line}`);
-  if (t.containerName) out.push(`所属：${t.containerName}`);
-  if (t.signature) out.push(`签名：${t.signature.trim()}`);
-  out.push(`范围：${translate(`explain.scope.${result.scope}`)} · 行 ${result.lines.start}-${result.lines.end}`);
-
-  const section = (title: string, rows: string[]) => {
-    out.push('', `${title}（${rows.length}）：`);
-    if (!rows.length) out.push('- （无）');
-    for (const row of rows) out.push(row);
-  };
-  const callRows = (nodes: CallNode[]) =>
-    nodes.map((n) => {
-      const at = `${n.file}:${n.location.range.start.line}`;
-      const tag = n.external ? '（外部）' : n.unresolved ? '（未解析）' : '';
-      return `- ${n.name}${tag} — ${n.file ? at : '（无出处）'}`;
-    });
-
-  section(translate('explain.callees'), callRows(result.callees));
-  section(translate('explain.callers'), callRows(result.callers));
-  section(
-    translate('explain.projectRefs'),
-    result.projectRefs.map((r) => `- ${r.name}（${kindText(r.kind)}）— ${r.file}:${r.line}`),
-  );
-  section(
-    translate('explain.externalModules'),
-    result.externalModules.map((m) => `- ${m.module || translate('explain.builtin')} — ${m.file}:${m.line}`),
-  );
-  out.push('', translate('explain.coverageText', {
-    resolved: result.coverage.resolved,
-    unresolved: result.coverage.unresolved,
-    external: result.coverage.external,
-  }));
-  return out.join('\n');
 }
 
 interface ExplainState {

@@ -7,8 +7,36 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { makeProject } from './helpers';
-import { blame, diffNumstat, fileDiff, fileHistory, isValidRev, showFile } from '../src/indexer/gitread';
+import {
+  blame,
+  diffNumstat,
+  fileDiff,
+  fileHistory,
+  isValidRev,
+  showFile,
+  worktreeChanges,
+} from '../src/indexer/gitread';
+
+const run = promisify(execFile);
+
+/** 造一个已有一次提交的仓库；本机没有 git 时返回 false，调用方 skip。 */
+async function initRepo(root: string): Promise<boolean> {
+  try {
+    await run('git', ['-C', root, 'init', '-q'], { windowsHide: true });
+    await run('git', ['-C', root, 'config', 'user.email', 't@example.com'], { windowsHide: true });
+    await run('git', ['-C', root, 'config', 'user.name', 't'], { windowsHide: true });
+    await run('git', ['-C', root, 'add', '-A'], { windowsHide: true });
+    await run('git', ['-C', root, 'commit', '-qm', 'init'], { windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 test('gitread: 非 git 目录全部降级为 null 且不抛', async () => {
   const fx = await makeProject({ 'src/a.ts': 'export const a = 1;\n' });
@@ -44,6 +72,36 @@ test('gitread: 非法 rev / 越界 path 一律拒绝', async () => {
     assert.equal(await blame(fx.root, '../outside.ts'), null);
     assert.equal(await fileHistory(fx.root, '../../etc/passwd'), null);
     assert.equal(await fileDiff(fx.root, 'src/../../outside.ts'), null);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+/**
+ * 2026-10-03 用户要求：「未跟踪是 ignore 还是新增的，没有在 ignore 就是新增，在 ignore 就直接忽略。不显示。」
+ * 钉住两条：没被忽略的新文件按 added 报（不再是单独的「未跟踪」档）；被 .gitignore 的文件不进清单。
+ */
+test('worktreeChanges: 未跟踪按新增报，被 .gitignore 的文件不出现', async (t) => {
+  const fx = await makeProject({ 'src/a.ts': 'export const a = 1;\n' });
+  try {
+    if (!(await initRepo(fx.root))) {
+      t.skip('本机 git 不可用，跳过');
+      return;
+    }
+    await fsp.writeFile(path.join(fx.root, '.gitignore'), 'ignored.txt\n');
+    await fsp.writeFile(path.join(fx.root, 'ignored.txt'), 'x\n');
+    await fsp.writeFile(path.join(fx.root, 'src', 'new.ts'), 'export const n = 1;\n');
+    await fsp.writeFile(path.join(fx.root, 'src', 'a.ts'), 'export const a = 2;\n');
+
+    const res = await worktreeChanges(fx.root);
+    assert.equal(res.isRepo, true);
+    const status = new Map(res.entries.map((e) => [e.file, e.status]));
+    assert.equal(status.get('src/new.ts'), 'added', `未跟踪的新文件应按新增报：${JSON.stringify(res.entries)}`);
+    assert.equal(status.get('src/a.ts'), 'modified');
+    assert.equal(status.get('.gitignore'), 'added', '刚建的 .gitignore 自己也是未跟踪的新文件');
+    assert.equal(status.has('ignored.txt'), false, '被 .gitignore 忽略的文件不该出现在变更清单里');
+    // 没有任何一条状态叫 untracked（这一档已按用户要求取消）
+    assert.equal(res.entries.some((e) => (e.status as string) === 'untracked'), false);
   } finally {
     await fx.cleanup();
   }

@@ -1,4 +1,4 @@
-/** 应用外壳：侧栏（总览/文件/引用/层级/大纲/搜索）+ 编辑器 + 项目地图 + 快捷键。 */
+/** 应用外壳：侧栏（文件/大纲/搜索/code会话）+ 编辑器 + 项目地图 + 右栏（变更/命令/总览）+ 快捷键。 */
 import {
   useEffect,
   useMemo,
@@ -10,29 +10,29 @@ import {
 import { api } from './api';
 import { Editor } from './Editor';
 import { FileTree, type TreeDecor } from './FileTree';
-import { FileSearch } from './FileSearch';
+import { FileSearch, MIN_LEN } from './FileSearch';
 import { CommandPanel } from './CommandPanel';
 import { GraphView, type GraphViewState } from './GraphView';
+import { AgentView } from './AgentView';
+import { AgentSessions } from './AgentSessions';
+import { useAgent } from './agentStore';
 import { FlowView } from './FlowView';
 import { Overview, OverviewPanel } from './Overview';
 import { OutlinePanel, SearchPanel, symbolPathAt } from './SidePanel';
 import { GotoNoticeBar, gotoFailureMessage } from './Notice';
 import { QuickOpen, type QuickOpenMode } from './QuickOpen';
 import { TopBar } from './TopBar';
-import { PrivacyPanel } from './PrivacyPanel';
 import { SettingsPanel } from './SettingsPanel';
-import { IndexReportDialog } from './IndexReport';
+import { ModelDialog } from './ModelDialog';
 import { Welcome } from './Welcome';
 import { SIDEBAR_MAX, SIDEBAR_MIN, loadPrefs, savePrefs } from './prefs';
 import { monaco, setProviderContext } from './monaco-setup';
-import { listenPopState, showFlash, useStore } from './state';
+import { listenPopState, showFlash, showToast, useStore } from './state';
 import { ShareMenu } from './ShareMenu';
-import { AnnotationsPanel } from './AnnotationsPanel';
 import { Dialog } from './Dialog';
 import { initHostBridge } from './bridge';
 import { useMapStore } from './mapState';
 import { useGuideStore } from './guideState';
-import { useNotesStore } from './notesState';
 import { ExplainPanel } from './ExplainPanel';
 import { useExplainStore } from './explainState';
 import { ChangesPanel } from './ChangesPanel';
@@ -52,24 +52,19 @@ type PanelTab =
   | 'hierarchy'
   | 'outline'
   | 'search'
-  | 'marks'
   | 'changes'
-  | 'notes'
-  | 'service';
+  | 'agent';
 
-/** 常驻 tab：阅读时随时够得着（其余都收进「更多」）。 */
-const PRIMARY_TABS: PanelTab[] = ['files', 'outline'];
 /**
- * 辅助 tab：收进「更多 ▾」。
- * 2026-10-03 用户要求移除「向导 / 引用 / 层级」三个面板（“没啥用”）；
- * 「搜索」也收进来 —— 它的日常用法（搜内容）已经并进文件面板（FileSearch）。
+ * 左栏 tab（2026-10-03 用户要求）：文件 / 大纲 / 搜索 / code会话，四个并排常驻。
+ * 「更多 ▾」随之取消 —— 辅助组只剩「总览」，而它搬去了右栏（与变更 / 命令并排，见 .dock-tabs）。
  */
-const SECONDARY_TABS: PanelTab[] = ['overview', 'search', 'marks', 'notes', 'service'];
-/** 快捷键顺序的**唯一次序来源**：Ctrl/Cmd+1..2 = 常驻（文件 / 大纲），3..9 与 0 = 辅助组依次。
+const LEFT_TABS: PanelTab[] = ['files', 'outline', 'search', 'agent'];
+/** 快捷键顺序的**唯一次序来源**：Ctrl/Cmd+1..4 = 左栏四个 tab（文件 / 大纲 / 搜索 / code会话），0 = 最后一个。
  * 以前这里和快捷键的 order 数组各写一份，漂移过：用户按 Ctrl+4 以为是「大纲」（界面上第 4 个），
  * 却切到了「引用」。加面板时只改这一处。
  */
-const PANEL_TABS: PanelTab[] = [...PRIMARY_TABS, ...SECONDARY_TABS];
+const PANEL_TABS: PanelTab[] = LEFT_TABS;
 /** tab 上的文字（guide / changes 走 i18n，单独处理）。 */
 const TAB_TEXT: Record<string, string> = {
   overview: '总览',
@@ -78,9 +73,7 @@ const TAB_TEXT: Record<string, string> = {
   refs: '引用',
   hierarchy: '层级',
   search: '搜索',
-  marks: '书签',
-  notes: '批注',
-  service: '命令',
+  agent: 'code会话',
 };
 const HOT_METRICS: HotMetric[] = ['files', 'refs', 'symbols', 'defined', 'unique', 'recent'];
 
@@ -125,11 +118,65 @@ function collectFiles(node: FileNode | null): string[] {
 }
 
 /**
+ * 无扩展名 / 名字带可变部分的清单文件（与后端 `languages/manifests.ts` 同表）。
+ * 都是「只高亮预览」的文件：认出来只是为了用对语法着色。
+ */
+const LANGS_BY_NAME: Record<string, string> = {
+  'pom.xml': 'xml',
+  'nuget.config': 'xml',
+  'packages.config': 'xml',
+  'app.config': 'xml',
+  'web.config': 'xml',
+  'directory.build.props': 'xml',
+  'directory.build.targets': 'xml',
+  'go.mod': 'gomod',
+  'go.sum': 'gomod',
+  'build.gradle': 'groovy',
+  'settings.gradle': 'groovy',
+  'init.gradle': 'groovy',
+  gemfile: 'ruby',
+  rakefile: 'ruby',
+  podfile: 'ruby',
+  fastfile: 'ruby',
+  appfile: 'ruby',
+  brewfile: 'ruby',
+  vagrantfile: 'ruby',
+  berksfile: 'ruby',
+  guardfile: 'ruby',
+  capfile: 'ruby',
+  thorfile: 'ruby',
+  'mix.lock': 'elixir',
+  'package.swift': 'swift',
+  pipfile: 'toml',
+  'cargo.lock': 'toml',
+  'poetry.lock': 'toml',
+  'uv.lock': 'toml',
+  'pdm.lock': 'toml',
+  'pipfile.lock': 'json',
+  'composer.lock': 'json',
+  'pubspec.lock': 'yaml',
+  dockerfile: 'dockerfile',
+  containerfile: 'dockerfile',
+  '.env': 'ini',
+  '.npmrc': 'ini',
+  '.yarnrc': 'ini',
+  '.nvmrc': 'ini',
+  '.editorconfig': 'ini',
+  makefile: 'makefile',
+  gnumakefile: 'makefile',
+};
+
+/** `requirements-dev.txt` / `constraints.txt` 这类（`pip` 依赖清单）。 */
+const REQUIREMENTS_RE = /^(requirements|constraints)[\w.-]*\.txt$/;
+
+/**
  * G7.5：历史版本正文没有后端给的 lang，按扩展名推断后端语言 id
- * （与 `indexer/languages.ts` 的 specForFile 同一集合；认不出返回空串 → Monaco 用 plaintext）。
+ * （与后端 `languages/specForFile` + `languages/manifests.ts` 同一集合；认不出返回空串 → Monaco 用 plaintext）。
  */
 function langForFile(file: string): string {
   const name = file.toLowerCase();
+  const base = name.slice(name.lastIndexOf('/') + 1);
+  if (name.endsWith('.d.ts')) return 'typescript';
   const ext = name.slice(name.lastIndexOf('.'));
   switch (ext) {
     case '.py':
@@ -151,8 +198,65 @@ function langForFile(file: string): string {
       return 'go';
     case '.java':
       return 'java';
+    case '.sh':
+    case '.bash':
+    case '.zsh':
+      return 'shell';
+    case '.json':
+    case '.jsonc':
+      return 'json';
+    case '.yml':
+    case '.yaml':
+      return 'yaml';
+    case '.toml':
+      return 'toml';
+    case '.ini':
+    case '.cfg':
+    case '.conf':
+    case '.properties':
+      return 'ini';
+    case '.dockerfile':
+      return 'dockerfile';
+    case '.md':
+    case '.markdown':
+      return 'markdown';
+    case '.css':
+      return 'css';
+    case '.scss':
+      return 'scss';
+    case '.less':
+      return 'less';
+    case '.html':
+    case '.htm':
+      return 'html';
+    case '.sql':
+      return 'sql';
+    // 包依赖 / 构建清单（只高亮预览，见后端 languages/manifests.ts）
+    case '.csproj':
+    case '.fsproj':
+    case '.vbproj':
+    case '.props':
+    case '.targets':
+    case '.nuspec':
+    case '.pubxml':
+      return 'xml';
+    case '.gradle':
+      return 'groovy';
+    case '.kts':
+      return 'kotlin';
+    case '.sbt':
+      return 'scala';
+    case '.gemspec':
+    case '.podspec':
+      return 'ruby';
+    case '.exs':
+      return 'elixir';
+    case '.mk':
+    case '.mak':
+      return 'makefile';
+    // 无扩展名的固定文件名
     default:
-      return '';
+      return LANGS_BY_NAME[base] ?? (REQUIREMENTS_RE.test(base) ? 'pip' : '');
   }
 }
 
@@ -166,8 +270,6 @@ export default function App() {
     const fromUrl = snapshot.get('tab') as PanelTab | null;
     return fromUrl && PANEL_TABS.includes(fromUrl) ? fromUrl : 'files';
   });
-  /** 「更多 ▾」下拉是否展开（辅助面板都收在里面）。 */
-  const [moreOpen, setMoreOpen] = useState(false);
   /** W3：变更面板 tab 上的计数（变了几个文件）。 */
   // 变更计数 = git 报的未提交改动条数（2026-10-03：变更以 git 为准，不再自记录）
   const changesCount = useChangesStore((s) => s.result?.entries.length ?? 0);
@@ -176,15 +278,8 @@ export default function App() {
   const tabLabel = (id: PanelTab) =>
     id === 'guide' ? t('guide.tab') : id === 'changes' ? t('changes.tab') : TAB_TEXT[id];
 
-  /** tab 上的计数（书签 / 变更 / 未解决批注）。 */
-  const tabCount = (id: PanelTab) =>
-    id === 'marks'
-      ? store.bookmarks.length
-      : id === 'changes'
-        ? changesCount
-        : id === 'notes'
-          ? store.annotations.filter((a) => !a.resolved).length
-          : 0;
+  /** tab 上的计数（变更）。 */
+  const tabCount = (id: PanelTab) => (id === 'changes' ? changesCount : 0);
 
   /** 一个 tab 按钮（常驻直接排；辅助的在「更多」菜单里复用同一套文字与计数）。 */
   const renderTabButton = (id: PanelTab) => {
@@ -198,7 +293,11 @@ export default function App() {
         aria-selected={tab === id}
         aria-controls="wcr-side-panel"
         className={tab === id ? 'active' : ''}
-        onClick={() => setTab(id)}
+        onClick={() => {
+          setTab(id);
+          // 2026-10-03：顶栏「Agent 对话」入口已删 —— 点「code会话」tab 直接把主区切到 Agent
+          if (id === 'agent' && store.projectId) setMainView('agent');
+        }}
         title={title}
       >
         {tabLabel(id)}
@@ -223,29 +322,34 @@ export default function App() {
   const searchInputRef = useRef<HTMLDivElement>(null);
 
   // 项目地图：主区视图（map = 强制看地图）、依赖图浮层、文件树叠加过滤（M9/M10）
-  const [mainView, setMainView] = useState<'auto' | 'map'>(() => (snapshot.get('view') === 'map' ? 'map' : 'auto'));
+  // 2026-10-03：主区可在「代码 / 地图 / Agent 会话」之间切；agent 不入 URL
+  const [mainView, setMainView] = useState<'auto' | 'map' | 'agent'>(() => (snapshot.get('view') === 'map' ? 'map' : 'auto'));
   const [graphOpen, setGraphOpen] = useState(() => snapshot.get('graph') === '1');
+  /** 2026-10-03：code-agent 会话（左栏管会话 + 中间看内容，见 mainView === 'agent'）。 */
   /** W5：流视图浮层的焦点（null = 关着）。 */
   const [flowTarget, setFlowTarget] = useState<{ file: string; line: number; col: number } | null>(null);
   const [graphState, setGraphState] = useState<GraphViewState | null>(null);
   const [recentFilter, setRecentFilter] = useState<RecentFilter>('all');
   const [onlyOrphans, setOnlyOrphans] = useState(false);
-  /** P24 / P17 / P9 的浮层：设置 · 隐私与数据 · 索引报告。 */
+  /** P24 的浮层：设置 · 模型（模型与设置平级，2026-10-03 用户要求）。 */
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [privacyOpen, setPrivacyOpen] = useState(false);
-  const [reportOpen, setReportOpen] = useState(false);
-  /** 索引报告端点是否可用：旧后端 404 时隐藏入口，不报错、不弹红。 */
-  const [reportAvailable, setReportAvailable] = useState(false);
-  /** W3 / G7.2：只读 diff 浮层的目标文件（null = 关着）。 */
+  const [modelOpen, setModelOpen] = useState(false);
+  /** W3 / G7.2：只读 diff 浮层的目标文件（null = 关着）；点变更行的增删行数触发。 */
   const [diffFile, setDiffFile] = useState<string | null>(null);
   /**
    * 二次确认（2026-10-03 用户要求）：重建索引 / 移除项目都是不可逆或有代价的动作，
    * 误点一下就跑掉不合理 —— 先把「会发生什么」说清楚再执行。
    */
   const [confirmAction, setConfirmAction] = useState<{ kind: 'reindex' | 'forget'; id?: string } | null>(null);
-  /** 右侧常驻变更栏（2026-10-03 用户要求）：默认展开，宽度可拖，可收起。 */
-  const [changesDockOpen, setChangesDockOpen] = useState(true);
+  /** 右侧常驻变更栏：默认展开（默认值来自设置），宽度可拖，可收起。 */
+  const [changesDockOpen, setChangesDockOpen] = useState(() => loadPrefs().changesOpen);
   const [changesDockWidth, setChangesDockWidth] = useState(280);
+  /**
+   * 右侧栏里的三个入口（2026-10-03 用户要求：命令也搬到右边，与变更并排，默认变更）。
+   * 「变更」= git 工作区改动清单 + 四个常用命令；「命令」= 服务状态与重启 / 停止；
+   * 「总览」= 规模 / 起点 / 结构告警 / 本轮产出（从左栏搬来，2026-10-03）。
+   */
+  const [dockTab, setDockTab] = useState<'changes' | 'service' | 'overview'>('changes');
   /** W3 / G7.3：整文件 blame 视图开关 + 当前文件的 blame（按文件缓存，光标移动不重新拉）。 */
   const [blameOn, setBlameOn] = useState(false);
   const [blame, setBlame] = useState<BlameResult | null>(null);
@@ -398,17 +502,6 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
-      // P24/P17/P9 的键盘入口（Alt / 逗号组合要先于 Ctrl+P 判断，否则会被文件搜索吃掉）
-      if (mod && e.altKey && key === 'p') {
-        e.preventDefault();
-        setPrivacyOpen(true);
-        return;
-      }
-      if (mod && e.altKey && key === 'i') {
-        e.preventDefault();
-        if (reportAvailable) setReportOpen(true);
-        return;
-      }
       if (mod && e.altKey && key === 'b') {
         // G7.3：切换「整文件 blame 视图」；无 git → 只在状态栏轻提示一句，不弹红
         e.preventDefault();
@@ -450,16 +543,12 @@ export default function App() {
       } else if (mod && !e.shiftKey && key === 't') {
         e.preventDefault();
         setQuick('symbol');
-      } else if (mod && e.shiftKey && key === 'b') {
-        // N20：在光标处加 / 去书签
-        e.preventDefault();
-        if (store.openFile) {
-          useStore.getState().toggleBookmark(store.openFile, cursor.line, cursor.col);
-        }
       } else if (mod && !e.shiftKey && /^[0-9]$/.test(key)) {
-        // N-δ：键盘可达 —— Ctrl/Cmd+1..3 = 文件/大纲/搜索（常驻），4..9 与 0 = 「更多」里的辅助面板。
+        // N-δ：键盘可达 —— Ctrl/Cmd+1..4 = 左栏四个 tab（文件 / 大纲 / 搜索 / code会话），0 = 最后一个。
         e.preventDefault();
-        setTab(key === '0' ? PANEL_TABS[PANEL_TABS.length - 1] : PANEL_TABS[Number(key) - 1]);
+        // 面板搬走后 PANEL_TABS 会变短：越界时什么都不做（否则会 setTab(undefined)，看上去像面板空了）
+        const next = key === '0' ? PANEL_TABS[PANEL_TABS.length - 1] : PANEL_TABS[Number(key) - 1];
+        if (next) setTab(next);
       } else if (mod && e.shiftKey && key === 'f') {
         e.preventDefault();
         setTab('search');
@@ -523,38 +612,14 @@ export default function App() {
     if (!id) {
       useMapStore.getState().reset();
       useGuideStore.getState().reset();
-      useNotesStore.getState().reset();
       useChangesStore.getState().reset();
       useExplainStore.getState().reset();
       return;
     }
     void useMapStore.getState().load(id);
     void useGuideStore.getState().load(id);
-    useNotesStore.getState().load(id);
     void useChangesStore.getState().load(id);
   }, [store.projectId, store.status?.indexedAt, store.tree]);
-
-  // P9 入口的能力探测：先看服务自述里有没有声明这个端点——
-  // 旧后端不声明就不发请求（既隐藏入口，也不产生 404 噪音），不报错、不弹红。
-  useEffect(() => {
-    const id = store.projectId;
-    if (!id) {
-      setReportAvailable(false);
-      return;
-    }
-    let cancelled = false;
-    api
-      .manifest()
-      .then((m) => {
-        if (!cancelled) setReportAvailable(Boolean(m.endpoints?.indexReport));
-      })
-      .catch(() => {
-        if (!cancelled) setReportAvailable(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [store.projectId]);
 
   const crumbs = useMemo(() => symbolPathAt(store.symbols, cursor.line), [store.symbols, cursor.line]);
   const searchDirOptions = useMemo(() => topDirs(store.tree), [store.tree]);
@@ -678,7 +743,8 @@ export default function App() {
   }, [mapTimeline, mapOverview, mapPulse, store.tree, recentFilter, onlyOrphans]);
 
   /** 没有打开文件时，主区就是项目地图（落点 C：首屏即主页）。 */
-  const showMap = mainView === 'map' || !store.openFile;
+  // agent 模式下强制不显示地图（地图与 agent 都占主区）
+  const showMap = mainView !== 'agent' && (mainView === 'map' || !store.openFile);
 
   /** 提示条上的「退而求其次」动作：拿符号名发起项目内全文搜索（N2）。 */
   const searchByName = (name: string) => {
@@ -699,14 +765,6 @@ export default function App() {
   const copySnippet = (file: string, startLine: number, endLine: number, text: string) =>
     useStore.getState().copySnippet({ file, startLine, endLine, text });
 
-  /** S3b：光标处符号 → 摘要（签名 + 位置）；认不出符号时退化为复制位置。 */
-  const copySymbolAt = (file: string, line: number, col: number) =>
-    useStore.getState().copySymbolAt(file, line, col);
-
-  const bookmarked = store.openFile
-    ? store.bookmarks.some((b) => b.file === store.openFile && b.line === cursor.line)
-    : false;
-
   return (
     <div className="app">
       <TopBar
@@ -719,8 +777,7 @@ export default function App() {
         onForget={(id) => setConfirmAction({ kind: 'forget', id })}
         onReindex={() => setConfirmAction({ kind: 'reindex' })}
         onOpenSettings={() => setSettingsOpen(true)}
-        onOpenPrivacy={() => setPrivacyOpen(true)}
-        onOpenReport={reportAvailable ? () => setReportOpen(true) : undefined}
+        onOpenModel={() => setModelOpen(true)}
       />
 
       <div className="body">
@@ -735,143 +792,29 @@ export default function App() {
             onPointerDown={onSidebarResizeStart}
             onKeyDown={onSidebarResizeKey}
           />
-          {/* tab 顺序只来自 PANEL_TABS（快捷键用同一份），不要再在这里手写一遍 */}
+          {/* tab 顺序只来自 LEFT_TABS（快捷键用同一份），不要再在这里手写一遍 */}
           <div className="panel-tabs" role="tablist" aria-label="侧栏面板">
-            {PRIMARY_TABS.map((id) => renderTabButton(id))}
-            {/* 辅助面板收进「更多」：默认只留阅读必需的三个入口 */}
-            <div className="panel-more">
-              <button
-                type="button"
-                role="tab"
-                id={SECONDARY_TABS.includes(tab) ? `wcr-tab-${tab}` : 'wcr-tab-more'}
-                aria-selected={SECONDARY_TABS.includes(tab)}
-                aria-haspopup="menu"
-                aria-expanded={moreOpen}
-                aria-controls="wcr-side-panel"
-                className={SECONDARY_TABS.includes(tab) ? 'active' : ''}
-                onClick={() => setMoreOpen((v) => !v)}
-                title="更多面板：总览 / 向导 / 引用 / 层级 / 变更 / 书签 / 批注"
-              >
-                {SECONDARY_TABS.includes(tab) ? tabLabel(tab) : '更多 ▾'}
-              </button>
-              {moreOpen && (
-                <>
-                  <div className="panel-more-backdrop" onClick={() => setMoreOpen(false)} />
-                  <div className="panel-more-menu" role="menu">
-                    {SECONDARY_TABS.map((id) => (
-                      <button
-                        key={id}
-                        id={`wcr-tab-${id}`}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={tab === id}
-                        className={tab === id ? 'active' : ''}
-                        onClick={() => {
-                          setTab(id);
-                          setMoreOpen(false);
-                        }}
-                      >
-                        {tabLabel(id)}
-                        {tabCount(id) > 0 && <span className="tab-count">{tabCount(id)}</span>}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
+            {LEFT_TABS.map((id) => renderTabButton(id))}
           </div>
 
           {/* P25：面板容器补 tabpanel 语义（aria-labelledby 指向当前 tab） */}
           <div className="panel-body" role="tabpanel" id="wcr-side-panel" aria-labelledby={`wcr-tab-${tab}`}>
 
-          {tab === 'notes' && (
-            <AnnotationsPanel
-              file={store.openFile}
-              cursor={cursor}
-              onJump={(file, line, col) => jump(file, line, col)}
-            />
-          )}
-
-          {tab === 'marks' && (
-            <div className="marks-panel">
-              <div className="marks-head">
-                <span className="muted">{store.bookmarks.length} 处标记</span>
-                <span className="spacer" />
-                <button
-                  className="btn ghost small"
-                  title="导出书签 JSON（可以贴给别人 / 跨机器）"
-                  onClick={() => {
-                    const json = useStore.getState().exportBookmarks();
-                    void navigator.clipboard?.writeText(json);
-                  }}
-                >
-                  导出
-                </button>
-                <label className="btn ghost small" title="导入书签 JSON（合并去重）">
-                  导入
-                  <input
-                    type="file"
-                    accept=".json,application/json"
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (!f) return;
-                      void f.text().then((text) => useStore.getState().importBookmarks(text));
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-              </div>
-              <div className="marks-body">
-                {!store.bookmarks.length && <div className="panel-empty">Ctrl/Cmd+Shift+B 在当前行加书签</div>}
-                {store.bookmarks.map((b) => (
-                  <div
-                    key={`${b.file}:${b.line}:${b.col}`}
-                    className="nav-row"
-                    onClick={() => jump(b.file, b.line, b.col)}
-                    title={`${b.file}:${b.line}:${b.col}`}
-                  >
-                    <span className="nav-name">{b.file.split('/').pop()}</span>
-                    <span className="nav-count">L{b.line}</span>
-                    <span className="nav-path">{b.file}</span>
-                    <button
-                      className="btn ghost small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        useStore.getState().removeBookmark(b.file, b.line, b.col);
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="nav-foot">书签存在本机浏览器，不写被读目录</div>
-            </div>
-          )}
-
-          {/* 「变更」已改到右侧常驻（见 .dock-changes），不再占侧栏 tab */}
-
-          {tab === 'service' && <CommandPanel />}
-
-          {tab === 'overview' && (
-            <OverviewPanel
-              onOpenFile={(file, line) => jump(file, line ?? 1, 1)}
-              onOpenMap={() => setMainView('map')}
-              onOpenGraph={() => setGraphOpen(true)}
-            />
-          )}
+          {/* 「变更」「命令」「总览」都在右侧常驻栏（见 .dock-changes），不再占侧栏 tab */}
 
           {tab === 'files' && (
             <>
               <input
                 className="text-input sidebar-filter"
-                placeholder="过滤文件名"
+                placeholder={`过滤文件名（≥${MIN_LEN} 字同时搜内容）`}
                 value={fileFilter}
                 onChange={(e) => setFileFilter(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setFileFilter('');
+                }}
               />
-              {/* 2026-10-03：搜内容也在这里（独立搜索面板收进「更多」） */}
-              <FileSearch onOpen={(file, line, col) => jump(file, line, col)} />
+              {/* 2026-10-03：文件名过滤与内容搜索共用一个输入框（≥4 字才搜内容） */}
+              <FileSearch query={fileFilter} onOpen={(file, line, col) => jump(file, line, col)} />
               <div className="tree-views">
                 <select
                   className="ov-select"
@@ -911,7 +854,6 @@ export default function App() {
               fileName={store.openFile}
               cursorLine={cursor.line}
               onJump={(s) => jump(s.location.file, s.location.range.start.line, s.location.range.start.col)}
-              onCopySymbol={(s) => useStore.getState().copySymbolSummary(s)}
             />
           )}
 
@@ -937,10 +879,29 @@ export default function App() {
               />
             </div>
           )}
+
+          {tab === 'agent' &&
+            (store.projectId ? (
+              <AgentSessions
+                projectId={store.projectId}
+                onBack={() => setMainView('auto')}
+                onOpen={() => setMainView('agent')}
+              />
+            ) : (
+              <div className="panel-empty">先打开一个项目</div>
+            ))}
           </div>
         </aside>
 
         <main className="main">
+          {mainView === 'agent' ? (
+            <AgentView
+              projectId={store.projectId ?? ''}
+              projectName={store.project?.name ?? store.projectId ?? ''}
+              onBack={() => setMainView('auto')}
+            />
+          ) : (
+            <>
           <div className="nav-bar">
             <button
               className="btn ghost guide-home"
@@ -1019,30 +980,10 @@ export default function App() {
             {store.openFile && (
               <button
                 className="btn ghost small"
-                onClick={() =>
-                  useStore.getState().toggleBookmark(store.openFile!, cursor.line, cursor.col)
-                }
-                title="Ctrl/Cmd+Shift+B：标记 / 取消标记当前行"
-              >
-                {bookmarked ? '★ 已标记' : '☆ 标记'}
-              </button>
-            )}
-            {store.openFile && (
-              <button
-                className="btn ghost small"
                 onClick={() => copyLocation(store.openFile!, cursor.line, cursor.col)}
                 title="复制位置（Ctrl/Cmd+Alt+C）：path:line:col"
               >
                 复制位置
-              </button>
-            )}
-            {store.openFile && (
-              <button
-                className="btn ghost small"
-                onClick={() => copySymbolAt(store.openFile!, cursor.line, cursor.col)}
-                title="复制光标处符号摘要（名字 + 种类 + 签名 + 位置）；认不出符号时复制位置"
-              >
-                复制符号
               </button>
             )}
             {store.openFile && (
@@ -1063,25 +1004,11 @@ export default function App() {
                 {mainView === 'map' ? '回到代码' : '项目地图'}
               </button>
             )}
-            {/* M20 地图快照：当前视图（地图/依赖图/口径）已经写进 URL，这里只是把它交出去 */}
             {/* 05 信使：分享 / 导出 / 批注 / 给 agent 用（一个下拉收口，不再往顶栏堆按钮） */}
             <ShareMenu
               cursor={cursor}
               searchQuery={searchQuery}
-              onOpenAnnotations={() => setTab('notes')}
             />
-            <button
-              className="btn ghost"
-              title="把当前地图视图（含热点口径、依赖图展开的目录）复制成链接"
-              onClick={() => {
-                void navigator.clipboard
-                  .writeText(window.location.href)
-                  .then(() => useStore.getState().setError(null))
-                  .catch(() => useStore.getState().setError('复制失败：浏览器拒绝了剪贴板访问'));
-              }}
-            >
-              复制地图链接
-            </button>
           </div>
 
           {/* N19：标签条（上限 8 + LRU + 同文件合并） */}
@@ -1135,9 +1062,7 @@ export default function App() {
                     onPosition={(line, col, scrollTop) => rememberPosition(store.openFile!, line, col, scrollTop)}
                     onCopyLocation={copyLocation}
                     onCopySnippet={copySnippet}
-                    onCopySymbol={copySymbolAt}
                     onOpenFile={jump}
-                    annotations={store.annotations}
                     blame={blameOn ? blame?.lines ?? null : null}
                     onOpenHistory={openHistoryVersion}
                     onExplain={openExplain}
@@ -1178,9 +1103,7 @@ export default function App() {
                       }
                       onCopyLocation={copyLocation}
                       onCopySnippet={copySnippet}
-                      onCopySymbol={copySymbolAt}
                       onOpenFile={jump}
-                      annotations={store.annotations}
                       historyRev={secondaryDoc.rev}
                     />
                   </div>
@@ -1189,10 +1112,7 @@ export default function App() {
             ) : (
               // 死分支留给兜底：无项目时同样是三步引导（正常路径下主区总是项目地图）
               <div className="welcome">
-                <Welcome
-                  variant={store.projectId ? 'empty' : 'first'}
-                  onOpenReport={reportAvailable ? () => setReportOpen(true) : undefined}
-                />
+                <Welcome variant={store.projectId ? 'empty' : 'first'} />
               </div>
             )}
             {store.fileLoading && <div className="loading-mask">加载中…</div>}
@@ -1215,35 +1135,90 @@ export default function App() {
             <span>{store.fileLang}</span>
             <span>{store.status?.indexing ? '索引中' : '就绪'}</span>
           </footer>
+            </>
+          )}
         </main>
 
-        {/* 2026-10-03 用户要求：「变更」直接常驻在右边（不再占侧栏一个 tab）。 */}
+        {/* 2026-10-03 用户要求：「变更」「命令」都常驻在右边（不再占侧栏 tab），默认显示变更。 */}
         {store.projectId && (
           <aside
             className={`dock-changes ${changesDockOpen ? '' : 'collapsed'}`}
             style={changesDockOpen ? { width: changesDockWidth } : undefined}
-            aria-label="自上次阅读以来的变更"
+            aria-label="变更 / 命令 / 总览"
           >
             {changesDockOpen && (
               <div
                 className="dock-resizer"
                 role="separator"
                 aria-orientation="vertical"
-                aria-label="调整变更栏宽度"
+                aria-label="调整右侧栏宽度"
                 tabIndex={0}
                 onPointerDown={onChangesDockResizeStart}
               />
             )}
-            <button
-              className="dock-toggle"
-              onClick={() => setChangesDockOpen((v) => !v)}
-              title={changesDockOpen ? '收起变更栏' : '展开变更栏'}
-            >
-              {changesDockOpen ? '变更 ▸' : '◂ 变更'}
-            </button>
+            <div className="dock-head">
+              <button
+                className="dock-toggle"
+                onClick={() => setChangesDockOpen((v) => !v)}
+                title={changesDockOpen ? '收起右侧栏' : '展开右侧栏'}
+              >
+                {changesDockOpen ? '▸' : '◂'}
+              </button>
+              {changesDockOpen && (
+                <div className="dock-tabs" role="tablist" aria-label="右侧栏面板">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={dockTab === 'changes'}
+                    className={`dock-tab${dockTab === 'changes' ? ' active' : ''}`}
+                    title="工作区改动（git status）与 add / commit / pull / push"
+                    onClick={() => setDockTab('changes')}
+                  >
+                    变更
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={dockTab === 'service'}
+                    className={`dock-tab${dockTab === 'service' ? ' active' : ''}`}
+                    title="服务状态与重启 / 停止"
+                    onClick={() => setDockTab('service')}
+                  >
+                    命令
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={dockTab === 'overview'}
+                    className={`dock-tab${dockTab === 'overview' ? ' active' : ''}`}
+                    title="项目总览：规模 / 起点 / 结构告警 / 本轮产出"
+                    onClick={() => setDockTab('overview')}
+                  >
+                    总览
+                  </button>
+                </div>
+              )}
+            </div>
             {changesDockOpen && (
               <div className="dock-body">
-                <ChangesPanel onOpenFile={(file) => jump(file)} onOpenDiff={(file) => setDiffFile(file)} />
+                {dockTab === 'changes' ? (
+                  <ChangesPanel onOpenFile={(file) => jump(file)} onOpenDiff={(file) => setDiffFile(file)} />
+                ) : dockTab === 'service' ? (
+                  <CommandPanel
+                    projectId={store.projectId}
+                    onOpenSession={(sessionId) => {
+                      const agent = useAgent.getState();
+                      void agent.refreshSessions().then(() => agent.select(sessionId));
+                      setMainView('agent');
+                    }}
+                  />
+                ) : (
+                  <OverviewPanel
+                    onOpenFile={(file, line) => jump(file, line ?? 1, 1)}
+                    onOpenMap={() => setMainView('map')}
+                    onOpenGraph={() => setGraphOpen(true)}
+                  />
+                )}
               </div>
             )}
           </aside>
@@ -1338,28 +1313,9 @@ export default function App() {
         onOpenFile={jump}
       />
 
-      {/* P24 / P17 / P9 浮层 */}
-      {settingsOpen && (
-        <SettingsPanel
-          onClose={() => setSettingsOpen(false)}
-          onOpenPrivacy={() => {
-            setSettingsOpen(false);
-            setPrivacyOpen(true);
-          }}
-          onOpenReport={
-            reportAvailable
-              ? () => {
-                  setSettingsOpen(false);
-                  setReportOpen(true);
-                }
-              : undefined
-          }
-        />
-      )}
-      {privacyOpen && <PrivacyPanel onClose={() => setPrivacyOpen(false)} />}
-      {reportOpen && store.projectId && (
-        <IndexReportDialog projectId={store.projectId} onClose={() => setReportOpen(false)} />
-      )}
+      {/* P24 浮层：设置 · 模型 */}
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {modelOpen && <ModelDialog onClose={() => setModelOpen(false)} />}
 
       {confirmAction && (
         <Dialog
@@ -1396,6 +1352,18 @@ export default function App() {
           <button className="btn ghost" onClick={() => useStore.getState().setError(null)}>
             关闭
           </button>
+        </div>
+      )}
+
+      {/* 命令结果冒泡（2026-10-03）：变更栏的 git 命令结果走这里，点一下收起 */}
+      {store.toast && (
+        <div
+          className={`toast-run ${store.toast.ok ? 'ok' : 'bad'}`}
+          role="status"
+          title="点击关闭"
+          onClick={() => showToast(null)}
+        >
+          {store.toast.text}
         </div>
       )}
     </div>

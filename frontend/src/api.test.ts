@@ -77,6 +77,25 @@ describe('api', () => {
     expect(JSON.parse(String(init?.body))).toEqual({ file: 'src/a.ts', line: 3, col: 7 });
   });
 
+  it('gitWrite：四个命令走 POST，push 额外带 confirm=1，commit 的说明放 body', async () => {
+    const fn = mockFetch(() => jsonResponse({ ok: true }));
+
+    await api.gitWrite('p1', 'add');
+    let [url, init] = callOf(fn, 0);
+    expect(String(url)).toBe(`${BASE}/projects/p1/git-write`);
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({ action: 'add' });
+
+    await api.gitWrite('p1', 'push');
+    [url, init] = callOf(fn, 1);
+    expect(String(url)).toBe(`${BASE}/projects/p1/git-write?confirm=1`);
+
+    await api.gitWrite('p1', 'commit', '修一个 bug');
+    [url, init] = callOf(fn, 2);
+    expect(String(url)).toBe(`${BASE}/projects/p1/git-write`);
+    expect(JSON.parse(String(init?.body))).toEqual({ action: 'commit', message: '修一个 bug' });
+  });
+
   it('searchStream 解析 chunk / done 事件并回调命中', async () => {
     const chunk = { matches: [{ file: 'a.ts', range: {} }], truncated: false };
     const done = { fileCount: 1, truncated: false, total: 1 };

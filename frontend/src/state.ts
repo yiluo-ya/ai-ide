@@ -14,16 +14,10 @@ import type {
   TypeHierarchyResult,
 } from './api';
 import { api, subscribeEvents } from './api';
-import {
-  newAnnotationId,
-  readAnnotations,
-  writeAnnotations,
-  type AnnotationThread,
-} from './annotations';
 import { setRead as setReadMark } from './marks';
 import { useGuideStore } from './guideState';
 import { flushSnapshot, scheduleSnapshotWrite } from './readSnapshot';
-import { formatLineRange, formatSnippet, formatSymbolSummary, type SnippetInput } from './share';
+import { formatLineRange, formatSnippet, type SnippetInput } from './share';
 
 export interface RevealRequest {
   file: string;
@@ -58,14 +52,6 @@ export interface TabInfo {
   file: string;
   line: number;
   col: number;
-}
-
-/** 书签（N20）：本机持久化，可导出。 */
-export interface Bookmark {
-  file: string;
-  line: number;
-  col: number;
-  note?: string;
 }
 
 /** 位置记忆（N22）：每文件的光标 / 滚动位置。 */
@@ -104,6 +90,13 @@ export interface GotoNotice {
   message: string;
   /** reason=external 时的来源详情（Q1）：模块名与 import 位置。 */
   external?: ExternalSource;
+}
+
+/** 右下角冒泡（命令结果 / 一键动作的反馈）：只有一句话 + 成功失败两态。 */
+export interface RunToast {
+  id: number;
+  text: string;
+  ok: boolean;
 }
 
 interface State {
@@ -145,15 +138,13 @@ interface State {
   tabs: TabInfo[];
   /** 分屏（N19）：第二窗格；null = 单栏。 */
   secondary: RevealRequest | null;
-  /** 书签（N20，本机持久化）。 */
-  bookmarks: Bookmark[];
   /** 位置记忆（N22，本机持久化）：file → 位置。 */
   positions: Record<string, MemoryPosition>;
-  /** S10：批注线程（本机持久化，按项目分片；不写被读目录）。 */
-  annotations: AnnotationThread[];
   error: string | null;
   reveal: RevealRequest | null;
   notice: GotoNotice | null;
+  /** 右下角冒泡（2026-10-03：变更栏的 git 命令结果用）；几秒后自动消失。 */
+  toast: RunToast | null;
   history: Array<{ file: string; line: number; col: number }>;
   historyIndex: number;
 
@@ -186,30 +177,12 @@ interface State {
   openSecondaryText: (file: string, text: string, lang: string, rev: string) => void;
   closeSecondary: () => void;
   closeTab: (file: string) => void;
-  /** N20：在当前光标处加/去书签。 */
-  toggleBookmark: (file: string, line: number, col: number, note?: string) => void;
-  removeBookmark: (file: string, line: number, col: number) => void;
-  /** N20：导出 / 导入书签 JSON（衔接 05 信使）。 */
-  exportBookmarks: () => string;
-  importBookmarks: (json: string) => number;
   /** N22：记录某文件的光标与滚动位置。 */
   rememberPosition: (file: string, position: MemoryPosition) => void;
   /** 判据 6：复制 `path:line:col` 到剪贴板，并在状态栏轻提示。 */
   copyLocation: (file: string, line: number, col: number) => void;
   /** S3a：把选中的一段代码连同出处（`path:行范围` + 围栏语言）复制走。 */
   copySnippet: (input: Omit<SnippetInput, 'file' | 'lang'> & { file?: string; lang?: string }) => void;
-  /** S3b：复制某个符号的摘要（名字 + 种类 + 签名 + `path:line:col`）。 */
-  copySymbolSummary: (symbol: SymbolInfo, file?: string) => void;
-  /** S3b：复制光标处符号摘要；光标处没有可识别符号时退化为复制位置。 */
-  copySymbolAt: (file: string, line: number, col: number) => void;
-  /** S10：在指定位置加一条批注。 */
-  addAnnotation: (file: string, line: number, col: number, text: string) => void;
-  /** S10：回复某条批注。 */
-  replyAnnotation: (id: string, text: string) => void;
-  /** S10：标为已解决 / 重新打开。 */
-  toggleAnnotationResolved: (id: string) => void;
-  /** S10：删除一条批注。 */
-  removeAnnotation: (id: string) => void;
   setError: (message: string | null) => void;
   showNotice: (notice: GotoNotice) => void;
   dismissNotice: () => void;
@@ -232,6 +205,28 @@ export function showFlash(text: string) {
     useStore.setState({ flash: null });
     flashTimer = null;
   }, 3000);
+}
+
+let toastTimer: number | null = null;
+let toastSeq = 0;
+
+/**
+ * 右下角冒泡：说一句结果，几秒后自己消失（命令类操作不需要用户点关闭）。
+ * 传 null 表示立刻收起；同一时刻只留一条（新的顶掉旧的）。
+ */
+export function showToast(text: string | null, ok = true) {
+  if (toastTimer != null) window.clearTimeout(toastTimer);
+  if (text === null) {
+    toastTimer = null;
+    useStore.setState({ toast: null });
+    return;
+  }
+  const id = (toastSeq += 1);
+  useStore.setState({ toast: { id, text, ok } });
+  toastTimer = window.setTimeout(() => {
+    if (useStore.getState().toast?.id === id) useStore.setState({ toast: null });
+    toastTimer = null;
+  }, 4000);
 }
 /** N12：正在进行的搜索请求（新一次搜索 / 停止按钮会中止它）。 */
 let searchAbort: AbortController | null = null;
@@ -312,34 +307,6 @@ function snapToSymbol(
   return { line, col };
 }
 
-/**
- * 符号树里包含某点的最内层符号；找不到返回 null（宁可不给，也不猜）。
- * S3b 的「复制符号摘要」用它把「光标停在哪一行」翻译成「这行的哪个符号」。
- */
-function symbolAtPoint(symbols: SymbolInfo[], line: number, col: number): SymbolInfo | null {
-  const flat: SymbolInfo[] = [];
-  const walk = (list: SymbolInfo[]) => {
-    for (const s of list) {
-      flat.push(s);
-      if (s.children?.length) walk(s.children);
-    }
-  };
-  walk(symbols);
-  const covering = flat.filter((s) => {
-    const r = s.range ?? s.location.range;
-    if (line < r.start.line || line > r.end.line) return false;
-    if (line === r.start.line && col < r.start.col) return false;
-    if (line === r.end.line && col > r.end.col) return false;
-    return true;
-  });
-  if (!covering.length) return null;
-  const span = (s: SymbolInfo) => {
-    const r = s.range ?? s.location.range;
-    return r.end.line - r.start.line;
-  };
-  return covering.reduce((a, b) => (span(a) <= span(b) ? a : b));
-}
-
 /** 文档类文件的预览上限：超过就不加载，直接提示（用户 2026-10-03 定的 100KB）。 */
 export const DOC_PREVIEW_MAX_BYTES = 100 * 1024;
 
@@ -386,25 +353,6 @@ function writePositions(projectId: string, positions: Record<string, MemoryPosit
       for (const k of keys.slice(0, keys.length - POSITION_LIMIT)) delete positions[k];
     }
     window.localStorage.setItem(`wcr:positions:${projectId}`, JSON.stringify(positions));
-  } catch {
-    /* 忽略配额错误 */
-  }
-}
-
-export function readBookmarks(projectId: string | null): Bookmark[] {
-  if (!projectId) return [];
-  try {
-    const raw = window.localStorage.getItem(`wcr:bookmarks:${projectId}`);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-    return Array.isArray(parsed) ? (parsed as Bookmark[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeBookmarks(projectId: string, bookmarks: Bookmark[]) {
-  try {
-    window.localStorage.setItem(`wcr:bookmarks:${projectId}`, JSON.stringify(bookmarks));
   } catch {
     /* 忽略配额错误 */
   }
@@ -466,12 +414,11 @@ export const useStore = create<State>((set, get) => ({
   flash: null,
   tabs: [],
   secondary: null,
-  bookmarks: [],
   positions: {},
-  annotations: [],
   error: null,
   reveal: null,
   notice: null,
+  toast: null,
   history: [],
   historyIndex: -1,
   highlightsToken: 0,
@@ -524,9 +471,7 @@ export const useStore = create<State>((set, get) => ({
       searchDirs: [],
       tabs: [],
       secondary: null,
-      bookmarks: readBookmarks(id),
       positions: readPositions(id),
-      annotations: readAnnotations(id),
       history: [],
       historyIndex: -1,
       highlightsToken: 0,
@@ -540,8 +485,13 @@ export const useStore = create<State>((set, get) => ({
       unsubscribeEvents = subscribeEvents(id, (event) => {
         if (event.type === 'status' || event.type === 'index-ready') {
           set({ status: event.status as IndexStatus });
-          // 索引刚完成：此前因未索引而没着的色要补上
-          if (event.type === 'index-ready') set((s) => ({ highlightsToken: s.highlightsToken + 1 }));
+          if (event.type === 'index-ready') {
+            // 索引刚完成：此前因未索引而没着的色要补上
+            set((s) => ({ highlightsToken: s.highlightsToken + 1 }));
+            // 索引完成意味着磁盘扫描也已就绪：补拉一次文件树。此前只在切项目时拉一次，
+            // 若那一次撞在扫描窗口里拿到空树 / 半棵树，用户会一直盯着空白面板不自动恢复。
+            void get().loadTree();
+          }
         } else if (event.type === 'file-changed' || event.type === 'file-deleted') {
           void get().loadTree();
           set((s) => ({ highlightsToken: s.highlightsToken + 1 }));
@@ -699,53 +649,6 @@ export const useStore = create<State>((set, get) => ({
     set({ tabs: get().tabs.filter((t) => t.file !== file) });
   },
 
-  toggleBookmark(file, line, col, note) {
-    const id = get().projectId;
-    if (!id) return;
-    const exists = get().bookmarks.some((b) => b.file === file && b.line === line);
-    const next = exists
-      ? get().bookmarks.filter((b) => !(b.file === file && b.line === line))
-      : [...get().bookmarks, { file, line, col, note }];
-    writeBookmarks(id, next);
-    set({ bookmarks: next });
-  },
-
-  removeBookmark(file, line, col) {
-    const id = get().projectId;
-    if (!id) return;
-    const next = get().bookmarks.filter((b) => !(b.file === file && b.line === line && b.col === col));
-    writeBookmarks(id, next);
-    set({ bookmarks: next });
-  },
-
-  /** N20：导出书签（衔接 05 信使的「带得走」）。 */
-  exportBookmarks() {
-    return JSON.stringify({ project: get().project?.name ?? null, bookmarks: get().bookmarks }, null, 2);
-  },
-
-  /** N20：导入书签（合并去重），返回新增条数。 */
-  importBookmarks(json) {
-    const id = get().projectId;
-    if (!id) return 0;
-    try {
-      const parsed = JSON.parse(json) as { bookmarks?: Bookmark[] } | Bookmark[];
-      const incoming = Array.isArray(parsed) ? parsed : parsed.bookmarks ?? [];
-      const merged = [...get().bookmarks];
-      let added = 0;
-      for (const b of incoming) {
-        if (!b || typeof b.file !== 'string' || typeof b.line !== 'number') continue;
-        if (merged.some((x) => x.file === b.file && x.line === b.line && x.col === b.col)) continue;
-        merged.push({ file: b.file, line: b.line, col: b.col ?? 1, note: b.note });
-        added += 1;
-      }
-      writeBookmarks(id, merged);
-      set({ bookmarks: merged });
-      return added;
-    } catch {
-      return 0;
-    }
-  },
-
   /** N22：记录某文件的光标与滚动位置（切走 / 关闭页面前随时可写）。 */
   rememberPosition(file, position) {
     const id = get().projectId;
@@ -769,73 +672,6 @@ export const useStore = create<State>((set, get) => ({
     const text = formatSnippet({ ...input, file, lang: input.lang ?? get().fileLang });
     void navigator.clipboard?.writeText(text);
     showFlash(`已复制片段 ${formatLineRange(file, input.startLine, input.endLine)}`);
-  },
-
-  /** S3b：某个符号 →「谁、在哪、签名是什么」（不贴整段实现）。 */
-  copySymbolSummary(symbol, file) {
-    const text = formatSymbolSummary({ symbol, file: file ?? get().openFile ?? undefined });
-    void navigator.clipboard?.writeText(text);
-    showFlash(`已复制符号摘要 ${symbol.name}`);
-  },
-
-  /** S3b：右键菜单入口 —— 先就近吸附到符号，再退化为复制位置。 */
-  copySymbolAt(file, line, col) {
-    const symbols = get().symbols;
-    const snapped = snapToSymbol(symbols, line, col);
-    const symbol = symbolAtPoint(symbols, snapped.line, snapped.col);
-    if (!symbol) {
-      get().copyLocation(file, line, col);
-      return;
-    }
-    get().copySymbolSummary(symbol, symbol.location.file || file);
-  },
-
-  /** S10：批注改动只落本机（localStorage），不动被读目录 —— 这是「只读」边界的一部分。 */
-  addAnnotation(file, line, col, text) {
-    const id = get().projectId;
-    if (!id) return;
-    const next = [
-      ...get().annotations,
-      {
-        id: newAnnotationId(),
-        file,
-        line,
-        col,
-        text,
-        replies: [],
-        createdAt: Date.now(),
-      } satisfies AnnotationThread,
-    ];
-    writeAnnotations(id, next);
-    set({ annotations: next });
-  },
-
-  replyAnnotation(id, text) {
-    const projectId = get().projectId;
-    if (!projectId) return;
-    const next = get().annotations.map((a) =>
-      a.id === id ? { ...a, replies: [...a.replies, { text, at: Date.now() }] } : a,
-    );
-    writeAnnotations(projectId, next);
-    set({ annotations: next });
-  },
-
-  toggleAnnotationResolved(id) {
-    const projectId = get().projectId;
-    if (!projectId) return;
-    const next = get().annotations.map((a) =>
-      a.id === id ? { ...a, resolved: !a.resolved } : a,
-    );
-    writeAnnotations(projectId, next);
-    set({ annotations: next });
-  },
-
-  removeAnnotation(id) {
-    const projectId = get().projectId;
-    if (!projectId) return;
-    const next = get().annotations.filter((a) => a.id !== id);
-    writeAnnotations(projectId, next);
-    set({ annotations: next });
   },
 
   async goBack() {

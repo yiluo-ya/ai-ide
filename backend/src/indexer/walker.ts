@@ -58,12 +58,34 @@ export interface ModuleHint {
   projectMeta: Record<string, string>;
 }
 
+/**
+ * 行式格式（Dockerfile / ini / env / conf / SQL）扫出的一个顶层符号。
+ * 这些格式没有可用的 tree-sitter 语法包，只能按行做只读语法扫描。
+ */
+export interface LineSymbol {
+  name: string;
+  kind: SymbolKind;
+  /** 1-based 行号。 */
+  line: number;
+  /** 1-based 列（UTF-16 code unit）。 */
+  col: number;
+  /** 名字结束列（不含）；缺省按名字长度算。 */
+  endCol?: number;
+  /** 展示用的一行说明（缺省取该行正文）。 */
+  detail?: string | null;
+}
+
 export interface LanguageSpec {
   id: LangId;
   label: string;
   /** 小写扩展名，含点。 */
   extensions: string[];
-  grammar: unknown;
+  /** 没有扩展名的固定文件名（小写），如 Dockerfile、.env。 */
+  filenames?: string[];
+  /** tree-sitter 语法；行式格式（lineSymbols）不需要。 */
+  grammar?: unknown;
+  /** 行式格式的符号扫描（与 grammar 二选一）。 */
+  lineSymbols?: (source: string) => LineSymbol[];
   /** node.type → 作用域规则。 */
   scopes: Record<string, ScopeRule>;
   /** node.type → 处理器（返回 true 表示已完全处理，不再自动遍历子节点）。 */

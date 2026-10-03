@@ -106,7 +106,11 @@ export function projectMap(project: ProjectIndex): ProjectMap {
 const ENTRY_STEMS = new Set(['main', 'index', 'app', 'cli', 'cmd', 'server', 'start', 'entry', 'manage', 'wsgi', 'asgi', '__main__']);
 
 const TEST_DIR_RE = /(^|\/)(__tests__|tests?|specs?|examples?|samples?|fixtures?|e2e|benchmarks?|demo)(\/|$)/i;
-const DOC_EXT_RE = /\.(md|markdown|txt|rst|json|ya?ml|toml|ini|cfg|conf|properties|xml|html|css|scss|less|sh|bat|cmd|ps1|sql|gitignore|editorconfig|npmrc|env)$/i;
+/**
+ * 文档 / 配置类扩展名（2026-10-03 收紧）：只留「不是该读完的代码」的那些。
+ * shell / sql / css / html / json / yaml / toml 已进符号索引，按代码算，不再归到这里。
+ */
+const DOC_EXT_RE = /\.(md|markdown|txt|rst|xml|ini|cfg|conf|properties|env|gitignore|editorconfig|npmrc)$/i;
 const DOC_BASE_RE = /^(readme|license|licence|changelog|contributing|notice|makefile|dockerfile|procfile)\.?/i;
 
 export function isTestFile(rel: string): boolean {

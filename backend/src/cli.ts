@@ -14,7 +14,7 @@ import path from 'node:path';
 const VERSION = '0.1.0';
 
 const USAGE = [
-  'wcr —— 浏览器里的代码阅读器（只读 · 不上传 · 代码不出本机）',
+  'wcr —— 浏览器里的代码阅读器',
   '',
   '用法：',
   '  wcr [目录] [选项]',
@@ -136,7 +136,6 @@ const root = args.dir ? path.resolve(args.dir) : null;
 for (const opt of args.unknown) logWarn('cli.arg.unknown', { arg: opt });
 
 say('web-code-reader');
-say('只读 · 不上传 · 代码不出本机');
 say();
 
 // 1) 单实例：已有实例就直接给地址，不起第二个进程（P15）

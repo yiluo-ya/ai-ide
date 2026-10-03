@@ -2,7 +2,7 @@
   "name": "web-code-reader",
   "version": "0.1.0",
   "private": true,
-  "description": "浏览器里的代码阅读器：后端 tree-sitter 索引 + Monaco 前端（只读，不上传，代码不出本机）",
+  "description": "浏览器里的代码阅读器：后端 tree-sitter 索引 + Monaco 前端（可选内置 code-agent）",
   "license": "MIT",
   "bin": {
     "wcr": "bin/wcr.mjs"

@@ -47,7 +47,18 @@ describe('prefs', () => {
       JSON.stringify({ theme: 'light', fontSize: 99, sidebarWidth: -5, locale: 'fr' }),
     );
     const { loadPrefs } = await loadPrefsModule();
-    expect(loadPrefs()).toEqual({ theme: 'light', fontSize: 18, sidebarWidth: 240, locale: 'zh' });
+    expect(loadPrefs()).toEqual({
+      theme: 'light',
+      fontSize: 18,
+      sidebarWidth: 240,
+      locale: 'zh',
+      wrap: false,
+      tabSize: 4,
+      minimap: true,
+      whitespace: false,
+      reduceMotion: false,
+      changesOpen: true,
+    });
   });
 
   it('字号夹取到 12–18，非有限数回落默认值', async () => {
@@ -86,9 +97,31 @@ describe('prefs', () => {
   });
 
   it('savePrefs 的 patch 同样经过收敛（越界 / 未知值不会写进去）', async () => {
-    const { loadPrefs, savePrefs } = await loadPrefsModule();
+    const { loadPrefs, savePrefs, DEFAULT_PREFS } = await loadPrefsModule();
     savePrefs({ fontSize: 100, locale: 'de' as never, theme: 'neon' as never });
-    expect(loadPrefs()).toEqual({ theme: 'dark', fontSize: 18, sidebarWidth: 320, locale: 'zh' });
+    expect(loadPrefs()).toEqual({ ...DEFAULT_PREFS, fontSize: 18 });
+  });
+
+  it('编辑器 / 界面细项：合法值生效，越界与非法值回落默认', async () => {
+    window.localStorage.setItem(
+      'wcr:prefs',
+      JSON.stringify({ wrap: true, tabSize: 2, minimap: false, whitespace: true, reduceMotion: true, changesOpen: false }),
+    );
+    let mod = await loadPrefsModule();
+    expect(mod.loadPrefs()).toMatchObject({
+      wrap: true,
+      tabSize: 2,
+      minimap: false,
+      whitespace: true,
+      reduceMotion: true,
+      changesOpen: false,
+    });
+
+    vi.resetModules();
+    window.localStorage.setItem('wcr:prefs', JSON.stringify({ tabSize: 99, wrap: 'yes' }));
+    mod = await loadPrefsModule();
+    expect(mod.loadPrefs().tabSize).toBe(8); // 夹到上限
+    expect(mod.loadPrefs().wrap).toBe(false); // 非布尔一律回落默认
   });
 
   it('theme=system 时跟随系统，其余模式按字面值', async () => {
@@ -101,13 +134,14 @@ describe('prefs', () => {
     expect(resolvedTheme('dark')).toBe('dark');
   });
 
-  it('applyPrefs 把主题 / 字号 / 侧栏宽 / 语言写到 :root', async () => {
+  it('applyPrefs 把主题 / 字号 / 侧栏宽 / 语言 / 动效写到 :root', async () => {
     const { savePrefs } = await loadPrefsModule();
-    savePrefs({ theme: 'light', fontSize: 15, sidebarWidth: 400, locale: 'en' });
+    savePrefs({ theme: 'light', fontSize: 15, sidebarWidth: 400, locale: 'en', reduceMotion: true });
     const root = document.documentElement;
     expect(root.dataset.theme).toBe('light');
     expect(root.style.getPropertyValue('--ui-font-size')).toBe('15px');
     expect(root.style.getPropertyValue('--sidebar-width')).toBe('400px');
+    expect(root.dataset.motion).toBe('reduced');
     expect(root.lang).toBe('en');
     expect(document.title).toBe('Web Code Reader');
   });

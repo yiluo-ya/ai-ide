@@ -69,6 +69,19 @@ const HARD_PROTECTED = new Set(['node_modules', '.git']);
 /** 生效的规则文件（相对项目根，按优先级从低到高）。 */
 export const IGNORE_FILES = ['.gitignore', '.wcrignore'] as const;
 
+/** 设置面板里的自定义规则在 sources 里的显示名。 */
+export const USER_RULES_SOURCE = '(设置)';
+
+/**
+ * 自定义规则文本（2026-10-03）：对所有项目生效，且优先级最高。
+ * 由宿主注入（server 启动时 prime、保存设置时 write），判定器自己不碰磁盘。
+ */
+let userRulesText = '';
+
+export function setUserIgnoreRules(text: string): void {
+  userRulesText = text;
+}
+
 interface IgnoreRule {
   negate: boolean;
   dirOnly: boolean;
@@ -157,6 +170,13 @@ export class IgnoreMatcher {
       const parsed = parseIgnoreFile(text, rel);
       this.rules.push(...parsed);
       this.sources.push({ path: rel, rules: parsed.length });
+    }
+    // 设置里的自定义规则：最后加载 → 优先级最高
+    const extra = userRulesText.trim();
+    if (extra) {
+      const parsed = parseIgnoreFile(extra, USER_RULES_SOURCE);
+      this.rules.push(...parsed);
+      this.sources.push({ path: USER_RULES_SOURCE, rules: parsed.length });
     }
   }
 

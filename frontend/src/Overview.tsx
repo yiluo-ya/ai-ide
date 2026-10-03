@@ -28,8 +28,6 @@ import './guide.css';
 interface Props {
   onOpenFile: (file: string, line?: number) => void;
   onOpenGraph: () => void;
-  /** P9 出口：后端提供索引报告端点时才传（拿不到就隐藏入口，不报错）。 */
-  onOpenReport?: () => void;
   /** W3 / G8：切到变更面板（「看全部 →」）。 */
   onOpenChanges?: () => void;
 }
@@ -38,17 +36,6 @@ function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
-}
-
-function fmtWhen(ms: number, now = Date.now()): string {
-  const diff = now - ms;
-  const minute = 60_000;
-  if (diff < minute) return '刚刚';
-  if (diff < 60 * minute) return `${Math.floor(diff / minute)} 分钟前`;
-  if (diff < 24 * 60 * minute) return `${Math.floor(diff / (60 * minute))} 小时前`;
-  const days = Math.floor(diff / (24 * 60 * minute));
-  if (days < 30) return `${days} 天前`;
-  return new Date(ms).toLocaleDateString();
 }
 
 /** M3.2 六档口径的中文说明。 */
@@ -124,8 +111,9 @@ function EntryRow({
         <span className="ov-file">{item.file}</span>
       </button>
       {item.kind === 'entry' && <span className="ov-badge entry">入口</span>}
-      <span className="ov-note">{item.reasons.join(' · ') || '—'}</span>
       <span className="ov-extra">{item.lines} 行</span>
+      {/* 理由换行另起一行：半宽卡片里挤在同一行只会被省略号吃掉（2026-10-03 布局） */}
+      <span className="ov-note ov-entry-why">{item.reasons.join(' · ') || '—'}</span>
     </div>
   );
 }
@@ -150,7 +138,7 @@ function GuideStart({ onOpenFile }: { onOpenFile: (file: string, line?: number) 
   };
 
   return (
-    <section className="ov-card ov-wide guide-start-card">
+    <section className="ov-card guide-start-card tone-guide">
       <h3>{t('guide.start.title')}</h3>
       <div className="guide-start">
         <div className="guide-start-row">
@@ -219,11 +207,21 @@ function GuideStart({ onOpenFile }: { onOpenFile: (file: string, line?: number) 
  * 显示「几个未提交改动」+ 分支名 + 增删行；不是 git 仓库就如实说，
  * 不再有「记录阅读基线」那种自记录对比（用户要求：不自己记录变更）。
  */
-function ChangesHint({ onOpenChanges }: { onOpenChanges?: () => void }) {
+function ChangesHint({
+  onOpenChanges,
+  onOpen,
+}: {
+  onOpenChanges?: () => void;
+  /** 点「本轮 agent 产出」的 chip：打开文件并标已读（与主页其它入口同一条口径）。 */
+  onOpen: (file: string, line?: number) => void;
+}) {
   const { t } = useI18n();
   const result = useChangesStore((s) => s.result);
   const busy = useChangesStore((s) => s.busy);
   const refresh = useChangesStore((s) => s.refresh);
+  /** M10.3：宿主上报的 agent 产出（原「最近」卡的内容，2026-10-03 并进变更卡）。 */
+  const agentMarks = useMapStore((s) => s.overview?.agentMarks ?? []);
+  const markReadMany = useMapStore((s) => s.markReadMany);
   /** G8.1：SSE 报过的文件（20 秒后自动消失）——只说「刚有变更」，不描述变了什么。 */
   const pulse = useMapStore((s) => s.pulse);
 
@@ -232,7 +230,7 @@ function ChangesHint({ onOpenChanges }: { onOpenChanges?: () => void }) {
   const removed = entries.reduce((n, e) => n + (e.removed ?? 0), 0);
 
   return (
-    <section className="ov-card ov-wide changes-card">
+    <section className="ov-card ov-wide changes-card tone-changes">
       <h3>{t('changes.startTitle')}</h3>
       <div className="guide-start">
         {Object.keys(pulse).length > 0 && (
@@ -264,6 +262,30 @@ function ChangesHint({ onOpenChanges }: { onOpenChanges?: () => void }) {
             <button className="btn ghost small" onClick={() => void refresh()} disabled={busy}>
               {t('changes.refresh')}
             </button>
+          </div>
+        )}
+        {agentMarks.length > 0 && (
+          <div className="ov-agent-marks">
+            <div className="ov-note">
+              本轮 agent 产出（宿主上报 {agentMarks.length} 个文件：
+              {agentMarks.filter((m) => m.lines.length > 0).length} 个带行范围）
+              <button className="ov-row-act" onClick={() => markReadMany(agentMarks.map((m) => m.file))}>
+                全部标记已读
+              </button>
+            </div>
+            <div className="ov-chips">
+              {agentMarks.slice(0, 16).map((m) => (
+                <button
+                  key={m.file}
+                  className="ov-chip is-agent"
+                  title={m.lines.length ? `变更行：${m.lines.map(([a, b]) => (a === b ? a : `${a}-${b}`)).join(', ')}` : '只标到文件级'}
+                  onClick={() => onOpen(m.file, m.lines[0]?.[0] ?? 1)}
+                >
+                  ▣ {m.file}
+                </button>
+              ))}
+              {agentMarks.length > 16 && <span className="ov-note">…等 {agentMarks.length} 个</span>}
+            </div>
           </div>
         )}
       </div>
@@ -303,9 +325,40 @@ function Metric({
   );
 }
 
-export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges }: Props) {
+/** 首屏指标带里的一个方块：数字在上、口径在下；能点开的仍然点开看构成。 */
+function Stat({
+  value,
+  label,
+  note,
+  onClick,
+  tone,
+}: {
+  value: string | number;
+  label: string;
+  note?: string;
+  onClick?: () => void;
+  tone?: 'warn';
+}) {
+  const inner = (
+    <>
+      <b>{value}</b>
+      <span>{label}</span>
+    </>
+  );
+  const cls = `ov-stat-block${onClick ? ' is-clickable' : ''}${tone ? ` ${tone}` : ''}`;
+  return onClick ? (
+    <button className={cls} title={note ?? label} onClick={onClick}>
+      {inner}
+    </button>
+  ) : (
+    <span className={cls} title={note ?? label}>
+      {inner}
+    </span>
+  );
+}
+
+export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
   const overview = useMapStore((s) => s.overview);
-  const timeline = useMapStore((s) => s.timeline);
   const busy = useMapStore((s) => s.busy);
   const options = useMapStore((s) => s.options);
   const setOptions = useMapStore((s) => s.setOptions);
@@ -313,7 +366,6 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges 
   const ignored = useMapStore((s) => s.ignored);
   const read = useMapStore((s) => s.read);
   const toggleRead = useMapStore((s) => s.toggleRead);
-  const markReadMany = useMapStore((s) => s.markReadMany);
   const status = useStore((s) => s.status);
   const [showReadme, setShowReadme] = useState(false);
   const [drawer, setDrawer] = useState<Drawer>(null);
@@ -349,16 +401,15 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges 
     }
     return (
       <div className="overview">
-        <Welcome variant="first" onOpenReport={onOpenReport} />
+        <Welcome variant="first" />
       </div>
     );
   }
 
-  const { identity, meta, readme, entries, hot, orphans, largestFiles, largestDirs, cycles, recent, dirs, partial, notes, agentMarks } =
+  const { identity, meta, readme, entries, hot, orphans, largestFiles, largestDirs, cycles, dirs, partial, notes } =
     overview;
   const totalLangFiles = identity.langs.reduce((n, l) => n + l.files, 0) || 1;
   const orphanVisible = orphans.filter((o) => !ignored[o.file]);
-  const readCount = Object.keys(read).length;
   const indexing = partial.indexing || status?.indexing === true;
 
   // 索引还没给出任何事实时，宁可说「正在建立」，也不显示一排 0（共同约束）
@@ -394,7 +445,7 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges 
   if (!indexing && identity.files === 0) {
     return (
       <div className="overview">
-        <Welcome variant="empty" onOpenReport={onOpenReport} />
+        <Welcome variant="empty" />
       </div>
     );
   }
@@ -428,11 +479,6 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges 
           <span className="ov-note" title="所有数字的口径见各自的悬浮说明；点数字可列出构成">
             口径可点
           </span>
-          {onOpenReport && (
-            <button className="btn ghost" onClick={onOpenReport} title="哪些文件没进索引、为什么">
-              索引报告
-            </button>
-          )}
           <button className="btn ghost" onClick={onOpenGraph}>
             看依赖图 →
           </button>
@@ -450,15 +496,59 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges 
         </div>
       )}
 
-      <GuideStart onOpenFile={onOpenFile} />
+      {/* 首屏指标带：规模数字从「它是什么」提到这里，滚动之前就能看到量级（2026-10-03 布局优化）。 */}
+      <section className="ov-metrics">
+        <Stat
+          value={identity.files}
+          label="文件"
+          note={notes.files?.label}
+          onClick={() => void openDrawer({ kind: 'facts', title: `全部 ${identity.files} 个文件`, note: notes.files?.label, pick: () => true, sort: bySize })}
+        />
+        <Stat
+          value={identity.dirs}
+          label="目录"
+          note={notes.dirs?.label}
+          onClick={() => void openDrawer({ kind: 'facts', title: `出现的目录（${dirs.length} 个）`, note: notes.dirs?.label, pick: () => false })}
+        />
+        <Stat
+          value={identity.lines.toLocaleString()}
+          label="行"
+          note={notes.lines?.label}
+          onClick={() => void openDrawer({ kind: 'facts', title: '已索引源码按行数降序', note: notes.lines?.label, pick: (f) => f.indexed, sort: byLines })}
+        />
+        <Stat
+          value={fmtBytes(identity.bytes)}
+          label="大小"
+          note={notes.bytes?.label}
+          onClick={() => void openDrawer({ kind: 'facts', title: '全部文件按大小降序', note: notes.bytes?.label, pick: () => true, sort: bySize })}
+        />
+        <Stat
+          value={identity.indexedFiles}
+          label="符号索引"
+          note={notes.indexedFiles?.label}
+          onClick={() => void openDrawer({ kind: 'facts', title: `已进符号索引的 ${identity.indexedFiles} 个文件`, note: notes.indexedFiles?.label, pick: (f) => f.indexed, sort: byLines })}
+        />
+        <Stat
+          value={identity.testFiles}
+          label="测试 / 示例"
+          note="按目录名与文件名判定（tests / spec / __tests__ / examples …）"
+          onClick={() => void openDrawer({ kind: 'facts', title: `测试 / 示例文件（${identity.testFiles} 个）`, note: '这批文件在热点榜里默认被降噪', pick: (f) => f.test, sort: bySize })}
+        />
+      </section>
 
       {/* W3 / G8.2：自上次阅读以来的变化（与阅读状态、笔记联动） */}
-      <ChangesHint onOpenChanges={onOpenChanges} />
+      <ChangesHint onOpenChanges={onOpenChanges} onOpen={open} />
 
       <div className="ov-grid">
+        {/* 从这里开始：半宽，与「它是什么」同排（两张卡高度接近，不留空列）。 */}
+        <GuideStart onOpenFile={onOpenFile} />
+
         {/* ---------------------------------------------------- 它是什么 */}
-        <section className="ov-card">
-          <h3>它是什么</h3>
+        <section className="ov-card tone-identity">
+          <h3>
+            它是什么
+            <span className="ov-h3-note">{identity.langs.length} 种语言</span>
+          </h3>
           <div className="ov-langs">
             {identity.langs.map((l) => (
               <div className="ov-lang" key={l.lang}>
@@ -489,44 +579,6 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges 
             ))}
             {!identity.langs.length && <div className="ov-note">没有已索引的源码文件。</div>}
           </div>
-          <div className="ov-stats">
-            <Metric
-              value={identity.files}
-              label="文件"
-              note={notes.files?.label}
-              onClick={() => void openDrawer({ kind: 'facts', title: `全部 ${identity.files} 个文件`, note: notes.files?.label, pick: () => true, sort: bySize })}
-            />
-            <Metric
-              value={identity.dirs}
-              label="目录"
-              note={notes.dirs?.label}
-              onClick={() => void openDrawer({ kind: 'facts', title: `出现的目录（${dirs.length} 个）`, note: notes.dirs?.label, pick: () => false })}
-            />
-            <Metric
-              value={fmtBytes(identity.bytes)}
-              label=""
-              note={notes.bytes?.label}
-              onClick={() => void openDrawer({ kind: 'facts', title: '全部文件按大小降序', note: notes.bytes?.label, pick: () => true, sort: bySize })}
-            />
-            <Metric
-              value={identity.indexedFiles}
-              label="索引"
-              note={notes.indexedFiles?.label}
-              onClick={() => void openDrawer({ kind: 'facts', title: `已进符号索引的 ${identity.indexedFiles} 个文件`, note: notes.indexedFiles?.label, pick: (f) => f.indexed, sort: byLines })}
-            />
-            <Metric
-              value={identity.testFiles}
-              label="测试/示例"
-              note="按目录名与文件名判定（tests / spec / __tests__ / examples …）"
-              onClick={() => void openDrawer({ kind: 'facts', title: `测试 / 示例文件（${identity.testFiles} 个）`, note: '这批文件在热点榜里默认被降噪', pick: (f) => f.test, sort: bySize })}
-            />
-            <Metric
-              value={identity.lines.toLocaleString()}
-              label="行"
-              note={notes.lines?.label}
-              onClick={() => void openDrawer({ kind: 'facts', title: '已索引源码按行数降序', note: notes.lines?.label, pick: (f) => f.indexed, sort: byLines })}
-            />
-          </div>
           <div className="ov-meta">
             <span>包类型：{meta.kind}</span>
             {meta.name && <span>包名：{meta.name}</span>}
@@ -547,7 +599,7 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges 
         </section>
 
         {/* ---------------------------------------------------- 从哪看起 */}
-        <section className="ov-card ov-wide">
+        <section className="ov-card ov-wide tone-entry">
           <h3>
             从哪看起
             <span className="ov-h3-actions">
@@ -602,7 +654,7 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges 
         </section>
 
         {/* ------------------------------------------- 结构与目录职责 */}
-        <section className="ov-card ov-wide">
+        <section className="ov-card ov-wide tone-structure">
           <h3>
             结构
             {cycles.length > 0 && <span className="ov-warn">{cycles.length} 处循环依赖</span>}
@@ -661,7 +713,7 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges 
             </details>
           )}
 
-          <details className="ov-details" open>
+          <details className="ov-details">
             <summary>
               目录职责与分层（{dirs.length}）
               <select
@@ -769,91 +821,6 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges 
           </details>
         </section>
 
-        {/* ------------------------------------------------------ 最近 */}
-        <section className="ov-card ov-wide">
-          <h3>最近</h3>
-          <div className="ov-stats">
-            <Metric
-              value={recent.today}
-              label="今天"
-              note={notes.recent?.label}
-              onClick={() => void openDrawer({ kind: 'facts', title: '今天改动过的文件', note: notes.recent?.label, pick: (f) => f.mtimeMs >= new Date().setHours(0, 0, 0, 0), sort: (a, b) => b.mtimeMs - a.mtimeMs })}
-            />
-            <Metric
-              value={recent.last3d}
-              label="3 天内"
-              note={notes.recent?.label}
-              onClick={() => void openDrawer({ kind: 'facts', title: '3 天内改动过的文件', note: notes.recent?.label, pick: (f) => f.mtimeMs >= Date.now() - 3 * 86_400_000, sort: (a, b) => b.mtimeMs - a.mtimeMs })}
-            />
-            <Metric
-              value={recent.last7d}
-              label="7 天内"
-              note={notes.recent?.label}
-              onClick={() => void openDrawer({ kind: 'facts', title: '7 天内改动过的文件', note: notes.recent?.label, pick: (f) => f.mtimeMs >= Date.now() - 7 * 86_400_000, sort: (a, b) => b.mtimeMs - a.mtimeMs })}
-            />
-            <Metric value={recent.older} label="更早" note={notes.recent?.label} />
-          </div>
-          {timeline?.source === 'git' && (
-            <div className="ov-meta">
-              <span>git {timeline.git.branch ?? '（无分支）'}</span>
-              {timeline.git.committedAt && <span>最近提交 {fmtWhen(timeline.git.committedAt)}</span>}
-              {timeline.git.dirty.length > 0 && <span>未提交 {timeline.git.dirty.length} 个文件</span>}
-            </div>
-          )}
-          {timeline?.source === 'fs' && <div className="ov-note">不是 git 仓库：只看文件修改时间。</div>}
-
-          {agentMarks.length > 0 && (
-            <div className="ov-agent-marks">
-              <div className="ov-note">
-                宿主上报的 agent 产出（{agentMarks.length} 个文件：
-                {agentMarks.filter((m) => m.lines.length > 0).length} 个带行范围）
-                <button className="ov-row-act" onClick={() => markReadMany(agentMarks.map((m) => m.file))}>
-                  全部标记已读
-                </button>
-              </div>
-              <div className="ov-chips">
-                {agentMarks.slice(0, 16).map((m) => (
-                  <button
-                    key={m.file}
-                    className="ov-chip is-agent"
-                    title={m.lines.length ? `变更行：${m.lines.map(([a, b]) => (a === b ? a : `${a}-${b}`)).join(', ')}` : '只标到文件级'}
-                    onClick={() => open(m.file, m.lines[0]?.[0] ?? 1)}
-                  >
-                    ▣ {m.file}
-                  </button>
-                ))}
-                {agentMarks.length > 16 && <span className="ov-note">…等 {agentMarks.length} 个</span>}
-              </div>
-            </div>
-          )}
-
-          <div className="ov-recent">
-            {recent.newest.map((f) => (
-              <FileRow key={f.file} file={f.file} note={fmtWhen(f.mtimeMs)} onOpen={open} />
-            ))}
-          </div>
-          {timeline && timeline.batches.length > 0 && (
-            <details className="ov-details">
-              <summary>改动批次（{timeline.batches.length}）</summary>
-              {timeline.batches.slice(0, 8).map((b) => (
-                <div className="ov-batch" key={`${b.at}:${b.label}`}>
-                  <span className="ov-note">
-                    {fmtWhen(b.at)} · {b.label ?? '未命名批次'} · {b.files.length} 个文件
-                  </span>
-                  <div className="ov-chips">
-                    {b.files.slice(0, 12).map((f) => (
-                      <button key={f} className="ov-chip" onClick={() => open(f)}>
-                        {f}
-                      </button>
-                    ))}
-                    {b.files.length > 12 && <span className="ov-note">…等 {b.files.length} 个</span>}
-                  </div>
-                </div>
-              ))}
-            </details>
-          )}
-          {readCount > 0 && <div className="ov-note">已标记读过 {readCount} 个文件（文件树里会变灰）。</div>}
-        </section>
       </div>
 
       {/* 「点数字列出构成」的抽屉 */}
@@ -898,7 +865,8 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenReport, onOpenChanges 
 }
 
 /**
- * 侧栏「总览」Tab（决策 C：首屏给主页，侧栏保留常驻入口）。
+ * 「总览」面板（决策 C：首屏给主页，另留一个常驻入口）。
+ * 2026-10-03 起挂在右侧常驻栏（与变更 / 命令并排），不再是侧栏 tab。
  * 只放最关键的几行：规模、起点 Top 6、结构告警、本轮产出；细看交给完整地图。
  */
 export function OverviewPanel({

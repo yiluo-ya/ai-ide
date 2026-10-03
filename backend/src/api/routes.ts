@@ -10,6 +10,7 @@ import type {
   ApiError,
   ChangeSnapshotInput,
   ChangeSummary,
+  CommandKind,
   DependencyGraph,
   DependentsResult,
   DirDependentsResult,
@@ -21,6 +22,7 @@ import type {
   FileSummary,
   GitChangeEntry,
   GitChangesResult,
+  GitWriteRequest,
   FindReferencesRequest,
   FlowKind,
   FlowResult,
@@ -56,6 +58,7 @@ import { buildRoutes } from '../indexer/guide';
 import { fileSummary } from '../indexer/summary';
 import { buildTimeline, DEFAULT_RECENT_WINDOW_MS, hostLinesFor, markHostOrigins } from '../indexer/timeline';
 import { compareSnapshot, readmap } from '../indexer/changes';
+import { gitAddAll, gitCommit, gitPull, gitPush } from '../indexer/gitwrite';
 import { explainAt } from '../indexer/explain';
 import { flowGraph } from '../indexer/flow';
 import {
@@ -71,18 +74,27 @@ import {
 } from '../indexer/gitread';
 import {
   CORS_ORIGINS,
-  DATA_DIR,
   FRONTEND_DIST,
   HOST,
   LOCAL_HOSTS,
-  PORT,
   SHARE_NOTE_LOCAL,
   SHARE_NOTE_SHARED,
   shareHintFor,
 } from '../config';
-import { buildIndexReport } from '../indexer/index-report';
 import { AGENT_TOOLS_NOTE, agentToolNames, agentToolSpecs, callAgentTool, type AgentCallResult } from './agent';
+import { createAgentSessionRoutes } from './agent-session';
+import { AgentSessions } from '../agent/sessions';
 import { restartService, serviceStatus, stopService } from '../services';
+import {
+  classifyRisk,
+  discoverCommands,
+  listRuns,
+  loadPlan,
+  riskReason,
+  runCommand,
+  stopRun,
+} from '../commands';
+import { readUserIgnore, writeUserIgnore } from '../indexer/user-ignore';
 
 const VERSION = '0.1.0';
 
@@ -161,7 +173,10 @@ export function createApp(
       agentSymbols: 'GET /api/agent/:id/symbols?q=&kind=&limit=',
       agentOutline: 'GET /api/agent/:id/outline?file=',
       agentFile: 'GET /api/agent/:id/file?path=&start=&end=',
-      indexReport: 'GET /api/projects/:id/index-report',
+      agentModelConfig: 'GET /api/agent/model-config · POST /api/agent/model-config { baseUrl, apiKey?, models? }',
+      agentSessions: 'GET /api/agent/sessions · POST /api/agent/sessions { projectId, backend?, provider?, modelId? }',
+      agentPrompt: 'POST /api/agent/sessions/:id/prompt { message }',
+      agentEvents: 'GET /api/agent/sessions/:id/events (SSE) · POST /api/agent/sessions/:id/abort',
       ignoreRules: 'GET /api/projects/:id/ignore',
       snapshot: 'GET /api/projects/:id/snapshot',
       verify: 'POST /api/projects/:id/verify',
@@ -176,15 +191,6 @@ export function createApp(
     resourcesEndpoint: 'GET /api/projects/:id/resources',
     lifecycleNote:
       '宿主收起面板（iframe 卸载 / wcr:dispose）时调用 dispose：关 watcher、断 SSE、释放内存索引，保留注册表条目；被读目录不受影响。',
-    // P17：隐私承诺（可追证：说清读什么 / 写哪里 / 传什么 / 谁在用）
-    privacy: {
-      network: 'none',
-      host: HOST,
-      port: PORT,
-      writesSource: false,
-      dataDir: DATA_DIR,
-      reads: '你打开的本机目录里的源码文件（按忽略规则筛选）',
-    },
   };
 
   app.get('/api/health', (c) =>
@@ -199,6 +205,29 @@ export function createApp(
     }),
   );
   app.get('/api/integration/manifest', (c) => c.json(manifest));
+
+  // ------------------------------------------------------- 设置（2026-10-03）
+
+  /** 自定义忽略规则（对所有项目生效，存本工具自己的数据目录）。 */
+  app.get('/api/settings/ignore', async (c) => c.json({ text: await readUserIgnore() }));
+
+  app.post('/api/settings/ignore', async (c) => {
+    const body = await readJson<{ text?: unknown }>(c);
+    const text = typeof body?.text === 'string' ? body.text : '';
+    await writeUserIgnore(text);
+    return c.json({ ok: true, text });
+  });
+
+  // ------------------------------------------------- agent 会话（可写，2026-10-03）
+
+  /**
+   * 会话与模型配置：`/api/agent/sessions*`、`/api/agent/model-config*`。
+   *
+   * 与上面「只读工具」分开的原因：那套工具是给**外部宿主**借索引用的（S8，只读承诺不变）；
+   * 这里的内置 agent 会改代码 —— 用户 2026-10-03 显式要求，所以单独一层、单独一组端点。
+   */
+  const agentSessions = new AgentSessions(registry);
+  app.route('/api/agent', createAgentSessionRoutes(agentSessions));
 
   // -------------------------------------------------------- agent 只读工具（S8）
 
@@ -296,13 +325,6 @@ export function createApp(
     return c.json({ ok: true, status: { ...project.status, indexing: true } });
   });
 
-  /** P9：索引报告 —— 哪些文件没进索引 / 为什么 / 编码分布。 */
-  app.get('/api/projects/:id/index-report', (c) => {
-    const project = registry.get(c.req.param('id'));
-    if (!project) return fail(c, 404, 'project_not_found');
-    return c.json(buildIndexReport(project));
-  });
-
   /** P8：生效的忽略规则与命中统计。 */
   app.get('/api/projects/:id/ignore', (c) => {
     const project = registry.get(c.req.param('id'));
@@ -374,6 +396,101 @@ export function createApp(
 
   // -------------------------------------------------------------- 命令管理结束
 
+  // -------------------------------------------------------------- 项目命令（FR-0005，2026-10-03）
+
+  /** 某项目已存的命令清单（还没分析过就是 null）。 */
+  app.get('/api/projects/:id/commands', async (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    return c.json({ plan: await loadPlan(project.id) });
+  });
+
+  /**
+   * 一句话让 code agent 分析本项目（只读会话），得出编译 / 启动 / 停止 / 测试命令。
+   * 慢：要等 agent 读完项目（默认上限 180 秒）。
+   */
+  app.post('/api/projects/:id/commands/discover', async (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const prompt = typeof body.prompt === 'string' && body.prompt.trim() ? body.prompt : '获取本项目的命令';
+    try {
+      const { plan, sessionId } = await discoverCommands({
+        registry,
+        sessions: agentSessions,
+        projectId: project.id,
+        prompt,
+      });
+      return c.json({ plan, sessionId });
+    } catch (error) {
+      return fail(c, 400, 'command_discover_failed', error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  /** 跑一条命令（cwd 固定项目根）；block 级命令在这里被拒。需要 ?confirm=1。 */
+  app.post('/api/projects/:id/commands/run', async (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    if (c.req.query('confirm') !== '1') {
+      return fail(c, 400, 'confirm_required', '执行命令需要二次确认（?confirm=1）');
+    }
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const command = typeof body.command === 'string' ? body.command : '';
+    const kind = typeof body.kind === 'string' ? (body.kind as CommandKind) : undefined;
+    try {
+      const run = await runCommand({
+        registry,
+        projectId: project.id,
+        command,
+        ...(kind ? { kind } : {}),
+        background: body.background === true,
+      });
+      return c.json({ run });
+    } catch (error) {
+      return fail(c, 400, 'command_run_failed', error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  /** 停掉一条后台运行。 */
+  app.post('/api/projects/:id/commands/stop', async (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const runId = typeof body.runId === 'string' ? body.runId : '';
+    try {
+      return c.json({ run: stopRun(project.id, runId) });
+    } catch (error) {
+      return fail(c, 400, 'command_stop_failed', error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  /** 运行记录（正在跑的后台任务 + 最近若干条）。 */
+  app.get('/api/projects/:id/commands/runs', async (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    return c.json({ runs: await listRuns(project.id) });
+  });
+
+  /** 危险级别（自定义命令在提交前先问一次，好在确认框里标红）。 */
+  app.get('/api/projects/:id/commands/risk', (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    const command = c.req.query('command') ?? '';
+    return c.json({ risk: classifyRisk(command), reason: riskReason(command) });
+  });
+
+  // -------------------------------------------------------------- 项目命令结束
+
   // -------------------------------------------------------------- 文件
 
   /**
@@ -419,9 +536,12 @@ export function createApp(
     return c.json({ path: abs, parent: parent === abs ? null : parent, dirs });
   });
 
-  app.get('/api/projects/:id/files', (c) => {
+  app.get('/api/projects/:id/files', async (c) => {
     const project = registry.get(c.req.param('id'));
     if (!project) return fail(c, 404, 'project_not_found');
+    // 冷启动 / 被释放后回来时内存里还没有扫描结果：等一次扫描（与建索引复用同一次），
+    // 否则这里会返回空树，用户切过去看到文件面板一片空白。
+    await project.ensureScanned();
     return c.json({ tree: project.buildFileTree(), status: project.status });
   });
 
@@ -429,9 +549,11 @@ export function createApp(
    * 2026-10-03 用户要求：文件树要显示项目的**所有**文件，不只是能检索的那些。
    * 这条端点连二进制、资源、被规则忽略的文件一并给出（仅跳过 node_modules/.git 这类噪声目录）。
    */
-  app.get('/api/projects/:id/all-files', (c) => {
+  app.get('/api/projects/:id/all-files', async (c) => {
     const project = registry.get(c.req.param('id'));
     if (!project) return fail(c, 404, 'project_not_found');
+    // 同上：不让文件树在「还没扫过」时返回空树。
+    await project.ensureScanned();
     return c.json({ tree: project.buildAllFileTree(), status: project.status });
   });
 
@@ -613,6 +735,38 @@ export function createApp(
       entries,
       truncated: Math.max(0, changes.entries.length - LIMIT),
     };
+    return c.json(result);
+  });
+
+  /**
+   * 变更栏的写操作（2026-10-03 用户要求）：`add -A` / `commit -m` / `pull --ff-only` / `push`。
+   *
+   * 三条边界：
+   * 1) 只有这四个动作（action 白名单），没有「任意 git」「任意 shell」；
+   * 2) 与命令管理同一守卫 —— 共享模式下 403；
+   * 3) push 对外可见，要 `?confirm=1`（前端先弹一次确认）。pull 固定 --ff-only，不产生合并提交。
+   * 失败也返回 200 + ok:false（git 的退出码与 stderr 就是事实，不该被当作「请求出错」吞掉）。
+   */
+  app.post('/api/projects/:id/git-write', async (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = await readJson<GitWriteRequest>(c);
+    const action = body?.action;
+    if (action !== 'add' && action !== 'commit' && action !== 'pull' && action !== 'push') {
+      return fail(c, 400, 'bad_request', 'action 只能是 add / commit / pull / push');
+    }
+    if (action === 'push' && c.req.query('confirm') !== '1') {
+      return fail(c, 400, 'confirm_required', '推送需要二次确认（?confirm=1）');
+    }
+    const result = await (action === 'add'
+      ? gitAddAll(project.root)
+      : action === 'commit'
+        ? gitCommit(project.root, String(body?.message ?? ''))
+        : action === 'pull'
+          ? gitPull(project.root)
+          : gitPush(project.root));
     return c.json(result);
   });
 

@@ -1247,6 +1247,13 @@ const COMMENT_PREFIXES: Partial<Record<LangId, string[]>> = {
   jsx: ['//', '/*', '*', '*/'],
   go: ['//', '/*', '*', '*/'],
   java: ['//', '/*', '*', '*/'],
+  rust: ['//', '/*', '*', '*/'],
+  shell: ['#'],
+  yaml: ['#'],
+  toml: ['#'],
+  ini: ['#', ';'],
+  dockerfile: ['#'],
+  sql: ['--'],
 };
 
 /**

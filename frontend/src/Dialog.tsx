@@ -1,7 +1,7 @@
 /**
  * 浮层骨架（P25 无障碍）：role=dialog + aria-modal + Esc 关闭 + 焦点进出可控。
  *
- * 所有设置 / 隐私 / 索引报告浮层共用它，保证键盘行为一致：
+ * 所有设置 / 模型浮层共用它，保证键盘行为一致：
  * 打开时焦点移入浮层，Esc 关闭，Tab 在浮层内循环，遮罩点击关闭。
  */
 import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';

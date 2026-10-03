@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { readBookmarks, readPositions, readSearchHistory } from './state';
+import { readPositions, readSearchHistory } from './state';
 
 /**
  * state 里的本机持久化读取（N13 / N20 / N22，Q4：只落 localStorage、按项目分片）。
@@ -13,7 +13,6 @@ describe('state 本机持久化', () => {
   it('没有当前项目时一律返回空值', () => {
     expect(readSearchHistory(null)).toEqual([]);
     expect(readPositions(null)).toEqual({});
-    expect(readBookmarks(null)).toEqual([]);
   });
 
   it('搜索历史：坏 JSON 回落空数组，非字符串项被过滤', () => {
@@ -31,16 +30,5 @@ describe('state 本机持久化', () => {
 
     window.localStorage.setItem('wcr:positions:p2', 'not json');
     expect(readPositions('p2')).toEqual({});
-  });
-
-  it('书签：正常读出，非数组 / 坏 JSON 回落空数组', () => {
-    window.localStorage.setItem('wcr:bookmarks:p1', JSON.stringify([{ file: 'a.ts', line: 1, col: 1 }]));
-    expect(readBookmarks('p1')).toEqual([{ file: 'a.ts', line: 1, col: 1 }]);
-
-    window.localStorage.setItem('wcr:bookmarks:p2', JSON.stringify({ file: 'a.ts' }));
-    expect(readBookmarks('p2')).toEqual([]);
-
-    window.localStorage.setItem('wcr:bookmarks:p3', '{{{');
-    expect(readBookmarks('p3')).toEqual([]);
   });
 });

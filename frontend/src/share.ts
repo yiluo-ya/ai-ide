@@ -4,8 +4,6 @@
  *
  * 这里只做纯格式化（无副作用、可单测）；写剪贴板与轻提示在 state 的动作里。
  */
-import type { SymbolInfo } from '../../shared/types';
-
 /** 位置的最小形态：`path:line:col`（README「位置契约」，1-based）。 */
 export function formatLocation(file: string, line: number, col: number): string {
   return `${file}:${line}:${col}`;
@@ -27,6 +25,18 @@ export function fenceLang(lang: string): string {
     go: 'go',
     java: 'java',
     rust: 'rust',
+    shell: 'bash',
+    json: 'json',
+    yaml: 'yaml',
+    toml: 'toml',
+    ini: 'ini',
+    dockerfile: 'dockerfile',
+    markdown: 'markdown',
+    css: 'css',
+    scss: 'scss',
+    less: 'less',
+    html: 'html',
+    sql: 'sql',
   };
   return map[lang] ?? '';
 }
@@ -52,20 +62,3 @@ export function formatSnippet(input: SnippetInput): string {
   return `${where}\n\`\`\`${fence}\n${body}\n\`\`\``;
 }
 
-export interface SymbolSummaryInput {
-  symbol: SymbolInfo;
-  /** 覆盖出处文件（默认用符号自己的 location.file，即项目内相对路径）。 */
-  file?: string;
-}
-
-/**
- * S3b：符号摘要 —— 「谁、在哪、签名是什么」，不贴整段实现。
- * 位置用 `path:line:col`，与「复制位置」同一口径，人和 agent 都能据此落到同一处。
- */
-export function formatSymbolSummary({ symbol, file }: SymbolSummaryInput): string {
-  const start = symbol.location.range.start;
-  const where = formatLocation(file ?? symbol.location.file, start.line, start.col);
-  const head = `${symbol.name} (${symbol.kind}) ${where}`;
-  const signature = symbol.detail?.trim();
-  return signature ? `${head}\n${signature}` : head;
-}

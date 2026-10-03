@@ -14,7 +14,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ProjectIndex } from './indexer/store';
 import { ProjectWatcher } from './watcher';
-import { WATCH_ENABLED } from './config';
+import { REPO_ROOT, WATCH_ENABLED } from './config';
 import { logInfo, logWarn } from './log';
 
 /** 单实例判定用的运行时信息（落 `<dataDir>/runtime.json`）。 */
@@ -57,6 +57,29 @@ export async function clearRuntime(dataDir: string): Promise<void> {
     await fsp.rm(runtimePath(dataDir), { force: true });
   } catch {
     /* 删不掉不影响退出 */
+  }
+}
+
+/**
+ * 一次性数据目录迁移（2026-10-03）：老版本把状态写在 `<仓库根>/data`，现在默认在 `~/.ide`。
+ *
+ * 只**复制**不删除（旧目录原样留着，用户自己确认后再删）；迁过一次就写标记，不会重复做。
+ * 用户显式设了 `READER_DATA_DIR` 指向别处、或本来就在用新目录时，这里是空操作。
+ */
+export async function migrateLegacyDataDir(dataDir: string): Promise<void> {
+  const legacy = path.join(REPO_ROOT, 'data');
+  if (path.resolve(legacy) === path.resolve(dataDir)) return;
+  if (!fs.existsSync(legacy)) return;
+  const marker = path.join(dataDir, '.migrated-from-repo');
+  if (fs.existsSync(marker)) return;
+  try {
+    await fsp.mkdir(dataDir, { recursive: true });
+    // force:false + errorOnExist:false = 已有的文件不覆盖，缺的补上
+    await fsp.cp(legacy, dataDir, { recursive: true, force: false, errorOnExist: false });
+    await fsp.writeFile(marker, `migrated from ${legacy} at ${new Date().toISOString()}\n`, 'utf8');
+    logInfo('data.migrated', { from: legacy, to: dataDir });
+  } catch (error) {
+    logWarn('data.migrate-failed', { from: legacy, to: dataDir, error: (error as Error).message });
   }
 }
 
