@@ -41,7 +41,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # 仓库还没有做过一次性全量格式化（见交付说明）；跑过 `npm run format` 之后请删掉 continue-on-error。
+      # 仓库还没有做过一次性全量格式化（见 docs/06-platform-plan.md §9.3）；
+      # 跑过 `npm run format` 之后请删掉 continue-on-error。
       - name: Format check
         continue-on-error: true
         run: npm run format:check
@@ -58,9 +59,6 @@ jobs:
       - name: Install Chromium (UI regression)
         run: npx playwright install --with-deps chromium
 
-      # 已知失配：tests/ui/navigator.mjs 的 findChromium() 按 Windows 布局查找
-      # （%LOCALAPPDATA%/ms-playwright/chromium-*/chrome-win64/chrome.exe），Linux runner 上找不到浏览器；
-      # 在该文件改成跨平台查找之前，这一步只报告不阻断。
+      # findChromium() 已跨平台（Windows / Linux / macOS 的 playwright 缓存），这里装的 Chromium 找得到。
       - name: UI regression (Chromium)
-        continue-on-error: true
         run: npm run test:ui

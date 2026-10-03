@@ -254,3 +254,100 @@ docker build -t web-code-reader . && \
 3. **Docker 只读挂载的宿主差异**：Windows 下的 bind mount 权限语义弱于 Linux，`ro` 的「物理写不了」在 Windows 上仅部分成立（面板里如实写「容器内只读」而非「磁盘不可写」）。
 4. **快照与符号事实的耦合**：快照只固化 tree-sitter 的解析事实，语法包升级后需靠 `schema` 版本回落重建；这点在 `snapshot.ts` 的注释里写明。
 5. **首次概览 2~3 秒**（01 主题遗留）不在本次预算内，靠后续「文件级边落盘」解决。
+
+---
+
+## 9. 落地结果（2026-10-02）
+
+本节是「实际做了什么、实测什么数字、与文档差在哪」的唯一结论处。P1–P25 全量落地，§4 的四个子任务全部交付。
+
+### 9.1 各能力落点
+
+| 能力 | 落点（文件） | 说明 |
+|---|---|---|
+| P4 索引持久化 | `backend/src/indexer/snapshot.ts` + `store.ts`（`restoreSnapshot`/`applySnapshot`/`persistSnapshot`） | NDJSON + gzip 快照，**不落正文**；指纹一致时不重解析、不重写 |
+| P5 并行解析 | `backend/src/indexer/parse-pool.ts` + `parse-worker.ts` | worker 池（默认 `min(4, max(2, cpus-1))`），失败自动回落串行 |
+| P7 一致性对账 | `store.ts` 的 `verify()` + `registry.ts` 定时器 | 默认 10 分钟；`POST /verify` 手动触发，差异自动修复 |
+| P8 忽略规则 | `backend/src/indexer/ignore.ts` | `.gitignore` + `.wcrignore`，优先级 builtin < gitignore < wcrignore；`node_modules`/`.git` 硬保护 |
+| P9 索引报告 | `backend/src/indexer/index-report.ts` + `routes.ts` | `GET /index-report`（归类 + 编码分布）、`GET /ignore` |
+| P11 大文件降级 | `store.ts` / `parser.ts`（`topLevelOnly`） | 1–5MB 源码走顶层符号模式，>5MB 只正文 |
+| P12 编码 | `backend/src/indexer/encoding.ts` | BOM → UTF-8 严格 → GBK → latin1；索引与正文共用解码 |
+| P2 unresolved 说明 | `resolver.ts` + `shared/types.ts` 的 `UnresolvedDetail` | 5 种缺失原因由后端给，前端只做文案（不引入 LSP，Q1） |
+| P1 Rust | `backend/src/languages/rust.ts` + `languages/index.ts`（一行注册） | 定义 / 引用 / 大纲 / `impl Trait for` / `crate::` 模块解析 |
+| P10 monorepo | `languages/{typescript,go,python}.ts` | tsconfig `paths`/`baseUrl`/`exports`、`go.work`、Python src 布局 |
+| P13/P15 启动 | `backend/src/cli.ts` + `bootstrap.ts` + `server.ts` | `wcr [dir]`、自动选端口、单实例复用、自动开浏览器 |
+| P14 分发 | `Dockerfile` / `.dockerignore` / `bin/wcr.mjs` / 根 `package.json` 的 bin+files | npx tarball（实测）与 Docker 只读挂载 |
+| P16 引导 | `frontend/src/Welcome.tsx`（挂在可达的 `Overview` 空态） | 填路径 / 最近项目 / 索引进度 + 索引报告入口 |
+| P17 隐私 | `frontend/src/PrivacyPanel.tsx` + `TopBar.tsx` 常驻角标 + `/integration/manifest` 的 `privacy` | 只读 · 不上传 · 代码不出本机，可追证 |
+| P18 后端单测 | `backend/tests/`（85 例） | 新增 06 相关 9 个测试文件 |
+| P19 前端单测 | `frontend/vitest.config.ts` + 6 个 `*.test.ts`（42 例） | prefs / i18n / api / state |
+| P20 UI 回归 + CI | `tests/ui/`（navigator 12 + guide 8 + platform 7） + `.github/workflows/ci.yml` | typecheck → lint → test → test:unit → build → test:ui |
+| P21 lint/format | `eslint.config.js` + `.prettierrc.json` | `npm run lint` 0 error（7 warning，均在其它主题文件） |
+| P22 日志 | `backend/src/log.ts` 接线到 `server.ts`/`cli.ts`/`store.ts` | key=value 到 stderr，`READER_LOG_LEVEL` / `READER_LOG_FILE` |
+| P23 基准 | `backend/bench/{bench,synth}.ts` + `backend/tests/perf.test.ts` | 预算对照表 + 宽松守护（`READER_PERF_STRICT=1` 收紧） |
+| P24 偏好 | `frontend/src/prefs.ts`（`wcr:prefs`）+ `SettingsPanel.tsx` | 主题深/亮/系统、字号 12–18、侧栏宽拖拽 |
+| P25 i18n/无障碍 | `frontend/src/i18n/{index,zh,en}.ts` + 各组件 `aria-*` | 中英文案 + 键盘可达 + `role="dialog"` |
+
+### 9.2 实测数字（`npm run bench`，本机 2026-10-02）
+
+**1000 文件 / 126,016 行合成仓 —— 全部 PASS**
+
+| 场景 | 实测 | 预算 |
+|---|---|---|
+| 首开可交互 | 218 ms | ≤ 2000 ms |
+| 索引完成（全量） | 9.5 s | ≤ 60 s |
+| 二次打开 · 文件树 | **71 ms** | ≤ 500 ms |
+| 二次打开 · 符号可跳转 | **1007 ms** | ≤ 1500 ms |
+| 二次打开 · 恢复期读盘 | **0 次** | 0 |
+| 查询 goto / refs / search / overview | P50 0.2 / 1.3 / 0.5 / 2.0 ms，P95 0.3 / 2.0 / 1.2 / 2.9 ms | P50 ≤150 / P95 ≤500 |
+| 增量更新（单文件 → 新符号可查） | 118 ms | ≤ 1000 ms |
+
+**10000 文件 / 1,260,016 行合成仓 —— 2 项未达标（如实）**
+
+| 场景 | 实测 | 预算 | 判定 |
+|---|---|---|---|
+| 首开可交互 | 1430 ms | ≤ 2000 ms | PASS |
+| 索引完成 | 81.8 s | ≤ 60 s | **OVER（1.36×）** |
+| 二次打开 · 文件树 | 482 ms | ≤ 1000 ms | PASS |
+| 二次打开 · 符号可跳转 | **11.5 s** | ≤ 3000 ms（万级放宽口径） | **OVER** |
+| 恢复期读盘 | 0 次 | 0 | PASS |
+| 快照写盘 | 成功（54.5 MB gz） | 必须成功 | PASS（修前直接 `Invalid string length` 失败） |
+
+**其它验收**：`npm run typecheck` 干净；`npm --prefix backend test` **85/85**；`npm run test:unit` **42/42**；
+`npm run test:ui` **12/12（导航·信使）+ 8/8（向导）+ 7/7（底座）**；`npm run build` 成功；`npm run lint` **0 error / 7 warning**。
+
+底座 UI 回归（`tests/ui/platform.mjs`，本次新增）覆盖：常驻隐私承诺、隐私面板六节、索引报告入口、
+切亮色真的换主题（`rgb(30,30,30)` → `rgb(255,255,255)`）、字号 16 落 `wcr:prefs` 且 `--ui-font-size` 即时生效、
+切 English 后 `documentElement.lang=en`、全程 0 console error。
+
+### 9.3 与文档的差异 / 未达标（含理由）
+
+1. **万级二次打开 11.5s（目标 3s）**：瓶颈已量化 —— 18.7 万条符号记录、59 万引用、39 万作用域，恢复期 `JSON.parse`
+   占 5.4s（结构性成本，块化无关），派生表重建 2.0s。已达成的优化：快照去掉正文（465MB → 186MB）、列式数组编码、
+   1MB 读写块、gzip level 1、懒 `SourceText`、跳过 classMap 重建、指纹一致不重写。**下一步**：类型化数组 + 字符串池的
+   专用列式二进制格式（架构级改造，本轮未做）。**注意**：万级场景用户实际感知的「打开就能读」是 482ms（文件树 + 正文），
+   11.5s 只影响「符号跳转何时就绪」。
+2. **万级索引完成 81.8s（预算 60s）**：索引速度不是本轮目标（本轮做的是持久化与并行接入）；worker 并行已生效但本机
+   4 核收益有限。
+3. **`npm run format:check` 未全绿**：全仓约 73 个既存文件与 Prettier 配置有风格差异。本轮只格式化了 06 新增文件
+   （避免覆盖并行会话正在编辑的共享文件）。收尾动作：所有并行主题结束后执行一次 `npm run format`。
+4. **Docker 未实测构建**：本机无 docker（`docker --version` 不存在）。做了静态演练（两阶段、非 root、HOST/VOLUME/EXPOSE），
+   并明确写了用法；镜像内 `install:all` 与原生模块编译未实跑。
+5. **CI 的 `test:ui` 已跨平台化**：`tests/ui/{navigator,guide,platform}.mjs` 的 `findChromium()` 支持 Windows / Linux /
+   macOS 缓存（找不到就交给 playwright-core 自己找），CI 的该步已去掉 `continue-on-error`；`format:check` 仍保留
+   `continue-on-error`（原因见第 3 条），Linux 上首次真实 CI 跑通后即可删掉。
+6. **npx 形态的实测范围**：验证到「`npm pack` 产物 + `npx ./web-code-reader-0.1.0.tgz` 可用」；**未发布到 npm registry**
+   （外部可见动作，需用户显式确认）。
+7. **单文件 exe**：按 §1 Q2 决策明确不做。
+8. **Rust 的覆盖边界**：跨文件 `impl Trait for Type` 挂不到类型定义、宏展开与 `cfg` 条件编译不覆盖、
+   `use a::b::*` 要求目录存在；均在 `rust.ts` 注释与本节说明。
+
+### 9.4 复现方式
+
+```bash
+npm run typecheck && npm run lint && npm test && npm run test:unit && npm run build && npm run test:ui
+npm run bench                                   # 1k；万级加 --files=10000（backend/bench）
+READER_PERF_STRICT=1 npx tsx --test backend/tests/perf.test.ts   # 性能守护（收紧阈值）
+npm run cli -- <本机目录>                        # 一键启动（自动选端口 / 单实例复用）
+npm run build && npm pack                        # npx 分发产物
+```

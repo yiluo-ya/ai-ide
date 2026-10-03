@@ -71,13 +71,18 @@ export const mapApi = {
     }),
 
   /** 依赖图（M4/M5）：默认按目录聚合，expand 里的目录展开到文件级。 */
-  graph: (id: string, options: { level?: 'dir' | 'file'; expand?: string[]; external?: number } = {}) =>
+  graph: (
+    id: string,
+    options: { level?: 'dir' | 'file'; expand?: string[]; external?: number; focus?: string[] } = {},
+  ) =>
     request<DependencyGraph>(
       `/projects/${id}/graph${qs({
         level: options.level,
         // 根目录的节点 id 是 `./`，展开它要发 `.`（后端把空串视作根目录）
         expand: options.expand?.map((dir) => dir.replace(/\/+$/, '') || '.').join(','),
         external: options.external,
+        // 「把入口 / 热点提到文件级」的覆盖：传空串 = 不提升（目录级视图更干净）
+        focus: options.focus ? options.focus.join(',') || '-' : undefined,
       })}`,
     ),
 

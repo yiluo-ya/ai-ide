@@ -98,7 +98,11 @@ test('snapshot: 写入 → 读取往返（含派生表重建与懒 text）', asy
   assert.equal(headerSeen, 'fp-abc');
   assert.equal(result.header.savedAt, 42);
   assert.equal(result.header.indexVersion, 3);
-  assert.deepEqual(decodeEntries(result.header.entries).get('a.ts'), { dir: false, size: Buffer.byteLength(src), mtimeMs: 111 });
+  assert.deepEqual(decodeEntries(result.header.entries).get('a.ts'), {
+    dir: false,
+    size: Buffer.byteLength(src),
+    mtimeMs: 111,
+  });
   assert.equal(result.header.encodings?.utf8, 1);
   assert.equal(result.header.skips?.['b.bin']?.reason, 'binary');
 
@@ -178,7 +182,11 @@ test('snapshot: 指纹不一致 → 只重解析变化的文件', async (t) => {
   first.dispose();
 
   // 只改 b.ts（size / mtime 都变）
-  await fsp.writeFile(path.join(root, 'src', 'b.ts'), 'export function betaRenamed(): number {\n  return 20;\n}\n', 'utf8');
+  await fsp.writeFile(
+    path.join(root, 'src', 'b.ts'),
+    'export function betaRenamed(): number {\n  return 20;\n}\n',
+    'utf8',
+  );
 
   const second = new ProjectIndex('p', 'p', posix(root), Date.now(), { dataDir, persist: true, workers: 0 });
   const spy = spyReparse(second);
@@ -242,7 +250,12 @@ test('snapshot: 损坏快照不会让索引不可用（store 层回落全量）'
   assert.ok(second.defsByName.has('alpha'));
 });
 
-test('snapshot: 数千条记录逐行流式写入 / 读回（模拟百 MB 量级 payload）', { timeout: 300_000 }, async (t) => {
+// 同类压测：默认关闭（用户 2026-10-03：压测我自己跑）；要跑加 READER_PERF=1。
+const PERF_ON = process.env.READER_PERF === '1';
+(PERF_ON ? test : test.skip)(
+  'snapshot: 数千条记录逐行流式写入 / 读回（模拟百 MB 量级 payload）',
+  { timeout: 240_000 },
+  async (t) => {
   const dir = await tmpDir();
   t.after(() => fsp.rm(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'big.ndjson.gz');
@@ -290,7 +303,8 @@ test('snapshot: 数千条记录逐行流式写入 / 读回（模拟百 MB 量级
   assert.equal(read, RECORDS);
   const st = await fsp.stat(file);
   assert.ok(st.size > 0 && st.size < source.length * RECORDS, 'gzip 应真的压缩了');
-});
+  },
+);
 
 test('snapshot: 指纹函数对 size / mtime / dir 敏感（Q8 判据）', () => {
   const a = fingerprintEntries([

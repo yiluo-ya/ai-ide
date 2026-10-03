@@ -32,8 +32,6 @@ interface Props {
   onOpen: (file: string) => void;
   filter?: string;
   decor?: TreeDecor;
-  onToggleRead?: (file: string) => void;
-  onToggleIgnored?: (file: string) => void;
   /** G3.5：右键菜单里的「加入待读」。 */
   onAddToQueue?: (file: string) => void;
 }
@@ -86,17 +84,27 @@ function matchesVisible(node: FileNode, visible: Set<string> | undefined): boole
 }
 
 const ORIGIN_BADGE: Record<FileOrigin, { mark: string; title: string } | null> = {
-  agent: { mark: '▣', title: '宿主上报：本轮 agent 产出' },
+  // 2026-10-03 用户要求去掉「agent 产出」（没啥用）：不再在文件树上标它。
+  agent: null,
   recent: { mark: '◌', title: '最近改动（启发式推断，非「谁写的」）' },
   project: null,
 };
+
+/**
+ * 文件树的排序（2026-10-03 用户要求）：目录在前、文件在后，各自按名称升序。
+ * 后端给的顺序是路径序，目录与文件会混在一起（`a.ts` 跑到 `a/` 前面），看起来乱。
+ */
+function sortNodes(nodes: FileNode[]): FileNode[] {
+  return [...nodes].sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
 
 function FileBadges({ file, decor }: { file: string; decor?: TreeDecor }) {
   const fact = decor?.timeline?.get(file);
   const level = heatLevel(fact?.mtimeMs);
   const origin = fact ? ORIGIN_BADGE[fact.origin] : null;
-  const ignored = decor?.ignored?.has(file);
-  const read = decor?.read?.has(file);
   const pulsing = decor?.pulse?.has(file);
   return (
     <>
@@ -118,8 +126,6 @@ function FileBadges({ file, decor }: { file: string; decor?: TreeDecor }) {
       )}
       {decor?.hot?.has(file) && <span className="badge hot" title="热点：被多个文件引用，适合当阅读起点">★</span>}
       {decor?.orphans?.has(file) && <span className="badge orphan" title="没人引用这个文件">?</span>}
-      {read && <span className="badge read" title="已读过">✓</span>}
-      {ignored && <span className="badge ignored" title="已标记忽略">∅</span>}
     </>
   );
 }
@@ -132,9 +138,8 @@ function TreeNode({
   filter,
   decor,
   expanded,
+  collapsed,
   toggle,
-  onToggleRead,
-  onToggleIgnored,
   onMenu,
 }: {
   node: FileNode;
@@ -144,18 +149,22 @@ function TreeNode({
   filter: string;
   decor?: TreeDecor;
   expanded: Set<string>;
+  /** 用户显式折叠过的目录：过滤自动展开时也压得住。 */
+  collapsed: Set<string>;
   toggle: (path: string) => void;
-  onToggleRead?: (file: string) => void;
-  onToggleIgnored?: (file: string) => void;
   onMenu: (e: React.MouseEvent, file: string) => void;
 }) {
   if (!matchesFilter(node, filter) || !matchesVisible(node, decor?.visible)) return null;
 
   if (node.type === 'directory') {
-    // 过滤时自动展开，方便直接看到命中项
-    const open = filter || decor?.visible ? true : expanded.has(node.path) || depth === 0;
-    const children = (node.children ?? []).filter(
-      (c) => matchesFilter(c, filter) && matchesVisible(c, decor?.visible),
+    // 过滤时自动展开，方便直接看到命中项；但用户显式折叠过的目录优先 ——
+    // 折叠得动，才算真的能折叠（之前 `|| depth === 0` 让顶层目录永远展开）。
+    const auto = Boolean(filter || decor?.visible);
+    const open = !collapsed.has(node.path) && (expanded.has(node.path) || auto);
+    const children = sortNodes(
+      (node.children ?? []).filter(
+        (c) => matchesFilter(c, filter) && matchesVisible(c, decor?.visible),
+      ),
     );
     return (
       <div className="tree-dir">
@@ -182,9 +191,8 @@ function TreeNode({
               filter={filter}
               decor={decor}
               expanded={expanded}
+              collapsed={collapsed}
               toggle={toggle}
-              onToggleRead={onToggleRead}
-              onToggleIgnored={onToggleIgnored}
               onMenu={onMenu}
             />
           ))}
@@ -192,13 +200,7 @@ function TreeNode({
     );
   }
 
-  const className = [
-    'tree-row',
-    'file',
-    activeFile === node.path ? 'active' : '',
-    decor?.read?.has(node.path) ? 'read' : '',
-    decor?.ignored?.has(node.path) ? 'ignored' : '',
-  ]
+  const className = ['tree-row', 'file', activeFile === node.path ? 'active' : '']
     .filter(Boolean)
     .join(' ');
 
@@ -208,10 +210,9 @@ function TreeNode({
       style={{ paddingLeft: depth * 12 + 18 }}
       onClick={() => onOpen(node.path)}
       onContextMenu={(e) => {
-        // 右键：打开小菜单（含「加入待读」，G3.5）；Alt+右键仍是「切忽略」的老手势
+        // 右键：打开小菜单（含「加入待读」，G3.5）
         e.preventDefault();
-        if (e.altKey) onToggleIgnored?.(node.path);
-        else onMenu(e, node.path);
+        onMenu(e, node.path);
       }}
       title={node.path}
     >
@@ -230,23 +231,35 @@ export function FileTree({
   onOpen,
   filter = '',
   decor,
-  onToggleRead,
-  onToggleIgnored,
   onAddToQueue,
 }: Props) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  /** 用户显式折叠过的目录（优先级高于「过滤 / 只看」的自动展开）。 */
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   /** G3.5：右键菜单；null = 不开。 */
   const [menu, setMenu] = useState<LeafMenu | null>(null);
-  const toggle = (path: string) =>
+
+  // 2026-10-03 用户要求「文件夹默认折叠」：不再自动展开顶层目录，
+  // 一进来就是折叠的树，要看哪一层自己点。
+
+  const toggle = (path: string) => {
+    const willOpen = !expanded.has(path) || collapsed.has(path);
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
+      if (willOpen) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (willOpen) next.delete(path);
       else next.add(path);
       return next;
     });
+  };
 
-  const children = useMemo(() => tree?.children ?? [], [tree]);
+  const children = useMemo(() => sortNodes(tree?.children ?? []), [tree]);
 
   if (!tree) return <div className="panel-empty">尚未打开项目</div>;
   if (!children.length) return <div className="panel-empty">项目里没有可读文件</div>;
@@ -266,9 +279,8 @@ export function FileTree({
           filter={filter}
           decor={decor}
           expanded={expanded}
+          collapsed={collapsed}
           toggle={toggle}
-          onToggleRead={onToggleRead}
-          onToggleIgnored={onToggleIgnored}
           onMenu={(e, file) => setMenu({ file, x: e.clientX, y: e.clientY })}
         />
       ))}
@@ -290,29 +302,11 @@ export function FileTree({
             <button
               role="menuitem"
               onClick={() => {
-                onToggleRead?.(menu.file);
-                setMenu(null);
-              }}
-            >
-              {decor?.read?.has(menu.file) ? t('guide.nav.markUnread') : t('guide.nav.markRead')}
-            </button>
-            <button
-              role="menuitem"
-              onClick={() => {
                 onAddToQueue?.(menu.file);
                 setMenu(null);
               }}
             >
               {t('guide.nav.queue')}
-            </button>
-            <button
-              role="menuitem"
-              onClick={() => {
-                onToggleIgnored?.(menu.file);
-                setMenu(null);
-              }}
-            >
-              {decor?.ignored?.has(menu.file) ? t('guide.nav.unignore') : t('guide.nav.ignore')}
             </button>
           </div>
         </>

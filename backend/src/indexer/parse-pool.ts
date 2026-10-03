@@ -48,9 +48,7 @@ export class ParsePool {
     try {
       const workers = this.ensureWorkers();
       const chunks = splitInto(tasks, this.size);
-      const parts = await Promise.all(
-        chunks.map((chunk, i) => this.runOn(workers[i % workers.length], chunk)),
-      );
+      const parts = await Promise.all(chunks.map((chunk, i) => this.runOn(workers[i % workers.length], chunk)));
       return parts.flat();
     } catch (e) {
       this.fallback(e);

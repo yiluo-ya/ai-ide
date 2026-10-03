@@ -17,25 +17,150 @@ import type { SymbolKind } from '../types';
 /** Rust 标准库类型 / 原生类型 / 常用宏：落 external，不参与跳转。 */
 const RUST_BUILTINS = new Set([
   // 原生类型
-  'i8', 'i16', 'i32', 'i64', 'i128', 'isize', 'u8', 'u16', 'u32', 'u64', 'u128', 'usize',
-  'f32', 'f64', 'bool', 'char', 'str',
+  'i8',
+  'i16',
+  'i32',
+  'i64',
+  'i128',
+  'isize',
+  'u8',
+  'u16',
+  'u32',
+  'u64',
+  'u128',
+  'usize',
+  'f32',
+  'f64',
+  'bool',
+  'char',
+  'str',
   // 语法成分
-  'self', 'Self', 'super', 'crate', 'true', 'false', 'None', 'Some', 'Ok', 'Err',
+  'self',
+  'Self',
+  'super',
+  'crate',
+  'true',
+  'false',
+  'None',
+  'Some',
+  'Ok',
+  'Err',
   // 标准库类型 / trait
-  'String', 'Vec', 'VecDeque', 'Option', 'Result', 'Box', 'Rc', 'Arc', 'Weak', 'RefCell', 'Cell',
-  'Mutex', 'RwLock', 'OnceCell', 'OnceLock', 'Cow', 'HashMap', 'HashSet', 'BTreeMap', 'BTreeSet',
-  'BinaryHeap', 'LinkedList', 'Iterator', 'IntoIterator', 'FromIterator', 'Extend', 'DoubleEndedIterator',
-  'Clone', 'Copy', 'Default', 'Debug', 'Display', 'PartialEq', 'Eq', 'PartialOrd', 'Ord', 'Hash',
-  'Send', 'Sync', 'Sized', 'Drop', 'Fn', 'FnMut', 'FnOnce', 'From', 'Into', 'TryFrom', 'TryInto',
-  'AsRef', 'AsMut', 'Borrow', 'BorrowMut', 'Deref', 'DerefMut', 'ToString', 'ToOwned', 'Spawn',
-  'Path', 'PathBuf', 'OsStr', 'OsString', 'CString', 'CStr', 'Duration', 'Instant', 'SystemTime',
-  'IpAddr', 'Ipv4Addr', 'Ipv6Addr', 'SocketAddr', 'Ordering', 'Range', 'RangeInclusive', 'NonNull',
+  'String',
+  'Vec',
+  'VecDeque',
+  'Option',
+  'Result',
+  'Box',
+  'Rc',
+  'Arc',
+  'Weak',
+  'RefCell',
+  'Cell',
+  'Mutex',
+  'RwLock',
+  'OnceCell',
+  'OnceLock',
+  'Cow',
+  'HashMap',
+  'HashSet',
+  'BTreeMap',
+  'BTreeSet',
+  'BinaryHeap',
+  'LinkedList',
+  'Iterator',
+  'IntoIterator',
+  'FromIterator',
+  'Extend',
+  'DoubleEndedIterator',
+  'Clone',
+  'Copy',
+  'Default',
+  'Debug',
+  'Display',
+  'PartialEq',
+  'Eq',
+  'PartialOrd',
+  'Ord',
+  'Hash',
+  'Send',
+  'Sync',
+  'Sized',
+  'Drop',
+  'Fn',
+  'FnMut',
+  'FnOnce',
+  'From',
+  'Into',
+  'TryFrom',
+  'TryInto',
+  'AsRef',
+  'AsMut',
+  'Borrow',
+  'BorrowMut',
+  'Deref',
+  'DerefMut',
+  'ToString',
+  'ToOwned',
+  'Spawn',
+  'Path',
+  'PathBuf',
+  'OsStr',
+  'OsString',
+  'CString',
+  'CStr',
+  'Duration',
+  'Instant',
+  'SystemTime',
+  'IpAddr',
+  'Ipv4Addr',
+  'Ipv6Addr',
+  'SocketAddr',
+  'Ordering',
+  'Range',
+  'RangeInclusive',
+  'NonNull',
   // 常用宏（macro_invocation 的 macro 标识符不带 `!`）
-  'print', 'println', 'eprint', 'eprintln', 'format', 'vec', 'write', 'writeln', 'panic', 'assert',
-  'assert_eq', 'assert_ne', 'debug_assert', 'debug_assert_eq', 'debug_assert_ne', 'todo', 'unimplemented',
-  'unreachable', 'matches', 'dbg', 'include', 'include_str', 'include_bytes', 'env', 'option_env',
-  'concat', 'stringify', 'line', 'column', 'file', 'module_path', 'cfg', 'derive', 'allow', 'warn',
-  'deny', 'forbid', 'test', 'bench', 'macro_rules',
+  'print',
+  'println',
+  'eprint',
+  'eprintln',
+  'format',
+  'vec',
+  'write',
+  'writeln',
+  'panic',
+  'assert',
+  'assert_eq',
+  'assert_ne',
+  'debug_assert',
+  'debug_assert_eq',
+  'debug_assert_ne',
+  'todo',
+  'unimplemented',
+  'unreachable',
+  'matches',
+  'dbg',
+  'include',
+  'include_str',
+  'include_bytes',
+  'env',
+  'option_env',
+  'concat',
+  'stringify',
+  'line',
+  'column',
+  'file',
+  'module_path',
+  'cfg',
+  'derive',
+  'allow',
+  'warn',
+  'deny',
+  'forbid',
+  'test',
+  'bench',
+  'macro_rules',
 ]);
 
 /** 类型定义类 kind（impl / derive 的基名要挂到这些定义上）。 */
@@ -160,9 +285,7 @@ function rustDocstring(node: any): string | null {
     }
     if (sib.type !== 'line_comment') break;
     const kids = (sib.namedChildren ?? []) as any[];
-    const isDoc = kids.some(
-      (c: any) => c.type === 'outer_doc_comment_marker' || c.type === 'inner_doc_comment_marker',
-    );
+    const isDoc = kids.some((c: any) => c.type === 'outer_doc_comment_marker' || c.type === 'inner_doc_comment_marker');
     if (!isDoc) break;
     const text = kids.find((c: any) => c.type === 'doc_comment')?.text ?? '';
     lines.unshift(String(text).trim());
@@ -297,12 +420,9 @@ function chainParts(value: any, field: any): string[] | null {
 /** impl 块的类型名 / 方法归属：`impl Draw for Point` 的方法 containerName = Point。 */
 function handleFunction(node: any, ctx: WalkContext) {
   const name = node.childForFieldName('name');
-  const ownerItem =
-    node.parent?.type === 'declaration_list' ? node.parent.parent : null;
+  const ownerItem = node.parent?.type === 'declaration_list' ? node.parent.parent : null;
   const isMethod = ownerItem?.type === 'impl_item' || ownerItem?.type === 'trait_item';
-  const def = name
-    ? ctx.define(node, { nameNode: name, kind: isMethod ? 'method' : 'function' })
-    : null;
+  const def = name ? ctx.define(node, { nameNode: name, kind: isMethod ? 'method' : 'function' }) : null;
   const scope = ctx.enterScope(node, { kind: 'function', fixedName: name?.text }, name?.text ?? null);
   if (def) def.bodyScopeId = scope.id;
   const params = node.childForFieldName('parameters');
@@ -326,7 +446,10 @@ export const rust: LanguageSpec = {
     mod_item: { kind: 'module', nameFields: ['name'], defKind: 'module' },
     function_item: { kind: 'function', nameFields: ['name'], defKind: 'function', paramFields: ['parameters'] },
     function_signature_item: {
-      kind: 'function', nameFields: ['name'], defKind: 'method', paramFields: ['parameters'],
+      kind: 'function',
+      nameFields: ['name'],
+      defKind: 'method',
+      paramFields: ['parameters'],
     },
     struct_item: { kind: 'class', nameFields: ['name'], defKind: 'struct' },
     enum_item: { kind: 'class', nameFields: ['name'], defKind: 'enum' },
@@ -427,7 +550,10 @@ export const rust: LanguageSpec = {
         if (!segs.length) continue;
         if (item.wildcard) {
           ctx.addImport({
-            localName: '*', module: segs.join('::'), kind: 'star', range: ctx.rangeOf(item.rangeNode),
+            localName: '*',
+            module: segs.join('::'),
+            kind: 'star',
+            range: ctx.rangeOf(item.rangeNode),
           });
           continue;
         }
@@ -435,7 +561,10 @@ export const rust: LanguageSpec = {
         const localName = item.alias ?? last;
         if (segs.length === 1) {
           ctx.addImport({
-            localName, module: last, kind: 'module', range: ctx.rangeOf(item.rangeNode),
+            localName,
+            module: last,
+            kind: 'module',
+            range: ctx.rangeOf(item.rangeNode),
           });
           continue;
         }

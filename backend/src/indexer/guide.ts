@@ -14,7 +14,7 @@
 import type { GuideRoute, GuideRouteKind, GuideRouteStep, GuideRoutesResult, LangId } from '../types';
 import { findCycles, isDocOrConfig, isTestFile, looksLikeEntry, projectMap, type FileFacts } from './insight';
 import type { FileIndex, ImportRecord } from './model';
-import { moduleFiles } from './resolver';
+import { documentSymbols, moduleFiles } from './resolver';
 import type { ProjectIndex } from './store';
 
 /** 每条路线最多给多少步：阅读者不会按 300 步走（04-guide-plan §6 风险处置）。 */
@@ -95,6 +95,9 @@ function toRoute(kind: GuideRouteKind, facts: FactsMap, pending: Pending[]): Gui
       lang: (fact?.lang ?? 'plaintext') as LangId,
       lines: fact?.lines ?? 0,
       test: fact?.test ?? isTestFile(item.file),
+      // 行级指引由 buildRoutes 里的 withHints 统一填（这里给安全默认值）
+      line: 1,
+      hints: [],
     };
   });
   return {
@@ -307,6 +310,28 @@ function freshRoute(project: ProjectIndex, files: string[], facts: FactsMap): Gu
 // ---------------------------------------------------------------- 入口
 
 /**
+ * 给每一步补「先看哪一行、关注哪几个符号」。
+ * 路线只说「读哪个文件」不够用：打开一个 800 行的文件，人还得自己找入口。
+ * 符号取不到（未索引 / 解析失败）时退回 line=1、hints=[]，不影响路线本身。
+ */
+function withHints(project: ProjectIndex, route: GuideRoute): GuideRoute {
+  return {
+    ...route,
+    steps: route.steps.map((step) => {
+      let hints: GuideRouteStep['hints'] = [];
+      try {
+        hints = documentSymbols(project, step.file)
+          .slice(0, 3)
+          .map((s) => ({ name: s.name, line: s.location.range.start.line, kind: s.kind }));
+      } catch {
+        hints = [];
+      }
+      return { ...step, hints, line: hints[0]?.line ?? 1 };
+    }),
+  };
+}
+
+/**
  * 四条路线一次算全（顺序固定：依赖序 / 入口向下 / 热度序 / 新鲜度序）。
  * 索引未跑完时 `partial: true`，只基于当前已索引文件给结果，不报错。
  */
@@ -320,5 +345,6 @@ export function buildRoutes(project: ProjectIndex): GuideRoutesResult {
   const fresh = freshRoute(project, files, facts);
   // G3.2 进度分母：只数源码文件，测试与文档 / 配置不算「该读完的代码」
   const sourceFiles = files.filter((f) => !isTestFile(f) && !isDocOrConfig(f)).length;
-  return { routes: [dep, entry, hot, fresh], partial: project.status.indexing, sourceFiles };
+  const routes = [dep, entry, hot, fresh].map((route) => withHints(project, route));
+  return { routes, partial: project.status.indexing, sourceFiles };
 }

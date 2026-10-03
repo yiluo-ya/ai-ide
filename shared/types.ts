@@ -81,6 +81,10 @@ export interface FileNode {
   count?: number;
   lang?: LangId;
   size?: number;
+  /** 二进制 / 资源文件（图片、压缩包…）：文件树里能看见，但不预览。 */
+  binary?: boolean;
+  /** 是否已进符号索引；false = 非源码 / 被规则忽略 / 过大（点开时给明确理由）。 */
+  indexed?: boolean;
   /** 目录的子节点（文件为 undefined）。 */
   children?: FileNode[];
 }
@@ -286,6 +290,13 @@ export interface GuideRouteStep {
   lines: number;
   /** 测试 / 示例文件（判定与 01 地图同源），路线不排除它，只是标出来。 */
   test: boolean;
+  /**
+   * 建议先看这一行（1-based）：该文件第一个顶层符号的定义行；取不到符号时为 1。
+   * 路线只说到「读哪个文件」是不够的 —— 打开一个 800 行的文件，人还得自己找入口。
+   */
+  line: number;
+  /** 关注点：该文件最值得先看的几个顶层符号（名称 + 行 + 种类）。 */
+  hints: Array<{ name: string; line: number; kind: string }>;
 }
 
 /** 一条阅读路线。 */

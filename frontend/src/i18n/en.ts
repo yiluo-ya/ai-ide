@@ -65,8 +65,7 @@ export const en: Record<string, string> = {
   'privacy.writesBody':
     "It never writes into your code folder; only the project list and (if enabled) the index cache live in this tool's own data directory.",
   'privacy.sends': 'What it sends',
-  'privacy.sendsBody':
-    'No outbound network requests at all: no account, no telemetry, no reporting, no update checks.',
+  'privacy.sendsBody': 'No outbound network requests at all: no account, no telemetry, no reporting, no update checks.',
   'privacy.who': 'Who can reach it',
   'privacy.whoBody': 'The server listens on the loopback address only; processes on this machine can reach it.',
   'privacy.proofTitle': 'How to verify',
@@ -250,10 +249,8 @@ export const en: Record<string, string> = {
   'changes.counts': '{files} files changed · {added} added · {modified} modified · {deleted} deleted',
   'changes.lines': '+{added} / -{removed} lines',
   'changes.noGit': 'No git detected; comparing by line count only (no added/removed lines).',
-  'changes.noGitHead':
-    'This folder is a git repo with no commits yet (no HEAD); comparing by line count only.',
-  'changes.notesSummary':
-    'You have notes in {files} of these files; lines behind {notes} of them were changed',
+  'changes.noGitHead': 'This folder is a git repo with no commits yet (no HEAD); comparing by line count only.',
+  'changes.notesSummary': 'You have notes in {files} of these files; lines behind {notes} of them were changed',
   'changes.onlyStale': 'Only files where my notes went stale',
   'changes.onlyStaleTitle': 'Show only entries that have notes and were changed',
   'changes.refresh': 'Compare again',
@@ -436,7 +433,8 @@ export const en: Record<string, string> = {
   'flow.metaKind': 'kind: {kind} · layer {depth}',
   'flow.metaDegrees': 'In this graph: in {in} · out {out}',
   'flow.externalNote': 'External dependencies are not expanded and cannot be jumped to: their sources are not indexed.',
-  'flow.unresolvedNote': 'Unresolved calls would need type information; this tool does not infer it, so they are only marked, never guessed.',
+  'flow.unresolvedNote':
+    'Unresolved calls would need type information; this tool does not infer it, so they are only marked, never guessed.',
   'flow.openFile': 'Open file',
   'flow.noSource': '(no source)',
   'flow.tagExternal': 'external',

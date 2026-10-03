@@ -62,6 +62,13 @@ export interface EntryInfo {
   mtimeMs: number;
 }
 
+/** 按扩展名判断「二进制 / 资源文件」（文件树里只展示、不预览）。 */
+function isBinaryName(rel: string): boolean {
+  return /\.(png|jpe?g|gif|webp|ico|bmp|pdf|zip|gz|tgz|tar|jar|war|class|exe|dll|so|dylib|bin|woff2?|ttf|eot|mp[34]|wav|webm|mp4|sqlite|db|wasm|lock|map)$/i.test(
+    rel,
+  );
+}
+
 /** 未索引文件的原因记录（P9）。 */
 export interface SkipInfo {
   reason: SkipReason;
@@ -85,6 +92,12 @@ export class ProjectIndex {
 
   /** 全部非忽略条目（含目录），rel 为 POSIX 风格。 */
   readonly entries = new Map<string, EntryInfo>();
+  /**
+   * 2026-10-03 用户要求「文件树显示项目所有文件」：除噪声目录（node_modules/.git …）外，
+   * 连被规则忽略的与二进制的文件也记一份，专供 `/all-files` 给文件树用；
+   * 不混进 entries，是因为 entries 参与快照指纹与对账，语义必须是「可索引的候选文件」。
+   */
+  readonly allFiles = new Map<string, { size: number; mtimeMs: number; binary: boolean }>();
   readonly dirs = new Set<string>();
   /** 已建符号索引的源码文件。 */
   readonly files = new Map<string, FileIndex>();
@@ -184,6 +197,7 @@ export class ProjectIndex {
     await this.ignore.reload(this.root);
     this.entries.clear();
     this.dirs.clear();
+    this.allFiles.clear();
     this.ignoredCount = 0;
     let level: string[] = [''];
     while (level.length) {
@@ -218,6 +232,8 @@ export class ProjectIndex {
       }
       if (!d.isFile()) continue;
       if (this.ignore.ignoresFile(childRel)) {
+        // 被规则忽略的也记进 allFiles（文件树要显示「所有文件」），但不进 entries
+        this.allFiles.set(childRel, { size: 0, mtimeMs: 0, binary: isBinaryName(childRel) });
         this.ignoredCount++;
         continue;
       }
@@ -233,6 +249,7 @@ export class ProjectIndex {
     });
     for (const st of stats) {
       if (st) this.entries.set(st.rel, { dir: false, size: st.size, mtimeMs: st.mtimeMs });
+      if (st) this.allFiles.set(st.rel, { size: st.size, mtimeMs: st.mtimeMs, binary: isBinaryName(st.rel) });
     }
     return children;
   }
@@ -1089,6 +1106,63 @@ export class ProjectIndex {
       if (firstKey) this.textCache.delete(firstKey);
     }
     this.textCache.set(fi.file, fi);
+  }
+
+  /**
+   * 一个文件的状态：能不能预览、为什么不能（前端要据此说清「太大」还是「二进制」）。
+   * 读盘失败（不存在）返回 null。
+   */
+  fileStatus(rel: string): { size: number; binary: boolean } | null {
+    const known = this.allFiles.get(rel);
+    if (known) return { size: known.size, binary: known.binary };
+    const entry = this.entries.get(rel);
+    if (entry) return { size: entry.size, binary: isBinaryName(rel) };
+    return null;
+  }
+
+  /**
+   * 全部文件的树（2026-10-03）：只跳过噪声目录（node_modules / .git 那类），
+   * 被规则忽略的、二进制的、超大的文件都出现在树上，各自标出自己的状态。
+   * 与 buildFileTree 的区别：后者只给「可索引的候选文件」。
+   */
+  buildAllFileTree(): FileNode {
+    const root: FileNode = { name: this.name, path: '', type: 'directory', count: 0, children: [] };
+    const dirNodes = new Map<string, FileNode>();
+    dirNodes.set('', root);
+    for (const dir of [...this.dirs].sort()) {
+      const parts = dir.split('/');
+      const parent = dirNodes.get(parts.slice(0, -1).join('/'));
+      if (!parent) continue;
+      const node: FileNode = { name: parts[parts.length - 1], path: dir, type: 'directory', count: 0, children: [] };
+      parent.children?.push(node);
+      dirNodes.set(dir, node);
+    }
+    for (const rel of [...this.allFiles.keys()].sort()) {
+      const parts = rel.split('/');
+      const parent = dirNodes.get(parts.slice(0, -1).join('/'));
+      if (!parent) continue;
+      const info = this.allFiles.get(rel)!;
+      const spec = specForFile(rel);
+      const indexed = this.files.has(rel) || this.textCache.has(rel);
+      parent.children?.push({
+        name: parts[parts.length - 1],
+        path: rel,
+        type: 'file',
+        size: info.size,
+        lang: spec ? spec.id : 'plaintext',
+        binary: info.binary,
+        indexed,
+      });
+    }
+    const countFiles = (n: FileNode): number => {
+      if (n.type === 'file') return 1;
+      let total = 0;
+      for (const c of n.children ?? []) total += countFiles(c);
+      n.count = total;
+      return total;
+    };
+    countFiles(root);
+    return root;
   }
 
   buildFileTree(): FileNode {

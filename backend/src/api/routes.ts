@@ -1,5 +1,7 @@
 /** HTTP 路由：项目 / 文件 / 代码智能 / 文本搜索 / SSE 事件。 */
 import path from 'node:path';
+import os from 'node:os';
+import fsp from 'node:fs/promises';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
@@ -60,6 +62,7 @@ import {
   DATA_DIR,
   FRONTEND_DIST,
   HOST,
+  LOCAL_HOSTS,
   PORT,
   SHARE_NOTE_LOCAL,
   SHARE_NOTE_SHARED,
@@ -73,8 +76,13 @@ const VERSION = '0.1.0';
 /** 热点口径的合法取值（与 shared/types.ts 的 HotMetric 保持一致）。 */
 const HOT_METRICS: HotMetric[] = ['files', 'refs', 'symbols', 'defined', 'unique', 'recent'];
 
-const fail = (c: Context, status: 400 | 404 | 500, error: string, message?: string) =>
-  c.json({ error, message: message ?? error } satisfies ApiError, status);
+const fail = (
+  c: Context,
+  status: 400 | 403 | 404 | 413 | 415 | 500,
+  error: string,
+  message?: string,
+  extra?: Record<string, unknown>,
+) => c.json({ error, message: message ?? error, ...(extra ?? {}) } satisfies ApiError, status);
 
 export function createApp(
   registry: ProjectRegistry,
@@ -312,10 +320,63 @@ export function createApp(
 
   // -------------------------------------------------------------- 文件
 
+  /**
+   * 目录选择器（2026-10-03 用户要求：打开本机目录不能只靠手输路径）。
+   * 只列目录名，不读任何文件内容；不传 path 时给「起点」（Windows 给盘符，其余给 $HOME 与 /）。
+   * 共享模式（HOST 不是本机）下禁用：那等于把整台机器的目录树暴露给局域网。
+   */
+  app.get('/api/fs/dirs', async (c) => {
+    if (!LOCAL_HOSTS.has(HOST)) {
+      return fail(c, 403, 'disabled_in_share_mode', '共享模式下禁用了目录浏览（只读已知项目）');
+    }
+    const raw = (c.req.query('path') ?? '').trim();
+    if (!raw) {
+      const roots: Array<{ name: string; path: string }> = [];
+      if (process.platform === 'win32') {
+        for (const letter of 'CDEFGHIJKLMNOPQRSTUVWXYZ') {
+          const drive = `${letter}:\\`;
+          try {
+            await fsp.access(drive);
+            roots.push({ name: drive, path: drive });
+          } catch {
+            /* 不存在的盘符跳过 */
+          }
+        }
+      } else {
+        roots.push({ name: '/', path: '/' });
+      }
+      roots.push({ name: '主目录', path: os.homedir() });
+      return c.json({ path: null, parent: null, dirs: roots });
+    }
+    const abs = path.resolve(raw);
+    let dirents;
+    try {
+      dirents = await fsp.readdir(abs, { withFileTypes: true });
+    } catch {
+      return fail(c, 404, 'dir_not_found', `目录不可读：${abs}`);
+    }
+    const dirs = dirents
+      .filter((d) => d.isDirectory())
+      .map((d) => ({ name: d.name, path: path.join(abs, d.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const parent = path.dirname(abs);
+    return c.json({ path: abs, parent: parent === abs ? null : parent, dirs });
+  });
+
   app.get('/api/projects/:id/files', (c) => {
     const project = registry.get(c.req.param('id'));
     if (!project) return fail(c, 404, 'project_not_found');
     return c.json({ tree: project.buildFileTree(), status: project.status });
+  });
+
+  /**
+   * 2026-10-03 用户要求：文件树要显示项目的**所有**文件，不只是能检索的那些。
+   * 这条端点连二进制、资源、被规则忽略的文件一并给出（仅跳过 node_modules/.git 这类噪声目录）。
+   */
+  app.get('/api/projects/:id/all-files', (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    return c.json({ tree: project.buildAllFileTree(), status: project.status });
   });
 
   app.get('/api/projects/:id/file', async (c) => {
@@ -325,7 +386,17 @@ export function createApp(
     if (!rel) return fail(c, 400, 'bad_request', 'path is required');
     if (!project.resolveInside(rel)) return fail(c, 400, 'path_escape', '路径越界');
     const file = await project.readText(rel);
-    if (!file) return fail(c, 404, 'file_not_found', `无法读取（不存在 / 二进制 / 过大）：${rel}`);
+    // 读不到时给「为什么」：二进制与过大是两回事，前端要分别说清楚
+    if (!file) {
+      const info = project.fileStatus(rel);
+      if (info?.binary) return fail(c, 415, 'binary_file', `二进制 / 资源文件，不支持预览：${rel}`);
+      if (info && info.size > 0) {
+        return fail(c, 413, 'file_too_large', `文件太大，不支持预览：${rel}（${info.size} 字节）`, {
+          size: info.size,
+        });
+      }
+      return fail(c, 404, 'file_not_found', `无法读取：${rel}`);
+    }
     return c.json({ file: rel, lang: file.lang, text: file.text, size: file.size });
   });
 
@@ -363,12 +434,22 @@ export function createApp(
       .map((s) => (s === '.' ? '' : s));
     const rawExternal = Number(c.req.query('external') ?? 20);
     const external = Number.isFinite(rawExternal) ? Math.max(0, Math.min(rawExternal, 100)) : 20;
+    // focus：是否把入口 / 热点提到文件级。传 `focus=-` 或不传即「不提升」（目录级视图更干净）。
+    const rawFocus = c.req.query('focus');
+    const focus =
+      rawFocus === undefined || rawFocus === '-'
+        ? []
+        : rawFocus
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
     // 目录职责与分层复用概览的同一次计算，避免重复 IO
     const overview = await buildOverview(project, { limit: 3 });
     const graph: DependencyGraph = buildGraph(project, {
       level,
       expand,
       external,
+      focus,
       duties: overview.dirs,
     });
     return c.json(graph);

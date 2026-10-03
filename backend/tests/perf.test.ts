@@ -26,7 +26,16 @@ const LIMITS = STRICT
   ? { indexMs: 20_000, secondLoadMs: 1_500, gotoP95Ms: 1_000 }
   : { indexMs: 60_000, secondLoadMs: 20_000, gotoP95Ms: 1_000 }; // CI 宽松：只拦「崩塌到分钟级」
 
-test('perf: 1000 文件合成仓（索引 / 快照二次加载 / goto P95）', { timeout: 300_000 }, async () => {
+/**
+ * 压测默认关闭（用户 2026-10-03：压测我自己跑，不要每次都测）。
+ * 要跑：READER_PERF=1 npm test（或直接单跑本文件）。
+ */
+const PERF_ON = process.env.READER_PERF === '1';
+
+(PERF_ON ? test : test.skip)(
+  'perf: 1000 文件合成仓（索引 / 快照二次加载 / goto P95）',
+  { timeout: 240_000 },
+  async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'wcr-perf-'));
   const root = path.join(base, 'repo');
   const dataDir = path.join(base, 'data');
@@ -75,4 +84,5 @@ test('perf: 1000 文件合成仓（索引 / 快照二次加载 / goto P95）', {
     warm?.dispose();
     await fsp.rm(base, { recursive: true, force: true }).catch(() => undefined);
   }
-});
+  },
+);

@@ -29,6 +29,9 @@ import type { DependencyGraph, DependentsResult, DirDependentsResult } from './m
 import type { GraphEdge, GraphLayer, GraphNode, SymbolInfo } from '../../shared/types';
 import './graph.css';
 
+/** 与后端 `dirIdOf('')` 一致：根目录节点 id。前端靠它把根目录下的文件认到 ./ 名下。 */
+const ROOT_DIR_ID = './';
+
 interface Props {
   projectId: string;
   activeFile?: string | null;
@@ -195,11 +198,41 @@ export function layoutGraph(graph: DependencyGraph, mode: LayoutMode): Layout | 
     freeY = (bands.length - 1) * LANE_SPACING + LANE_FREE_GAP;
   }
   const laneNode = (d: SimNode) => slotY.has(d.id);
-  const targetX = (d: SimNode) => (laneOn ? slotX.get(d.id) ?? 0 : 0);
-  const targetY = (d: SimNode) => (laneOn ? slotY.get(d.id) ?? freeY : 0);
+
+  // 文件节点归属到「最近的、图上存在的祖先目录」：展开目录时文件就贴着它排，
+  // 而不是被统一下沉到最后一行 —— 那正是「一堆文件堆在一起」的观感来源。
+  const dirIds = new Set(graph.nodes.filter((n) => n.kind === 'dir').map((n) => n.id));
+  const parentDirOf = new Map<string, string>();
+  for (const n of graph.nodes) {
+    if (n.kind !== 'file') continue;
+    const parts = n.id.split('/');
+    for (let i = parts.length - 1; i > 0; i -= 1) {
+      const candidate = `${parts.slice(0, i).join('/')}/`;
+      if (dirIds.has(candidate)) {
+        parentDirOf.set(n.id, candidate);
+        break;
+      }
+    }
+    if (!parentDirOf.has(n.id) && dirIds.has(ROOT_DIR_ID)) parentDirOf.set(n.id, ROOT_DIR_ID);
+  }
+  /** 节点的锚：目录锚自己，文件锚父目录；都没有（外部依赖 / 根目录文件）返回 undefined。 */
+  const anchorOf = (d: SimNode): string | undefined =>
+    laneNode(d) ? d.id : parentDirOf.get(d.id);
+
+  const targetX = (d: SimNode) => {
+    if (!laneOn) return 0;
+    const anchor = anchorOf(d);
+    return anchor ? (slotX.get(anchor) ?? 0) : 0;
+  };
+  const targetY = (d: SimNode) => {
+    if (!laneOn) return 0;
+    const anchor = anchorOf(d);
+    return anchor ? (slotY.get(anchor) ?? freeY) : freeY;
+  };
   const strengthX = (d: SimNode) => {
     if (!laneOn) return 0.04;
-    return laneNode(d) ? 0.3 : 0.02;
+    if (laneNode(d)) return 0.3;
+    return parentDirOf.has(d.id) ? 0.12 : 0.02;
   };
   const strengthY = (d: SimNode) => {
     if (!laneOn) return 0.04;
@@ -226,15 +259,16 @@ export function layoutGraph(graph: DependencyGraph, mode: LayoutMode): Layout | 
     sim.tick();
     if (!laneOn) continue;
     for (const n of nodes) {
-      const laneY = slotY.get(n.id);
-      const target = laneY ?? freeY;
+      // 目录与它的文件都夹在自己那条泳道里；外部依赖没有归属，仍压在泳道图下方一行
+      const anchor = anchorOf(n);
+      const target = anchor ? (slotY.get(anchor) ?? freeY) : freeY;
       n.y = Math.max(target - lim, Math.min(target + lim, n.y ?? 0));
     }
   }
 
   if (laneOn) {
     // 色带的左右边界按泳道内节点的实际落点算：不同层节点数差很多，固定宽度会看不出归属
-    const xs = nodes.filter(laneNode).map((n) => n.x ?? 0);
+    const xs = nodes.filter((n) => anchorOf(n) !== undefined).map((n) => n.x ?? 0);
     const x0 = (xs.length ? Math.min(...xs) : 0) - 74;
     const x1 = (xs.length ? Math.max(...xs) : 0) + 74;
     for (const band of bands) {
@@ -299,7 +333,7 @@ export function groupByDepth<T extends { depth: number }>(items: T[] | undefined
 export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial, onViewChange }: Props) {
   const [level, setLevel] = useState<'dir' | 'file'>(initial?.level ?? 'dir');
   const [expand, setExpand] = useState<string[]>(initial?.expand ?? []);
-  const [withExternal, setWithExternal] = useState(initial?.external ?? true);
+  const [withExternal, setWithExternal] = useState(initial?.external ?? false);
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(initial?.layout ?? 'lanes');
   const [graph, setGraph] = useState<DependencyGraph | null>(null);
   const [loading, setLoading] = useState(false);
@@ -347,7 +381,15 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
     setLoading(true);
     setError(null);
     mapApi
-      .graph(projectId, { level, expand, external: withExternal ? 20 : 0 })
+      .graph(projectId, {
+        level,
+        expand,
+        external: withExternal ? 20 : 0,
+        // 2026-10-03 用户反馈「一堆文件堆在一起」：默认目录级视图不再强制把
+        // 入口 / 热点提到文件级（focus: [] = 不提升）——要看某个目录里的文件，
+        // 点那个目录展开即可；文件级视图本就是全文件，不受影响。
+        ...(level === 'dir' && expand.length === 0 ? { focus: [] } : {}),
+      })
       .then((g) => {
         if (cancelled) return;
         setGraph(g);
@@ -775,6 +817,8 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
                   <g
                     key={n.id}
                     className="gv-node"
+                    data-kind={n.kind}
+                    data-id={n.id}
                     transform={`translate(${n.x ?? 0} ${n.y ?? 0})`}
                     onPointerDown={stopPointer}
                     onClick={() => onNodeClick(n)}

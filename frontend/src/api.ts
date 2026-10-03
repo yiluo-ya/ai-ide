@@ -119,6 +119,16 @@ export const api = {
   fileTree: (id: string) =>
     request<{ tree: FileNode; status: IndexStatus }>(`/projects/${id}/files`),
 
+  /** 2026-10-03：文件树要显示项目的所有文件（含二进制与规则忽略的）。 */
+  allFiles: (id: string) =>
+    request<{ tree: FileNode; status: IndexStatus }>(`/projects/${id}/all-files`),
+
+  /** 目录选择器：列本机目录（共享模式下后端会 403）。 */
+  fsDirs: (path?: string) =>
+    request<{ path: string | null; parent: string | null; dirs: Array<{ name: string; path: string }> }>(
+      path ? `/fs/dirs?path=${encodeURIComponent(path)}` : '/fs/dirs',
+    ),
+
   fileText: (id: string, path: string) =>
     request<{ file: string; lang: string; text: string; size: number }>(
       `/projects/${id}/file?path=${encodeURIComponent(path)}`,

@@ -68,7 +68,8 @@ export function parseCorsOrigins(raw: string | undefined | null): string[] {
 /** 解析后的 CORS 白名单（`['*']` = 默认放开；共享前应设 READER_CORS_ORIGIN 收紧）。 */
 export const CORS_ORIGINS = parseCorsOrigins(process.env.READER_CORS_ORIGIN);
 
-const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+/** 仅本机可达的监听地址（共享模式 = 不在此集合内，此时按「不可信来源」处理）。 */
+export const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
 /** 仅本机监听时的说明；也是 shareHint=null 时的「如何放开」。 */
 export const SHARE_NOTE_LOCAL =

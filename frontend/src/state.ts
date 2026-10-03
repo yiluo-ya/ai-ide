@@ -83,6 +83,11 @@ export interface RefsState {
   declaration: Location | null;
   /** 发起查询时的光标位置（面板里标「← 光标」）。 */
   origin: { file: string; line: number; col: number };
+  /**
+   * 家族：这个符号在继承体系里的位置（来自类型层级）。
+   * 引用列表只回答「谁提到它」；家族回答「它继承谁、谁继承了它」—— 两者合起来才看得出结构。
+   */
+  family?: TypeHierarchyResult | null;
 }
 
 /**
@@ -335,6 +340,33 @@ function symbolAtPoint(symbols: SymbolInfo[], line: number, col: number): Symbol
   return covering.reduce((a, b) => (span(a) <= span(b) ? a : b));
 }
 
+/** 文档类文件的预览上限：超过就不加载，直接提示（用户 2026-10-03 定的 100KB）。 */
+export const DOC_PREVIEW_MAX_BYTES = 100 * 1024;
+
+/** 文档 / 配置类扩展名：这类文件常常很大（日志、锁文件），整篇塞进编辑器没意义。 */
+const DOC_LIKE = /\.(md|markdown|txt|log|json|ya?ml|toml|ini|csv|tsv|xml|html?|css|map|lock|svg)$/i;
+
+function isDocLike(file: string): boolean {
+  return DOC_LIKE.test(file);
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} 字节`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** 在文件树里找某个路径的节点（拿体积用；找不到返回 null）。 */
+function findFileNode(node: FileNode | null, path: string): FileNode | null {
+  if (!node) return null;
+  if (node.path === path) return node;
+  for (const child of node.children ?? []) {
+    const hit = findFileNode(child, path);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 export function readPositions(projectId: string | null): Record<string, MemoryPosition> {
   if (!projectId) return {};
   try {
@@ -500,7 +532,9 @@ export const useStore = create<State>((set, get) => ({
       highlightsToken: 0,
     });
     try {
-      const { tree, status } = await api.fileTree(id);
+      // 文件树给「所有文件」（2026-10-03 用户要求）：二进制 / 被规则忽略的也看得见，
+      // 拉不到（旧后端）就退回只含可索引文件的那份。
+      const { tree, status } = await api.allFiles(id).catch(() => api.fileTree(id));
       const project = get().projects.find((p) => p.id === id) ?? null;
       set({ tree, status, project });
       unsubscribeEvents = subscribeEvents(id, (event) => {
@@ -556,7 +590,7 @@ export const useStore = create<State>((set, get) => ({
     const id = get().projectId;
     if (!id) return;
     try {
-      const { tree, status } = await api.fileTree(id);
+      const { tree, status } = await api.allFiles(id).catch(() => api.fileTree(id));
       set({ tree, status });
     } catch {
       /* 树刷新失败不打断阅读 */
@@ -575,6 +609,15 @@ export const useStore = create<State>((set, get) => ({
     const targetCol = col ?? memory?.col ?? 1;
     // 先只置 loading：openFile 与 fileLang 必须同时更新，否则 Editor 会先用旧语言建 model
     set({ fileLoading: true });
+    // 2026-10-03 用户要求：文档类文件超过 10KB 不预览，直接说清楚（不把浏览器拖死）
+    const node = findFileNode(get().tree, file);
+    if (node && node.type === 'file' && isDocLike(file) && (node.size ?? 0) > DOC_PREVIEW_MAX_BYTES) {
+      set({
+        fileLoading: false,
+        error: `文件太大，不支持预览：${file}（${formatBytes(node.size ?? 0)}；文档类超过 ${formatBytes(DOC_PREVIEW_MAX_BYTES)} 不加载）`,
+      });
+      return;
+    }
     try {
       const res = await api.fileText(id, file);
       set({
@@ -967,6 +1010,15 @@ export const useStore = create<State>((set, get) => ({
         includeDeclaration: true,
       });
       if (get().openFile !== file) return; // 期间已切走
+      // 顺手带一次类型层级：引用面板要能回答「它在继承体系里的位置」，
+      // 而「家族」只在类型符号上有意义 —— 查不到就留 null，不影响引用列表本身。
+      let family: TypeHierarchyResult | null = null;
+      try {
+        family = await api.typeHierarchy(id, file, target.line, target.col);
+      } catch {
+        family = null;
+      }
+      if (get().openFile !== file) return;
       set({
         references: {
           symbol: res.symbol ?? null,
@@ -974,6 +1026,7 @@ export const useStore = create<State>((set, get) => ({
           locations: res.locations,
           declaration: res.declaration ?? null,
           origin: { file, line, col },
+          family,
         },
         referencesBusy: false,
       });

@@ -77,11 +77,7 @@ test('monorepo(ts): 项目内 workspace 包按包名 + exports/main 解析', asy
     }),
     'packages/ui/src/index.ts': "export * from './button';\n",
     'packages/ui/src/button.ts': 'export function Button(): string {\n  return "b";\n}\n',
-    'web/app.ts': [
-      "import { Button } from '@acme/ui/button';",
-      'export const b = Button();',
-      '',
-    ].join('\n'),
+    'web/app.ts': ["import { Button } from '@acme/ui/button';", 'export const b = Button();', ''].join('\n'),
   });
   try {
     const call = locate(fx.project, 'web/app.ts', 'Button()');

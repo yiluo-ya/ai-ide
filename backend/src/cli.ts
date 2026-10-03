@@ -81,15 +81,19 @@ export function parseArgs(argv: string[], defaults: { port?: number; host?: stri
 }
 
 /** 打印给用户的地址：通配监听地址换成回环，避免给出 0.0.0.0。 */
-const displayHost = (host: string): string =>
-  host === '0.0.0.0' ? '127.0.0.1' : host === '::' ? '[::1]' : host;
+const displayHost = (host: string): string => (host === '0.0.0.0' ? '127.0.0.1' : host === '::' ? '[::1]' : host);
 
 const say = (line = '') => process.stdout.write(`${line}\n`);
 
 async function registerProject(
   baseUrl: string,
   root: string,
-  http: { httpJson: (url: string, opts?: { method?: string; body?: unknown }) => Promise<{ status: number; json: unknown } | null> },
+  http: {
+    httpJson: (
+      url: string,
+      opts?: { method?: string; body?: unknown },
+    ) => Promise<{ status: number; json: unknown } | null>;
+  },
   logWarn: (msg: string, fields?: Record<string, unknown>) => void,
 ) {
   try {

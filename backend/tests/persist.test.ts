@@ -50,7 +50,11 @@ test('persist: 进度计数是累计完成数（25+ 文件、跨多批读取）'
   const { project, cleanup } = await makeProject(files);
   t.after(cleanup);
   assert.equal(project.status.filesTotal, 30);
-  assert.equal(project.status.filesIndexed, project.status.filesTotal, 'filesIndexed 必须是累计值，不能被最后一批的数量覆盖');
+  assert.equal(
+    project.status.filesIndexed,
+    project.status.filesTotal,
+    'filesIndexed 必须是累计值，不能被最后一批的数量覆盖',
+  );
   assert.equal(project.status.progress, 1);
 });
 
@@ -115,7 +119,11 @@ test('persist: 单文件改动只重解析该文件（indexOne 次数 = 变化�
   cold.dispose();
 
   // 改一个文件（size 也变）
-  await fsp.writeFile(path.join(root, 'src', 'b.ts'), 'export function betaPlus(value: number): number {\n  return value + 2;\n}\n', 'utf8');
+  await fsp.writeFile(
+    path.join(root, 'src', 'b.ts'),
+    'export function betaPlus(value: number): number {\n  return value + 2;\n}\n',
+    'utf8',
+  );
 
   const warm = new ProjectIndex('p', 'p', posix(root), Date.now(), { dataDir, persist: true, workers: 0 });
   const spy = spyReparse(warm);
@@ -129,7 +137,11 @@ test('persist: 单文件改动只重解析该文件（indexOne 次数 = 变化�
 
   // 增量路径：watcher 单文件变更 → 恰好 1 次 indexOne
   const before = spy.one;
-  await fsp.writeFile(path.join(root, 'src', 'a.ts'), 'export function alphaTwo(): number {\n  return 10;\n}\n', 'utf8');
+  await fsp.writeFile(
+    path.join(root, 'src', 'a.ts'),
+    'export function alphaTwo(): number {\n  return 10;\n}\n',
+    'utf8',
+  );
   await warm.onFileChanged('src/a.ts');
   assert.equal(spy.one - before, 1, '单文件变更走一次 indexOne');
   assert.ok(warm.defsByName.has('alphaTwo'));

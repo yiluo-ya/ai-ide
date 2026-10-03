@@ -48,9 +48,7 @@ if (hasFlag('--version', '-v')) {
 
 const tsx = resolveTsx();
 if (!tsx) {
-  process.stderr.write(
-    'web-code-reader: 找不到 tsx 运行器。请在包目录执行 `npm install`（或全局安装 tsx）后重试。\n',
-  );
+  process.stderr.write('web-code-reader: 找不到 tsx 运行器。请在包目录执行 `npm install`（或全局安装 tsx）后重试。\n');
   process.exit(1);
 }
 

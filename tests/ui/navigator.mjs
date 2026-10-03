@@ -15,9 +15,13 @@
 import { chromium } from 'playwright-core';
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { openPanel, useFastTimeouts, withStepTimeout } from './panel.mjs';
 
 const PORT = process.env.PORT ?? '8799';
 const BASE = `http://127.0.0.1:${PORT}`;
+/** 文件节点算「贴着自己父目录」的纵向容差（泳道半高 + 展开时的纵向浮动余量）。 */
+const LANE_TOLERANCE = 200;
+
 /**
  * 夹具项目 id 必须由 run.mjs 传入。
  * 以前这里回退到一个真实项目 id（0370c5cdff28），单独跑这个脚本时会静静地
@@ -29,23 +33,48 @@ if (!PROJECT) {
   process.exit(1);
 }
 
+/**
+ * 跨平台查找本机 Chromium（Windows / Linux / macOS 的 playwright 缓存）；找不到返回 null，
+ * 交给 playwright-core 自己按默认规则找（CI 用 `npx playwright install --with-deps chromium` 装的就在这里）。
+ */
 function findChromium() {
-  const root = path.join(process.env.LOCALAPPDATA ?? '', 'ms-playwright');
-  for (const dir of readdirSync(root).filter((d) => d.startsWith('chromium-'))) {
-    for (const candidate of ['chrome-win/chrome.exe', 'chrome-win64/chrome.exe']) {
-      const exe = path.join(root, dir, candidate);
-      if (existsSync(exe)) return exe;
+  const roots = [
+    process.env.PLAYWRIGHT_BROWSERS_PATH,
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'ms-playwright') : null,
+    process.env.HOME ? path.join(process.env.HOME, '.cache', 'ms-playwright') : null,
+    process.env.HOME ? path.join(process.env.HOME, 'Library', 'Caches', 'ms-playwright') : null,
+  ].filter((root) => root && existsSync(root));
+  const candidates = [
+    'chrome-win/chrome.exe',
+    'chrome-win64/chrome.exe',
+    'chrome-linux/chrome',
+    'chrome-linux64/chrome',
+    'chrome-mac/Chromium.app/Contents/MacOS/Chromium',
+    'chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium',
+  ];
+  for (const root of roots) {
+    let dirs;
+    try {
+      dirs = readdirSync(root).filter((d) => d.startsWith('chromium'));
+    } catch {
+      continue;
+    }
+    for (const dir of dirs) {
+      for (const name of candidates) {
+        const exe = path.join(root, dir, name);
+        if (existsSync(exe)) return exe;
+      }
     }
   }
-  throw new Error(`找不到 Chromium：${root}`);
+  return null;
 }
 
 const results = [];
 const errors = [];
 
-async function step(name, fn) {
+async function step(name, fn, timeoutMs) {
   try {
-    const detail = await fn();
+    const detail = await withStepTimeout(name, fn, timeoutMs);
     results.push({ name, pass: true, detail: typeof detail === 'string' ? detail : '' });
   } catch (e) {
     results.push({ name, pass: false, detail: String(e).split('\n')[0].slice(0, 200) });
@@ -71,13 +100,17 @@ function report() {
 }
 
 async function main() {
-  const browser = await chromium.launch({ executablePath: findChromium(), headless: true });
+  const executablePath = findChromium();
+  const browser = await chromium.launch({ ...(executablePath ? { executablePath } : {}), headless: true });
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
+  // 失败要快：默认 30 秒的等待会把一条超时放大成半分钟（需要长等的步骤各自写了显式 timeout）
+  useFastTimeouts(page);
   page.on('console', (msg) => {
     if (msg.type() === 'error') errors.push(msg.text());
   });
   page.on('pageerror', (e) => errors.push(String(e)));
 
+  // setup 显式放宽到 60 秒：首次索引是外部过程（磁盘 + tree-sitter），不是「用例该多等一秒」的问题
   await step('setup：打开夹具项目并等文件树就绪', async () => {
     // 每一步都给显式超时：靠默认 30 秒的话，卡住时既看不出卡在哪、也拖很久
     await page.goto(`${BASE}/?project=${PROJECT}`, { waitUntil: 'networkidle', timeout: 30_000 });
@@ -87,10 +120,10 @@ async function main() {
     await page.evaluate(() => window.localStorage.clear());
     await page.reload({ waitUntil: 'networkidle', timeout: 30_000 });
     // 等文件树就绪（索引 / 地图数据加载完）
-    await page.locator('.panel-tabs button', { hasText: '文件' }).click({ timeout: 20_000 });
+    await openPanel(page, 'files');
     await page.waitForFunction(() => document.querySelectorAll('.tree-row').length > 0, null, { timeout: 60_000 });
     return `${await page.locator('.tree-row').count()} 行文件树`;
-  });
+  }, 60_000);
 
   // setup 失败时，后面每条用例都只会重复同一个错误（各等一次超时）。
   // 先把已有结果打印出来再退出 —— 以前 setup 失败是抛个栈直接结束，一条结果都看不到。
@@ -100,6 +133,25 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+
+  await step('T：文件树默认折叠、目录与文件两色', async () => {
+    await openPanel(page, 'files');
+    await page.waitForSelector('.tree-row.dir', { timeout: 15_000 });
+    // 2026-10-03 用户要求「文件夹默认折叠」：一进来只该看到目录行
+    const fileRows = await page.locator('.tree-row.file').count();
+    assert(fileRows === 0, `默认应折叠，却直接显示了 ${fileRows} 个文件行`);
+    const dirColor = await page.$eval('.tree-row.dir .tree-name', (el) => getComputedStyle(el).color);
+    const dirWeight = await page.$eval('.tree-row.dir .tree-name', (el) => getComputedStyle(el).fontWeight);
+    // 展开第一个目录，看文件行是否出现、颜色是否与目录不同
+    await page.locator('.tree-row.dir').first().click();
+    await page.waitForSelector('.tree-row.file', { timeout: 15_000 });
+    const fileColor = await page.$eval('.tree-row.file .tree-name', (el) => getComputedStyle(el).color);
+    assert(
+      dirColor !== fileColor,
+      `目录与文件颜色相同（都是 ${dirColor}）：用户要求区分这两者`,
+    );
+    return `目录 ${dirColor} / 粗 ${dirWeight}，文件 ${fileColor}`;
+  });
 
   const openFile = async (needle) => {
     await page.keyboard.press('Control+p');
@@ -124,9 +176,9 @@ async function main() {
     await page.waitForTimeout(600);
   };
 
-  const sidebar = async (name) => {
-    await page.locator('.panel-tabs button', { hasText: name }).click();
-    await page.waitForTimeout(900);
+  const sidebar = async (id) => {
+    await openPanel(page, id);
+    await page.waitForTimeout(600);
   };
 
   /**
@@ -157,30 +209,12 @@ async function main() {
     return `${bar.replace(/\s+/g, ' ')} / ${tabs} 个标签`;
   });
 
-  await step('N4：引用面板：声明 / 测试标注（util.ts:12 helper）', async () => {
-    await openFile('util.ts');
-    await gotoLine(12);
-    await sidebar('引用');
-    await page.waitForTimeout(800);
-    const text = await page.locator('.refs-panel').first().innerText();
-    assert(/处引用/.test(text), `引用面板没出结果：${text.slice(0, 80)}`);
-    assert((await page.locator('.refs-badge.decl').count()) >= 1, '没有标出声明行');
-    assert((await page.locator('.refs-badge', { hasText: '测试' }).count()) >= 1, '没有标出测试文件');
-    return text.split('\n').slice(0, 3).join(' / ');
-  });
-
-  await step('N16：调用层级面板可查（util.ts:12 helper 的调用方）', async () => {
-    await sidebar('层级');
-    await page.waitForTimeout(900);
-    const text = await page.locator('.nav-panel').first().innerText();
-    assert(/谁调用我|我调用了谁/.test(text), text.slice(0, 80));
-    assert(/FastRunner|service\.ts/.test(text), `没列出调用方：${text.slice(0, 120)}`);
-    assert(/已解析 1 处以上|已解析/.test(text), '没有覆盖率行');
-    return text.split('\n').slice(0, 4).join(' / ');
-  });
+  // 2026-10-03 用户要求移除「引用 / 层级」面板：原来的 N4（引用）、N（家族）、N16（调用层级）
+  // 三条用例随之删除 —— 面板已不在界面上，测它等于测不存在的东西。
+  // 后端接口与组件保留（见 docs/03-navigator.md 的变更记录），日后恢复入口时再把用例接回来。
 
   await step('N11/N12：搜索面板（全屏入口 / 停止按钮 / 目录归类）', async () => {
-    await page.locator('.panel-tabs button', { hasText: '搜索' }).click();
+    await openPanel(page, 'search');
     await page.waitForTimeout(300);
     assert((await page.locator('.search-panel .btn', { hasText: '全屏' }).count()) >= 1, '没有全屏入口');
     await page.locator('.search-panel input.text-input').first().fill('helper');
@@ -235,7 +269,7 @@ async function main() {
 
   await step('S3a：复制选中代码（带出处：路径:行范围 + 围栏）', async () => {
     await openFile('util.ts');
-    await sidebar('大纲');
+    await sidebar('outline');
     // 行号从界面推导（夹具会被改动，写死行号测一次就脆）
     const title = await page.locator('.outline-row', { hasText: 'helper' }).first().getAttribute('title');
     const line = Number(/第 (\d+) 行/.exec(title ?? '')?.[1]);
@@ -264,7 +298,7 @@ async function main() {
 
   await step('S3b：复制符号摘要（大纲 ⧉ → 名字 + 种类 + 签名 + 位置）', async () => {
     await openFile('util.ts');
-    await sidebar('大纲');
+    await sidebar('outline');
     const row = page.locator('.outline-row', { hasText: 'helper' }).first();
     assert((await row.count()) > 0, '大纲里没有 helper');
     await row.hover();
@@ -294,7 +328,7 @@ async function main() {
 
   await step('S10：批注面板可添加、刷新后仍在（只存本机）', async () => {
     await openFile('util.ts');
-    await sidebar('批注');
+    await sidebar('notes');
     // 光标停在哪行都行：断言只用界面自己报出来的位置
     await gotoLine(3);
     await page.locator('.notes-compose textarea').first().fill('这里要处理越界');
@@ -307,7 +341,7 @@ async function main() {
 
     // 重载后仍在（localStorage，按项目分片）
     await page.reload({ waitUntil: 'networkidle' });
-    await sidebar('批注');
+    await sidebar('notes');
     rows = await page.locator('.notes-row').count();
     assert(rows >= 1, '刷新后批注丢了');
     return `${rows} 条批注，刷新后仍在`;
@@ -333,6 +367,67 @@ async function main() {
     assert(hasRule, '打印样式（@media print）没有加载');
     return '页眉 + @media print 规则就位';
   });
+
+  // 这条用例要「开图 + 点开一个目录（触发一次后端重算）」再断言布局，
+  // 内部等待本身就超过默认 20 秒上限，所以显式放宽到 40 秒（其余用例仍守 20 秒）。
+  await step('M：依赖图里文件节点贴着自己所属的目录', async () => {
+    // 用深链直接开图：主区的「看依赖图」按钮只在项目地图页出现，依赖当前主区视图，太脆。
+    const url = new URL(page.url());
+    url.searchParams.set('graph', '1');
+    await page.goto(url.toString(), { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.waitForSelector('.gv-node', { timeout: 20_000 });
+    // 2026-10-03：默认目录级视图不再混入文件节点（更干净）；
+    // 先确认默认就是纯目录，再点一个目录展开，看文件是否贴着自己的父目录。
+    const defaultKinds = await page.$$eval('.gv-node', (els) =>
+      els.map((e) => e.getAttribute('data-kind')),
+    );
+    assert(
+      !defaultKinds.includes('file'),
+      `默认依赖图里混进了文件节点（应只有目录）：${JSON.stringify(defaultKinds)}`,
+    );
+    // 要展开的是「真有文件的目录」：根目录 './' 下没有直接文件，点它等于没变化
+    // （夹具的文件都在 src/ 与 tests/ 里）—— 这是用例自身的坑，不是产品的问题。
+    const dirNode = page.locator('.gv-node[data-kind="dir"]:not([data-id="./"])').first();
+    // 图是 SVG + 力导向布局，节点常落在视口外或与图例重叠；这里只关心「点它会展开」，
+    // 所以跳过可点性检查直接派发点击（真实浏览器里是这个 onClick 在展开目录）。
+    await dirNode.click({ force: true });
+    await page.waitForSelector('.gv-node[data-kind="file"]', { timeout: 20_000 });
+    const nodes = await page.$$eval('.gv-node', (els) =>
+      els.map((e) => {
+        const m = /translate\((-?[\d.]+) (-?[\d.]+)\)/.exec(e.getAttribute('transform') ?? '');
+        return {
+          id: e.getAttribute('data-id') ?? '',
+          kind: e.getAttribute('data-kind') ?? '',
+          y: Number(m?.[2] ?? NaN),
+        };
+      }),
+    );
+    const dirs = nodes.filter((n) => n.kind === 'dir');
+    const files = nodes.filter((n) => n.kind === 'file' && Number.isFinite(n.y));
+    assert(dirs.length >= 1, '依赖图没有目录节点');
+    assert(files.length >= 1, `依赖图没有文件级节点：${JSON.stringify(nodes.slice(0, 6))}`);
+    const yOf = new Map(nodes.map((n) => [n.id, n.y]));
+    /** 文件所属目录的 y（逐级向上找图上存在的目录）。 */
+    const parentY = (id) => {
+      const parts = id.split('/');
+      for (let i = parts.length - 1; i > 0; i -= 1) {
+        const dir = `${parts.slice(0, i).join('/')}/`;
+        if (yOf.has(dir)) return yOf.get(dir);
+      }
+      return yOf.get('./');
+    };
+    const anchored = files.filter((f) => {
+      const py = parentY(f.id);
+      return py !== undefined && Math.abs(py - f.y) <= LANE_TOLERANCE;
+    });
+    assert(
+      anchored.length >= 1,
+      `文件节点都没贴着自己所属的目录（会被统一下沉成一行）：${JSON.stringify(files.slice(0, 6))}`,
+    );
+    const bands = new Set(files.map((f) => Math.round(f.y / 100))).size;
+    await page.keyboard.press('Escape');
+    return `${files.length} 个文件节点，贴住父目录 ${anchored.length} 个，y 分 ${bands} 档`;
+  }, 40_000);
 
   await browser.close();
 

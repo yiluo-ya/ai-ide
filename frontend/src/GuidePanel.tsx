@@ -147,11 +147,19 @@ export function GuidePanel({
                   <span className="guide-step-order">{step.order}</span>
                   <button
                     className="guide-step-main"
-                    onClick={() => onOpenFile(step.file)}
-                    title={`${step.file}\n${step.reason}`}
+                    onClick={() => onOpenFile(step.file, step.line ?? 1)}
+                    title={`${step.file}:${step.line ?? 1}\n${step.reason}${
+                      step.hints?.length ? `\n关注点：${step.hints.map((h) => `${h.name}（第 ${h.line} 行）`).join('、')}` : ''
+                    }`}
                   >
                     <span className="guide-step-file">{step.file}</span>
                     <span className="guide-step-reason">{step.reason}</span>
+                    {/* 说到「打开哪一行、看什么」才叫向导：只给文件名，人还得自己在文件里找入口 */}
+                    {step.hints?.length ? (
+                      <span className="guide-step-hints">
+                        先看第 {step.line ?? 1} 行 · {step.hints.map((h) => h.name).join(' / ')}
+                      </span>
+                    ) : null}
                   </button>
                   <span className={`guide-step-state ${isDone ? 'read' : isHere ? 'at' : 'todo'}`}>
                     {isDone ? t('guide.route.status.read') : isHere ? t('guide.route.status.at') : t('guide.route.status.todo')}

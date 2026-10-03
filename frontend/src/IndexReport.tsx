@@ -111,9 +111,7 @@ export function IndexReportDialog({ projectId, onClose }: { projectId: string; o
             ))}
           </ul>
 
-          <p className="wcr-note">
-            {t('report.generatedAt', { at: new Date(report.generatedAt).toLocaleString() })}
-          </p>
+          <p className="wcr-note">{t('report.generatedAt', { at: new Date(report.generatedAt).toLocaleString() })}</p>
         </>
       )}
 

@@ -85,8 +85,7 @@ function probePort(port: number, host: string): Promise<number | null> {
   });
 }
 
-const isPortFree = async (port: number, host: string): Promise<boolean> =>
-  (await probePort(port, host)) !== null;
+const isPortFree = async (port: number, host: string): Promise<boolean> => (await probePort(port, host)) !== null;
 
 /**
  * 从 `preferred` 起往后试（最多 20 个）找一个能监听的端口；
@@ -131,7 +130,9 @@ export function httpJson(
         timeout: opts.timeoutMs ?? 1500,
         headers: {
           connection: 'close',
-          ...(payload ? { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(payload)) } : {}),
+          ...(payload
+            ? { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(payload)) }
+            : {}),
         },
       },
       (res) => {

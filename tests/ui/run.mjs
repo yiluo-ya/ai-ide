@@ -123,6 +123,72 @@ const fixtureRoot = await writeFixture();
 /** 本次专用的数据目录：绝不去读使用者本机已注册的真实项目（否则会拖着一大批索引跑）。 */
 const dataDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'wcr-ui-data-'));
 
+/**
+ * 前端产物是否比源码新（新就跳过 vite build）。
+ * 构建一次约 90 秒，而改后端 / 文档时根本用不着重新构建 —— 那 90 秒纯属白等。
+ * 需要强制重建时：UI_FORCE_BUILD=1 npm run test:ui。
+ */
+async function needsBuild() {
+  if (process.env.UI_FORCE_BUILD === '1') return '要求强制重建';
+  const distIndex = path.join(ROOT, 'frontend/dist/index.html');
+  const distStat = await fsp.stat(distIndex).catch(() => null);
+  if (!distStat) return 'dist 不存在';
+  const newest = async (dir) => {
+    let max = 0;
+    let entries;
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true });
+    } catch {
+      return 0;
+    }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        const inner = await newest(p);
+        if (inner > max) max = inner;
+      } else {
+        const stat = await fsp.stat(p).catch(() => null);
+        if (stat && stat.mtimeMs > max) max = stat.mtimeMs;
+      }
+    }
+    return max;
+  };
+  const sources = [
+    path.join(ROOT, 'frontend/src'),
+    path.join(ROOT, 'shared'),
+    path.join(ROOT, 'frontend/index.html'),
+  ];
+  let srcMax = distStat.mtimeMs;
+  for (const s of sources) {
+    const stat = await fsp.stat(s).catch(() => null);
+    const m = stat && stat.isDirectory() ? await newest(s) : stat ? stat.mtimeMs : 0;
+    if (m > srcMax) srcMax = m;
+  }
+  if (srcMax > distStat.mtimeMs) return '源码比 dist 新';
+  return null;
+}
+
+const buildReason = await needsBuild();
+if (buildReason) {
+  console.log(`[ui] 构建前端产物（${buildReason}）…`);
+  const t = Date.now();
+  const build = spawn(
+    process.execPath,
+    [path.join(ROOT, 'frontend/node_modules/vite/bin/vite.js'), 'build'],
+    { cwd: path.join(ROOT, 'frontend'), stdio: ['ignore', 'ignore', 'inherit'] },
+  );
+  const code = await new Promise((resolve) => build.on('exit', resolve));
+  if (code !== 0) {
+    console.error('[ui] 前端构建失败，先修构建再跑 UI 回归。');
+    await fsp.rm(fixtureRoot, { recursive: true, force: true }).catch(() => {});
+    await fsp.rm(dataDir, { recursive: true, force: true }).catch(() => {});
+    process.exit(1);
+  }
+  console.log(`[ui] 构建完成（${((Date.now() - t) / 1000).toFixed(1)}s）`);
+} else {
+  console.log('[ui] dist 已是最新，跳过构建');
+}
+
 // 端口先探一次：旧的服务还占着就直接拒绝跑，而不是“洋洋洒洒”连上去跑一轮假结果
 if (await fetch(`${BASE}/api/health`).then((r) => r.ok).catch(() => false)) {
   console.error(`端口 ${PORT} 上已经有服务在监听（可能是上一轮遗留的测试后端）。`);
@@ -202,12 +268,20 @@ const runSuite = (file) => {
   );
   return new Promise((resolve) => child.on('exit', resolve));
 };
-const suites = ['navigator.mjs', 'guide.mjs'];
+// 调试时只跑一套：UI_SUITES=guide.mjs node tests/ui/run.mjs
+const suites = (process.env.UI_SUITES ?? 'navigator.mjs,guide.mjs,platform.mjs')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 let code = 0;
+const startedAt = Date.now();
 for (const suite of suites) {
+  const t = Date.now();
   const c = await runSuite(suite);
+  console.log(`[ui] ${suite}：${((Date.now() - t) / 1000).toFixed(1)}s${c === 0 ? '' : `（退出码 ${c}）`}`);
   if (typeof c === 'number' && c !== 0 && code === 0) code = c;
 }
+console.log(`[ui] 全部用时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
 
 clearTimeout(watchdog);
 await fetch(`${BASE}/api/projects/${project.id}`, { method: 'DELETE' }).catch(() => {});

@@ -2,7 +2,48 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SymbolInfo } from './api';
 import type { RefsState, SearchHit } from './state';
+import type { TypeNode } from '../../shared/types';
 import { useI18n } from './i18n';
+
+/** 继承关系的中文说法（与层级面板同一套口径）。 */
+const RELATION_TEXT: Record<TypeNode['relation'], string> = {
+  extends: '继承',
+  implements: '实现',
+  embeds: '嵌入',
+  overrides: '重写',
+};
+
+/**
+ * 大纲只显示「有结构意义」的符号：类 / 接口 / 结构体 / 枚举（含内部类，即嵌套在类里的类）
+ * 与函数 / 方法。变量、字段、属性、导入这些不显示 —— 2026-10-03 用户要求：
+ * 「大纲只显示方法和内部类就行，变量不用显示」。
+ */
+const OUTLINE_KINDS = new Set([
+  'class',
+  'interface',
+  'struct',
+  'enum',
+  'function',
+  'method',
+  'constructor',
+  'module',
+  'namespace',
+]);
+
+/** 递归过滤符号树：不在上述集合里的节点被丢掉（其子节点上提一层，不丢失结构）。 */
+export function filterOutline(symbols: SymbolInfo[]): SymbolInfo[] {
+  const out: SymbolInfo[] = [];
+  for (const s of symbols) {
+    const children = filterOutline(s.children ?? []);
+    if (OUTLINE_KINDS.has(s.kind)) {
+      out.push(children.length ? { ...s, children } : { ...s, children: [] });
+    } else {
+      // 容器本身不显示（如 variable），但它的子节点仍要保留 —— 上提到本层
+      out.push(...children);
+    }
+  }
+  return out;
+}
 
 const KIND_ICON: Record<string, string> = {
   class: 'C',
@@ -29,12 +70,20 @@ export function KindIcon({ kind }: { kind: string }) {
 
 // ------------------------------------------------------------------ 大纲
 
+/** 大纲节点的稳定键：同一文件里 name + 起始行足够唯一。 */
+function outlineKey(symbol: SymbolInfo): string {
+  return `${symbol.name}:${symbol.location.range.start.line}`;
+}
+
 function OutlineNode({
   symbol,
   depth,
   activeLine,
   onJump,
   onCopy,
+  overrides,
+  cursorPath,
+  onToggle,
 }: {
   symbol: SymbolInfo;
   depth: number;
@@ -42,8 +91,17 @@ function OutlineNode({
   onJump: (s: SymbolInfo) => void;
   /** S3b：把「符号名 + 种类 + 签名 + 位置」复制走。 */
   onCopy?: (s: SymbolInfo) => void;
+  /** 用户手动展开 / 折叠的覆盖（键 → 是否展开）。 */
+  overrides: Record<string, boolean>;
+  /** 光标所在符号链：自动展开，跟着阅读位置走。 */
+  cursorPath: Set<string>;
+  onToggle: (key: string, open: boolean) => void;
 }) {
   const line = symbol.location.range.start.line;
+  const key = outlineKey(symbol);
+  const kids = symbol.children ?? [];
+  // 默认只展开顶层一级与光标所在链 —— 大纲是骨架，不该一打开就铺满整屏。
+  const open = overrides[key] ?? (depth === 0 || cursorPath.has(key));
   return (
     <div className="outline-node">
       <div
@@ -52,6 +110,20 @@ function OutlineNode({
         onClick={() => onJump(symbol)}
         title={`${symbol.name} — 第 ${line} 行`}
       >
+        {kids.length > 0 ? (
+          <button
+            className={`outline-toggle ${open ? 'open' : ''}`}
+            title={open ? '折叠' : '展开'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle(key, !open);
+            }}
+          >
+            ▸
+          </button>
+        ) : (
+          <span className="outline-toggle-space" />
+        )}
         <KindIcon kind={symbol.kind} />
         <span className="outline-name">{symbol.name}</span>
         {symbol.detail && <span className="outline-detail">{symbol.detail}</span>}
@@ -68,16 +140,20 @@ function OutlineNode({
           </button>
         )}
       </div>
-      {(symbol.children ?? []).map((c) => (
-        <OutlineNode
-          key={`${c.name}:${c.location.range.start.line}`}
-          symbol={c}
-          depth={depth + 1}
-          activeLine={activeLine}
-          onJump={onJump}
-          onCopy={onCopy}
-        />
-      ))}
+      {open &&
+        kids.map((c) => (
+          <OutlineNode
+            key={`${c.name}:${c.location.range.start.line}`}
+            symbol={c}
+            depth={depth + 1}
+            activeLine={activeLine}
+            onJump={onJump}
+            onCopy={onCopy}
+            overrides={overrides}
+            cursorPath={cursorPath}
+            onToggle={onToggle}
+          />
+        ))}
     </div>
   );
 }
@@ -96,11 +172,33 @@ export function OutlinePanel({
   /** S3b：复制符号摘要（签名 + 位置），承接 05 信使。 */
   onCopySymbol?: (symbol: SymbolInfo) => void;
 }) {
+  /** 手动展开 / 折叠的覆盖；缺省时按「顶层一级 + 光标链」展开。 */
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   if (!fileName) return <div className="panel-empty">未打开文件</div>;
-  if (!symbols.length) return <div className="panel-empty">该文件没有可识别的符号</div>;
+  // 只留方法与类（含内部类）：变量/字段/导入不进大纲
+  const shown = filterOutline(symbols);
+  if (!shown.length) return <div className="panel-empty">该文件没有可识别的符号</div>;
+  const cursorPath = new Set(symbolPathAt(shown, cursorLine).map(outlineKey));
+  const allKeys: string[] = [];
+  const collect = (list: SymbolInfo[]) => {
+    for (const s of list) {
+      allKeys.push(outlineKey(s));
+      if (s.children?.length) collect(s.children);
+    }
+  };
+  collect(shown);
+  const setAll = (open: boolean) => setOverrides(Object.fromEntries(allKeys.map((k) => [k, open])));
   return (
     <div className="outline">
-      {symbols.map((s) => (
+      <div className="outline-tools">
+        <button className="btn ghost small" onClick={() => setAll(true)}>
+          展开全部
+        </button>
+        <button className="btn ghost small" onClick={() => setAll(false)}>
+          折叠全部
+        </button>
+      </div>
+      {shown.map((s) => (
         <OutlineNode
           key={`${s.name}:${s.location.range.start.line}`}
           symbol={s}
@@ -108,6 +206,9 @@ export function OutlinePanel({
           activeLine={cursorLine}
           onJump={onJump}
           onCopy={onCopySymbol}
+          overrides={overrides}
+          cursorPath={cursorPath}
+          onToggle={(key, open) => setOverrides((prev) => ({ ...prev, [key]: open }))}
         />
       ))}
     </div>
@@ -260,6 +361,47 @@ export function RefsPanel({
           只看项目代码
         </label>
       </div>
+      {/* 家族：引用列表只说「谁提到它」，这里补「它在继承体系里的位置」 */}
+      {(() => {
+        const family = data.family;
+        if (!family || !(family.bases.length || family.derived.length || family.unresolvedBases.length)) {
+          return null;
+        }
+        const link = (node: TypeNode) => (
+          <button
+            key={`${node.relation}:${node.file}:${node.location.range.start.line}`}
+            className="refs-family-link"
+            onClick={() => onJump(node.file, node.location.range.start.line, node.location.range.start.col)}
+            title={`${RELATION_TEXT[node.relation]} ${node.name} — ${node.file}:${node.location.range.start.line}`}
+          >
+            {node.name}
+          </button>
+        );
+        return (
+          <div className="refs-family">
+            <div className="refs-family-title">
+              家族
+              {family.kind && <span className="refs-family-kind">{family.kind}</span>}
+            </div>
+            {family.bases.length > 0 && (
+              <div className="refs-family-row">
+                <span className="refs-family-label">继承 / 实现</span>
+                {family.bases.map(link)}
+              </div>
+            )}
+            {family.derived.length > 0 && (
+              <div className="refs-family-row">
+                <span className="refs-family-label">被继承 / 实现（{family.derived.length}）</span>
+                {family.derived.slice(0, 6).map(link)}
+                {family.derived.length > 6 && <span className="refs-note">等 {family.derived.length} 个</span>}
+              </div>
+            )}
+            {family.unresolvedBases.length > 0 && (
+              <div className="refs-note">项目内找不到：{family.unresolvedBases.join('、')}</div>
+            )}
+          </div>
+        );
+      })()}
       <div className="refs-body">
         {groups.map((g) => (
           <div key={g.file} className="refs-group">

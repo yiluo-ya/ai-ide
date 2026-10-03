@@ -132,6 +132,20 @@
   color: var(--fg-dim);
 }
 
+/* 行级指引：这一步的入口在哪一行、先看哪几个符号 */
+.guide-step-hints {
+  font-size: 11px;
+  color: var(--accent-2);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-step.done .guide-step-hints {
+  color: var(--fg-dim);
+}
+
 .guide-step-reason {
   font-size: 11px;
   color: var(--fg-dim);

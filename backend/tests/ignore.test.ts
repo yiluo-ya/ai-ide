@@ -75,7 +75,7 @@ test('ignore: 优先级 .wcrignore > .gitignore > builtin', async (t) => {
   assert.equal(ig.ignoresDir('dist', 'dist'), true, '.wcrignore 没提 dist，.gitignore 生效');
 
   // 内置黑名单可被 .wcrignore 的 ! 打开
-  const root2 = await makeRoot({ '.wcrignore': ['!coverage/'] .join('\n') });
+  const root2 = await makeRoot({ '.wcrignore': ['!coverage/'].join('\n') });
   t.after(() => fsp.rm(root2, { recursive: true, force: true }));
   const ig2 = await IgnoreMatcher.load(root2);
   assert.equal(ig2.ignoresDir('coverage', 'coverage'), false, '! 可打开内置目录黑名单');

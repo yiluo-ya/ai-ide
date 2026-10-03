@@ -13,8 +13,7 @@ import { FileTree, type TreeDecor } from './FileTree';
 import { GraphView, type GraphViewState } from './GraphView';
 import { FlowView } from './FlowView';
 import { Overview, OverviewPanel } from './Overview';
-import { CallsPanel, TypesPanel } from './NavPanels';
-import { OutlinePanel, RefsPanel, SearchPanel, symbolPathAt } from './SidePanel';
+import { OutlinePanel, SearchPanel, symbolPathAt } from './SidePanel';
 import { GotoNoticeBar, gotoFailureMessage } from './Notice';
 import { QuickOpen, type QuickOpenMode } from './QuickOpen';
 import { TopBar } from './TopBar';
@@ -27,10 +26,10 @@ import { monaco, setProviderContext } from './monaco-setup';
 import { listenPopState, showFlash, useStore } from './state';
 import { ShareMenu } from './ShareMenu';
 import { AnnotationsPanel } from './AnnotationsPanel';
+import { Dialog } from './Dialog';
 import { initHostBridge } from './bridge';
 import { useMapStore } from './mapState';
-import { GuidePanel } from './GuidePanel';
-import { useGuideStore, visibleSteps } from './guideState';
+import { useGuideStore } from './guideState';
 import { useNotesStore } from './notesState';
 import { ExplainPanel } from './ExplainPanel';
 import { useExplainStore } from './explainState';
@@ -55,22 +54,19 @@ type PanelTab =
   | 'changes'
   | 'notes';
 
-/** 侧栏 tab 的**唯一次序来源**：渲染（tablist）与 Ctrl/Cmd+1..9 快捷键都按它来。
+/** 常驻 tab：阅读时随时够得着（其余都收进「更多」）。 */
+const PRIMARY_TABS: PanelTab[] = ['files', 'outline', 'search'];
+/**
+ * 辅助 tab：收进「更多 ▾」。
+ * 2026-10-03 用户要求移除「向导 / 引用 / 层级」三个面板（“没啥用”），
+ * 它们对应的 tab 与渲染分支一并去掉；组件与后端接口保留（不破坏性删除，日后可恢复）。
+ */
+const SECONDARY_TABS: PanelTab[] = ['overview', 'marks', 'notes'];
+/** 快捷键顺序的**唯一次序来源**：Ctrl/Cmd+1..3 = 常驻，4..9 与 0 = 辅助组依次。
  * 以前这里和快捷键的 order 数组各写一份，漂移过：用户按 Ctrl+4 以为是「大纲」（界面上第 4 个），
  * 却切到了「引用」。加面板时只改这一处。
  */
-const PANEL_TABS: PanelTab[] = [
-  'overview',
-  'guide',
-  'files',
-  'outline',
-  'refs',
-  'hierarchy',
-  'search',
-  'marks',
-  'changes',
-  'notes',
-];
+const PANEL_TABS: PanelTab[] = [...PRIMARY_TABS, ...SECONDARY_TABS];
 /** tab 上的文字（guide / changes 走 i18n，单独处理）。 */
 const TAB_TEXT: Record<string, string> = {
   overview: '总览',
@@ -98,8 +94,6 @@ function writeSnapshot(params: Record<string, string | null>): void {
 
 /** 读一次 URL 快照（只在首次挂载时用）。 */
 const snapshot = new URLSearchParams(window.location.search);
-/** 层级 tab 的两面：调用层级（N16）/ 类型层级（N17 + N15）。 */
-type HierarchyKind = 'calls' | 'types';
 type RecentFilter = 'all' | 'today' | '3d' | '7d';
 
 /** 面包屑同级下拉（N7）的内容。 */
@@ -161,37 +155,57 @@ function langForFile(file: string): string {
 export default function App() {
   const store = useStore();
   const { t } = useI18n();
-  // 向导（G2/G3）：路线与状态栏提示都从 guideState 读
-  const guideRoutes = useGuideStore((s) => s.routes);
-  const guideKind = useGuideStore((s) => s.kind);
-  const guideCustom = useGuideStore((s) => s.custom);
-  const guideDone = useGuideStore((s) => s.done);
-  const guideRead = useMapStore((s) => s.read);
-  const guideSteps = useMemo(
-    () => visibleSteps({ routes: guideRoutes, kind: guideKind, custom: guideCustom }),
-    [guideRoutes, guideKind, guideCustom],
-  );
-  const guideDoneCount = guideSteps.filter((s) => guideDone[s.file] || guideRead[s.file]).length;
+  // 2026-10-03 用户要求移除向导面板：状态栏的「路线 · 下一步」提示与它依赖的派生值一并去掉。
   /** W4：结构性解释面板的目标（null = 关着）。 */
   const explainTarget = useExplainStore((s) => s.target);
-  const guideNext = useMemo(() => {
-    const order = guideSteps.map((s) => s.file);
-    if (!order.length) return null;
-    const i = store.openFile ? order.indexOf(store.openFile) : -1;
-    return i < 0 ? order[0] : order[i + 1] ?? null;
-  }, [guideSteps, store.openFile]);
   const [tab, setTab] = useState<PanelTab>(() => {
     const fromUrl = snapshot.get('tab') as PanelTab | null;
     return fromUrl && PANEL_TABS.includes(fromUrl) ? fromUrl : 'files';
   });
+  /** 「更多 ▾」下拉是否展开（辅助面板都收在里面）。 */
+  const [moreOpen, setMoreOpen] = useState(false);
   /** W3：变更面板 tab 上的计数（变了几个文件）。 */
   const changesCount = useChangesStore((s) => s.summary?.files.length ?? 0);
+
+  /** tab 文字：guide / changes 走 i18n，其余走 TAB_TEXT。 */
+  const tabLabel = (id: PanelTab) =>
+    id === 'guide' ? t('guide.tab') : id === 'changes' ? t('changes.tab') : TAB_TEXT[id];
+
+  /** tab 上的计数（书签 / 变更 / 未解决批注）。 */
+  const tabCount = (id: PanelTab) =>
+    id === 'marks'
+      ? store.bookmarks.length
+      : id === 'changes'
+        ? changesCount
+        : id === 'notes'
+          ? store.annotations.filter((a) => !a.resolved).length
+          : 0;
+
+  /** 一个 tab 按钮（常驻直接排；辅助的在「更多」菜单里复用同一套文字与计数）。 */
+  const renderTabButton = (id: PanelTab) => {
+    const count = tabCount(id);
+    const title = id === 'changes' ? t('changes.tabTitle') : undefined;
+    return (
+      <button
+        key={id}
+        role="tab"
+        id={`wcr-tab-${id}`}
+        aria-selected={tab === id}
+        aria-controls="wcr-side-panel"
+        className={tab === id ? 'active' : ''}
+        onClick={() => setTab(id)}
+        title={title}
+      >
+        {tabLabel(id)}
+        {count > 0 && <span className="tab-count">{count}</span>}
+      </button>
+    );
+  };
   const [quick, setQuick] = useState<QuickOpenMode>(null);
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
   const [fileFilter, setFileFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [crumbMenu, setCrumbMenu] = useState<CrumbMenu | null>(null);
-  const [hierarchyKind, setHierarchyKind] = useState<HierarchyKind>('calls');
   const [searchFullscreen, setSearchFullscreen] = useState(false);
   /** N19 分屏：第二窗格的文件内容（与主窗格共享 model 池）。 */
   const [secondaryDoc, setSecondaryDoc] = useState<{
@@ -210,10 +224,7 @@ export default function App() {
   const [flowTarget, setFlowTarget] = useState<{ file: string; line: number; col: number } | null>(null);
   const [graphState, setGraphState] = useState<GraphViewState | null>(null);
   const [recentFilter, setRecentFilter] = useState<RecentFilter>('all');
-  const [onlyAgent, setOnlyAgent] = useState(false);
   const [onlyOrphans, setOnlyOrphans] = useState(false);
-  const [onlyUnread, setOnlyUnread] = useState(false);
-  const [hideIgnored, setHideIgnored] = useState(false);
   /** P24 / P17 / P9 的浮层：设置 · 隐私与数据 · 索引报告。 */
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
@@ -222,6 +233,14 @@ export default function App() {
   const [reportAvailable, setReportAvailable] = useState(false);
   /** W3 / G7.2：只读 diff 浮层的目标文件（null = 关着）。 */
   const [diffFile, setDiffFile] = useState<string | null>(null);
+  /**
+   * 二次确认（2026-10-03 用户要求）：重建索引 / 移除项目都是不可逆或有代价的动作，
+   * 误点一下就跑掉不合理 —— 先把「会发生什么」说清楚再执行。
+   */
+  const [confirmAction, setConfirmAction] = useState<{ kind: 'reindex' | 'forget'; id?: string } | null>(null);
+  /** 右侧常驻变更栏（2026-10-03 用户要求）：默认展开，宽度可拖，可收起。 */
+  const [changesDockOpen, setChangesDockOpen] = useState(true);
+  const [changesDockWidth, setChangesDockWidth] = useState(280);
   /** W3 / G7.3：整文件 blame 视图开关 + 当前文件的 blame（按文件缓存，光标移动不重新拉）。 */
   const [blameOn, setBlameOn] = useState(false);
   const [blame, setBlame] = useState<BlameResult | null>(null);
@@ -234,12 +253,8 @@ export default function App() {
   );
   const mapOverview = useMapStore((s) => s.overview);
   const mapTimeline = useMapStore((s) => s.timeline);
-  const mapRead = useMapStore((s) => s.read);
-  const mapIgnored = useMapStore((s) => s.ignored);
   const mapPulse = useMapStore((s) => s.pulse);
   const mapOptions = useMapStore((s) => s.options);
-  const toggleRead = useMapStore((s) => s.toggleRead);
-  const toggleIgnored = useMapStore((s) => s.toggleIgnored);
 
   useEffect(() => {
     void store.init();
@@ -293,21 +308,8 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [store.notice]);
 
-  // 调用层级 / 类型层级（N16/N17/N15）：与引用面板同样按光标防抖查询
-  useEffect(() => {
-    if (tab !== 'hierarchy' || !store.openFile) return;
-    const file = store.openFile;
-    const { line, col } = cursor;
-    const timer = setTimeout(() => {
-      const s = useStore.getState();
-      if (hierarchyKind === 'calls') void s.loadCalls(file, line, col);
-      else {
-        void s.loadTypes(file, line, col);
-        void s.loadImpls(file, line, col);
-      }
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [tab, hierarchyKind, store.openFile, cursor.line, cursor.col, store.callDirection, store.callDepth]);
+  // 2026-10-03 用户要求移除「向导 / 引用 / 层级」：层级面板的按需查询 effect 一并删除。
+  // 组件（NavPanels / GuidePanel / SidePanel 的 RefsPanel）与后端接口保留，日后要恢复只需接回入口。
 
   // N19：分屏第二窗格的内容
   useEffect(() => {
@@ -450,7 +452,7 @@ export default function App() {
           useStore.getState().toggleBookmark(store.openFile, cursor.line, cursor.col);
         }
       } else if (mod && !e.shiftKey && /^[0-9]$/.test(key)) {
-        // N-δ：键盘可达 —— Ctrl/Cmd+1..9 按侧栏里看到的顺序切面板，0 = 第 10 个（批注）。
+        // N-δ：键盘可达 —— Ctrl/Cmd+1..3 = 文件/大纲/搜索（常驻），4..9 与 0 = 「更多」里的辅助面板。
         e.preventDefault();
         setTab(key === '0' ? PANEL_TABS[PANEL_TABS.length - 1] : PANEL_TABS[Number(key) - 1]);
       } else if (mod && e.shiftKey && key === 'f') {
@@ -589,6 +591,23 @@ export default function App() {
     savePrefs({ sidebarWidth: clampSidebar(loadPrefs().sidebarWidth + (e.key === 'ArrowLeft' ? -16 : 16)) });
   };
 
+  /** 右侧变更栏宽度拖拽（220~560）。变更栏在右边，所以是「往左拖变宽」。 */
+  const clampDock = (w: number) => Math.max(220, Math.min(560, Math.round(w)));
+  const onChangesDockResizeStart = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const target = e.currentTarget;
+    const startX = e.clientX;
+    const startWidth = clampDock(changesDockWidth);
+    target.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent) => setChangesDockWidth(clampDock(startWidth - (ev.clientX - startX)));
+    const onUp = () => {
+      target.removeEventListener('pointermove', onMove);
+      target.removeEventListener('pointerup', onUp);
+    };
+    target.addEventListener('pointermove', onMove);
+    target.addEventListener('pointerup', onUp);
+  };
+
   /** 打开文件一律回到代码视图（地图不是终点，是入口）。 */
   const jump = (file: string, line?: number, col?: number, endLine?: number, endCol?: number) => {
     setMainView('auto');
@@ -635,10 +654,9 @@ export default function App() {
     const hot = new Set((mapOverview?.hot ?? []).map((h) => h.file));
     // M9.3：SSE 刚报过的文件（mapState 里 20 秒后自动撤掉）
     const pulse = new Set(Object.keys(mapPulse));
-    const read = new Set(Object.keys(mapRead));
-    const ignored = new Set(Object.keys(mapIgnored));
+    // 2026-10-03 用户要求去掉「已读 / 未读」标准：不再往文件树叠 read / ignored，也不再按未读过滤。
 
-    const filtering = recentFilter !== 'all' || onlyAgent || onlyOrphans || onlyUnread || hideIgnored;
+    const filtering = recentFilter !== 'all' || onlyOrphans;
     let visible: Set<string> | undefined;
     if (filtering) {
       const cutoff = recentFilter === 'all' ? 0 : recentCutoff(recentFilter);
@@ -646,28 +664,13 @@ export default function App() {
         collectFiles(store.tree).filter((file) => {
           const fact = timeline.get(file);
           if (recentFilter !== 'all' && !(fact && fact.mtimeMs >= cutoff)) return false;
-          if (onlyAgent && fact?.origin !== 'agent') return false;
           if (onlyOrphans && !orphans.has(file)) return false;
-          if (onlyUnread && read.has(file)) return false;
-          if (hideIgnored && ignored.has(file)) return false;
           return true;
         }),
       );
     }
-    return { timeline, orphans, hot, pulse, read, ignored, dirs, visible };
-  }, [
-    mapTimeline,
-    mapOverview,
-    mapPulse,
-    mapRead,
-    mapIgnored,
-    store.tree,
-    recentFilter,
-    onlyAgent,
-    onlyOrphans,
-    onlyUnread,
-    hideIgnored,
-  ]);
+    return { timeline, orphans, hot, pulse, dirs, visible };
+  }, [mapTimeline, mapOverview, mapPulse, store.tree, recentFilter, onlyOrphans]);
 
   /** 没有打开文件时，主区就是项目地图（落点 C：首屏即主页）。 */
   const showMap = mainView === 'map' || !store.openFile;
@@ -708,8 +711,8 @@ export default function App() {
         openFile={store.openFile}
         onSelect={(id) => void useStore.getState().selectProject(id)}
         onOpenFolder={(root) => void useStore.getState().openFolder(root)}
-        onForget={(id) => void useStore.getState().forgetProject(id)}
-        onReindex={() => void useStore.getState().reindex()}
+        onForget={(id) => setConfirmAction({ kind: 'forget', id })}
+        onReindex={() => setConfirmAction({ kind: 'reindex' })}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenPrivacy={() => setPrivacyOpen(true)}
         onOpenReport={reportAvailable ? () => setReportOpen(true) : undefined}
@@ -729,38 +732,48 @@ export default function App() {
           />
           {/* tab 顺序只来自 PANEL_TABS（快捷键用同一份），不要再在这里手写一遍 */}
           <div className="panel-tabs" role="tablist" aria-label="侧栏面板">
-            {PANEL_TABS.map((id) => {
-              const count =
-                id === 'marks'
-                  ? store.bookmarks.length
-                  : id === 'changes'
-                    ? changesCount
-                    : id === 'notes'
-                      ? store.annotations.filter((a) => !a.resolved).length
-                      : 0;
-              const label = id === 'guide' ? t('guide.tab') : id === 'changes' ? t('changes.tab') : TAB_TEXT[id];
-              const title =
-                id === 'changes'
-                  ? t('changes.tabTitle')
-                  : id === 'notes'
-                    ? '批注：在这行留一句，随导出的报告一起交付'
-                    : undefined;
-              return (
-                <button
-                  key={id}
-                  role="tab"
-                  id={`wcr-tab-${id}`}
-                  aria-selected={tab === id}
-                  aria-controls="wcr-side-panel"
-                  className={tab === id ? 'active' : ''}
-                  onClick={() => setTab(id)}
-                  title={title}
-                >
-                  {label}
-                  {count > 0 && <span className="tab-count">{count}</span>}
-                </button>
-              );
-            })}
+            {PRIMARY_TABS.map((id) => renderTabButton(id))}
+            {/* 辅助面板收进「更多」：默认只留阅读必需的三个入口 */}
+            <div className="panel-more">
+              <button
+                type="button"
+                role="tab"
+                id={SECONDARY_TABS.includes(tab) ? `wcr-tab-${tab}` : 'wcr-tab-more'}
+                aria-selected={SECONDARY_TABS.includes(tab)}
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
+                aria-controls="wcr-side-panel"
+                className={SECONDARY_TABS.includes(tab) ? 'active' : ''}
+                onClick={() => setMoreOpen((v) => !v)}
+                title="更多面板：总览 / 向导 / 引用 / 层级 / 变更 / 书签 / 批注"
+              >
+                {SECONDARY_TABS.includes(tab) ? tabLabel(tab) : '更多 ▾'}
+              </button>
+              {moreOpen && (
+                <>
+                  <div className="panel-more-backdrop" onClick={() => setMoreOpen(false)} />
+                  <div className="panel-more-menu" role="menu">
+                    {SECONDARY_TABS.map((id) => (
+                      <button
+                        key={id}
+                        id={`wcr-tab-${id}`}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={tab === id}
+                        className={tab === id ? 'active' : ''}
+                        onClick={() => {
+                          setTab(id);
+                          setMoreOpen(false);
+                        }}
+                      >
+                        {tabLabel(id)}
+                        {tabCount(id) > 0 && <span className="tab-count">{tabCount(id)}</span>}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           {/* P25：面板容器补 tabpanel 语义（aria-labelledby 指向当前 tab） */}
@@ -832,14 +845,7 @@ export default function App() {
             </div>
           )}
 
-          {tab === 'guide' && (
-            <GuidePanel onOpenFile={(file, line, col) => jump(file, line, col)} />
-          )}
-
-          {/* W3 / G8：自上次阅读以来的变更清单 */}
-          {tab === 'changes' && (
-            <ChangesPanel onOpenFile={(file) => jump(file)} onOpenDiff={(file) => setDiffFile(file)} />
-          )}
+          {/* 「变更」已改到右侧常驻（见 .dock-changes），不再占侧栏 tab */}
 
           {tab === 'overview' && (
             <OverviewPanel
@@ -869,10 +875,6 @@ export default function App() {
                   <option value="3d">3 天内</option>
                   <option value="7d">7 天内</option>
                 </select>
-                <label title="只看宿主上报的本轮 agent 产出">
-                  <input type="checkbox" checked={onlyAgent} onChange={(e) => setOnlyAgent(e.target.checked)} />
-                  agent 产出
-                </label>
                 <label title="只看没人引用的文件">
                   <input
                     type="checkbox"
@@ -880,22 +882,6 @@ export default function App() {
                     onChange={(e) => setOnlyOrphans(e.target.checked)}
                   />
                   孤立
-                </label>
-                <label title="只看还没读过的文件">
-                  <input
-                    type="checkbox"
-                    checked={onlyUnread}
-                    onChange={(e) => setOnlyUnread(e.target.checked)}
-                  />
-                  未读
-                </label>
-                <label title="隐藏已标记忽略的文件">
-                  <input
-                    type="checkbox"
-                    checked={hideIgnored}
-                    onChange={(e) => setHideIgnored(e.target.checked)}
-                  />
-                  隐藏忽略
                 </label>
               </div>
               {/* 打开文件不带行号：回到上次读到的位置（N22） */}
@@ -905,8 +891,6 @@ export default function App() {
                 onOpen={(file) => jump(file)}
                 filter={fileFilter}
                 decor={decor}
-                onToggleRead={toggleRead}
-                onToggleIgnored={toggleIgnored}
                 onAddToQueue={(file) => useGuideStore.getState().addQueue({ file, line: 1, col: 1 })}
               />
             </>
@@ -920,51 +904,6 @@ export default function App() {
               onJump={(s) => jump(s.location.file, s.location.range.start.line, s.location.range.start.col)}
               onCopySymbol={(s) => useStore.getState().copySymbolSummary(s)}
             />
-          )}
-
-          {tab === 'refs' && (
-            <RefsPanel
-              data={store.references}
-              busy={store.referencesBusy}
-              onJump={(file, line, col) => jump(file, line, col)}
-              onCopy={copyLocation}
-            />
-          )}
-
-          {tab === 'hierarchy' && (
-            <div className="hierarchy-host">
-              <div className="nav-switch wide">
-                <button className={hierarchyKind === 'calls' ? 'active' : ''} onClick={() => setHierarchyKind('calls')}>
-                  调用层级
-                </button>
-                <button className={hierarchyKind === 'types' ? 'active' : ''} onClick={() => setHierarchyKind('types')}>
-                  类型层级
-                </button>
-              </div>
-              {hierarchyKind === 'calls' ? (
-                <CallsPanel
-                  data={store.calls}
-                  busy={store.callsBusy}
-                  direction={store.callDirection}
-                  depth={store.callDepth}
-                  onDirection={(d) => useStore.getState().setCallDirection(d)}
-                  onDepth={(d) => useStore.getState().setCallDepth(d)}
-                  onJump={(file, line, col) => jump(file, line, col)}
-                  onCopy={copyLocation}
-                  onExplain={openExplain}
-                  onFlow={openFlow}
-                />
-              ) : (
-                <TypesPanel
-                  data={store.types}
-                  busy={store.typesBusy}
-                  impls={store.impls}
-                  implsBusy={store.implsBusy}
-                  onJump={(file, line, col) => jump(file, line, col)}
-                  onCopy={copyLocation}
-                />
-              )}
-            </div>
           )}
 
           {tab === 'search' && (
@@ -1261,19 +1200,6 @@ export default function App() {
             {store.flash && <span className="flash-text">{store.flash}</span>}
             {store.notice?.reason === 'no-symbol' && <span className="notice-hint">{store.notice.message}</span>}
             {store.fileLoading && <span>加载中…</span>}
-            {guideSteps.length > 0 && (
-              <button
-                className="guide-status"
-                disabled={!guideNext}
-                onClick={() => guideNext && jump(guideNext)}
-                title={guideNext ? t('guide.status.nextTitle') : t('guide.status.noNext')}
-              >
-                {t('guide.status.route', { done: guideDoneCount, total: guideSteps.length })}
-                {guideNext
-                  ? ` · ${t('guide.status.next', { file: guideNext })}`
-                  : ` · ${t('guide.status.noNext')}`}
-              </button>
-            )}
             <span>
               Ln {cursor.line}, Col {cursor.col}
             </span>
@@ -1281,6 +1207,38 @@ export default function App() {
             <span>{store.status?.indexing ? '索引中' : '就绪'}</span>
           </footer>
         </main>
+
+        {/* 2026-10-03 用户要求：「变更」直接常驻在右边（不再占侧栏一个 tab）。 */}
+        {store.projectId && (
+          <aside
+            className={`dock-changes ${changesDockOpen ? '' : 'collapsed'}`}
+            style={changesDockOpen ? { width: changesDockWidth } : undefined}
+            aria-label="自上次阅读以来的变更"
+          >
+            {changesDockOpen && (
+              <div
+                className="dock-resizer"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="调整变更栏宽度"
+                tabIndex={0}
+                onPointerDown={onChangesDockResizeStart}
+              />
+            )}
+            <button
+              className="dock-toggle"
+              onClick={() => setChangesDockOpen((v) => !v)}
+              title={changesDockOpen ? '收起变更栏' : '展开变更栏'}
+            >
+              {changesDockOpen ? '变更 ▸' : '◂ 变更'}
+            </button>
+            {changesDockOpen && (
+              <div className="dock-body">
+                <ChangesPanel onOpenFile={(file) => jump(file)} onOpenDiff={(file) => setDiffFile(file)} />
+              </div>
+            )}
+          </aside>
+        )}
       </div>
 
       {searchFullscreen && (
@@ -1392,6 +1350,35 @@ export default function App() {
       {privacyOpen && <PrivacyPanel onClose={() => setPrivacyOpen(false)} />}
       {reportOpen && store.projectId && (
         <IndexReportDialog projectId={store.projectId} onClose={() => setReportOpen(false)} />
+      )}
+
+      {confirmAction && (
+        <Dialog
+          title={confirmAction.kind === 'reindex' ? '重建索引？' : '移除这个项目？'}
+          onClose={() => setConfirmAction(null)}
+        >
+          <p className="confirm-text">
+            {confirmAction.kind === 'reindex'
+              ? '会重新读取项目目录并重建索引（大项目要几十秒），期间搜索 / 跳转可能不完整。'
+              : '只会从阅读器的项目列表里移除，不会删你磁盘上的任何文件；下次可以重新打开。'}
+          </p>
+          <div className="confirm-actions">
+            <button className="btn ghost" onClick={() => setConfirmAction(null)}>
+              取消
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                const action = confirmAction;
+                setConfirmAction(null);
+                if (action.kind === 'reindex') void useStore.getState().reindex();
+                else if (action.id) void useStore.getState().forgetProject(action.id);
+              }}
+            >
+              {confirmAction.kind === 'reindex' ? '重建' : '移除'}
+            </button>
+          </div>
+        </Dialog>
       )}
 
       {store.error && (

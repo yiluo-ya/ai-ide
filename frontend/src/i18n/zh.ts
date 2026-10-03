@@ -105,7 +105,8 @@ export const zh: Record<string, string> = {
   'report.title': '索引报告',
   'report.loading': '正在读取索引报告…',
   'report.unavailable': '当前后端没有提供索引报告接口（需要更新的后端）。',
-  'report.summary': '扫描 {scanned} 个文件 · 已索引 {indexed} · 降级（大文件顶层符号）{degraded} · 源码文件 {sourceFiles}',
+  'report.summary':
+    '扫描 {scanned} 个文件 · 已索引 {indexed} · 降级（大文件顶层符号）{degraded} · 源码文件 {sourceFiles}',
   'report.reasonTitle': '未索引的原因',
   'report.reason.too-large': '大文件',
   'report.reason.binary': '二进制',
@@ -298,8 +299,7 @@ export const zh: Record<string, string> = {
   'diff.closeTitle': '关闭差异视图（Esc）',
   'diff.loading': '正在读取差异…',
   'diff.empty': '这个文件与 {rev} 没有差异。',
-  'diff.noGit':
-    '未检测到 git，读不到 diff。可以改用「变更」面板里的阅读快照对比（按修改时间 / 大小 / 行数）。',
+  'diff.noGit': '未检测到 git，读不到 diff。可以改用「变更」面板里的阅读快照对比（按修改时间 / 大小 / 行数）。',
   'diff.unavailable': '这个差异读不到（{reason}）。',
   'diff.error': '读取差异失败：{message}',
   'diff.truncated': '差异过长，只显示了前面一部分。',

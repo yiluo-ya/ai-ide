@@ -19,7 +19,7 @@ F12 / Shift+F12 / Ctrl+Shift+O 等 VS Code 习惯的导航全部可用。
   （谁引用了它 / 传递上游 / 覆盖它的测试）
 - **时间与来源**：只读 git（最近提交 / 未提交改动）+ 文件 mtime 热力，叠加在文件树上；
   宿主可上报「本轮 agent 产出的文件」（`POST /origin`），树上一眼区分 agent 产出与项目原有
-- 语言：Python、TypeScript/TSX、JavaScript/JSX、Go、Java（每种语言模块独立，加语言 = 加一个 spec 文件）
+- 语言：Python、TypeScript/TSX、JavaScript/JSX、Go、Java、Rust（每种语言模块独立，加语言 = 加一个 spec 文件）
 - **导航（03 Navigator）**：
   - 按 F12 **永远不会「什么都没发生」**：跳不动时提示条给出人话解释 + 下一步动作
     （外部依赖可「跳到 import 行」；解析不了可「搜 xxx」；索引中只解释）
@@ -57,6 +57,26 @@ F12 / Shift+F12 / Ctrl+Shift+O 等 VS Code 习惯的导航全部可用。
   - **文件摘要条**：导出数 / 依赖数 / 被引用数 + 模板化一句话摘要，标出「基于索引版本 <rev>」
   - **调用流视图**：从一个符号展开调用链（正向 / 反向 / 数据流）、深度 1~3、外部依赖可折叠；
     数据流只做**名字级近似**（虚线 + 「近似」标注），不做类型推断
+- **底座（06 Platform）**：
+  - **二次打开秒开**：索引快照（NDJSON + gzip，**只存符号事实、不存正文**）落 `data/index/<id>/`；
+    指纹一致时**不重解析、不重写**。实测 1000 文件合成仓：二次打开文件树 **71ms**、符号可跳转 **1.0s**
+  - **正文按需读盘**：hover / 密度 / 搜索时才读源码，恢复期**零读盘**（`files/<rel>` 懒读带缓存）
+  - **并行解析**：多 worker 解析（`READER_PARSE_WORKERS`，0 = 串行），worker 不可用自动回落串行
+  - **忽略规则可配置**：`.gitignore` + `.wcrignore`（`!` 取反、`**`、`/` 锚定；`node_modules` / `.git` 不可被打开）
+  - **索引报告**：`GET /index-report` 说清每个文件为什么没进索引（大文件 / 二进制 / 解析失败 / 读失败）与编码分布；
+    `GET /ignore` 显示生效的忽略规则。界面上从「已索引」状态处点开
+  - **大文件降级索引**：1–5MB 的源码走「顶层符号模式」（只取顶层定义与导入），仍出现在大纲 / 符号搜索里
+  - **非 UTF-8 编码**：BOM / UTF-8 / UTF-16 / GBK 探测解码，GBK 中文注释不乱码、符号位置正确
+  - **一致性对账**：默认每 10 分钟比对索引与磁盘（`READER_VERIFY_MS`），监听漏事件可自愈；`POST /verify` 手动触发
+  - **一键启动 / 单实例**：`wcr [目录]`（或 `npm run cli -- [目录]`）—— 端口被占用自动让位，重复启动复用已有实例
+  - **交付两条路径**：`npm pack` 产物可 `npx ./web-code-reader-0.1.0.tgz [目录]`；`Dockerfile` 一条命令起只读服务
+  - **常驻隐私承诺 + 首次引导**：顶栏常驻「只读 · 不上传 · 代码不出本机」（点开是可追证的隐私面板）；
+    未打开项目时首屏为三步引导（填路径 / 最近项目 / 索引进度 + 索引报告入口）
+  - **偏好与语言**：主题（深 / 亮 / 跟随系统）、编辑器字号 12–18、侧栏宽可拖拽，存 `wcr:prefs`；
+    中英文切换；键盘可走完主流程，关键控件带 `aria-*` 与可见焦点
+  - **monorepo**：tsconfig `paths`/`baseUrl`、`go.work`、Python src 布局 / `package-dir` 都能跨包解析（不再落 external）
+  - **工程化**：`npm run lint`（ESLint 9，0 error）、`npm run format`（Prettier）、`npm run test:unit`（vitest 42 例）、
+    `npm run bench`（性能基准对照预算）、`.github/workflows/ci.yml`
 
 ## 快速开始
 
@@ -70,6 +90,33 @@ npm run build
 # 3) 启动（默认 http://127.0.0.1:8787）
 npm start
 ```
+
+一键启动（自动选端口、重复启动复用已有实例、自动开浏览器）：
+
+```bash
+npm run cli -- <本机目录>     # 等价于 npx tsx backend/src/cli.ts <本机目录>
+npm run cli -- --help        # 全部选项（--port / --no-open / --no-watch / --workers）
+```
+
+### 交付给别人（两条路径，见 `docs/06-platform.md`）
+
+**A. npx / tarball（对方装了 Node）**
+
+```bash
+npm run build && npm pack              # 产出 web-code-reader-0.1.0.tgz
+npx ./web-code-reader-0.1.0.tgz D:/code/my-project
+```
+
+**B. Docker（对方不需要 Node；容器内只读挂载最硬）**
+
+```bash
+docker build -t web-code-reader .
+docker run --rm -p 8787:8787 -v D:/code:/work:ro web-code-reader
+# 浏览器打开 http://127.0.0.1:8787，项目路径填 /work/my-project
+```
+
+容器内监听 `0.0.0.0`（否则宿主访问不到），但挂载是 `ro` —— **物理上写不了被读目录**；
+`/data` 是容器内的可写卷，只放项目列表与索引快照。
 
 开发模式（前端热更新，`/api` 自动代理到 8787）：
 
@@ -85,8 +132,11 @@ npm run dev:frontend   # 终端 2 → http://127.0.0.1:5173
 http://127.0.0.1:8787/?project=<项目id>&file=src/app.py&line=42&col=5
 ```
 
-环境变量：`PORT`、`HOST`、`READER_DATA_DIR`（项目列表存放目录，默认 `data/`）、
-`READER_CORS_ORIGIN`（默认 `*`，可写逗号分隔白名单）、`READER_WATCH=0`（关闭文件监听）。
+环境变量：`PORT`、`HOST`、`READER_DATA_DIR`（项目列表与索引快照的存放目录，默认 `data/`）、
+`READER_CORS_ORIGIN`（默认 `*`，可写逗号分隔白名单）、`READER_WATCH=0`（关闭文件监听）、
+`READER_PERSIST=0`（关闭索引快照持久化）、`READER_PARSE_WORKERS`（解析 worker 数，0 = 串行）、
+`READER_VERIFY_MS`（索引对账间隔，0 = 关闭）、`READER_IGNORE_BUILTIN=0`（关闭内置忽略黑名单）、
+`READER_LOG_LEVEL=error|warn|info|debug`、`READER_LOG_FILE=<路径>`（可选，同时落日志文件）。
 
 **同机同目录分享（S5a）**：默认只监听 `127.0.0.1`（只有本机能开）。想让同一台机器上的同事也能读，
 用 `HOST=0.0.0.0 npm start` 重启 —— 启动日志会打印可分享地址（`http://<本机IP>:8787/?project=<id>`），
@@ -101,7 +151,11 @@ backend/src/
   indexer/insight.ts   项目地图聚合（概览 / 热点 / 孤立 / 环 / 复杂度）
   indexer/graph.ts     依赖图与反向依赖（目录聚合、展开、Tarjan SCC）
   indexer/timeline.ts  时间与来源（只读 git + mtime + 宿主上报）
-  languages/   python.ts / typescript.ts / go.ts / java.ts（每语言：定义·引用提取 + 模块说明符解析）
+  languages/   python.ts / typescript.ts / go.ts / java.ts / rust.ts（每语言：定义·引用提取 + 模块说明符解析）
+  indexer/ignore.ts / encoding.ts / snapshot.ts / parse-pool.ts / parse-worker.ts / index-report.ts
+               底座（06）：忽略规则 / 编码探测 / 索引快照（NDJSON+gzip，不含正文）/ 并行解析 / 索引报告
+  cli.ts / bootstrap.ts  一键启动、自动选端口、单实例复用、浏览器唤起
+  log.ts        结构化日志（key=value；READER_LOG_LEVEL / READER_LOG_FILE）
   api/routes.ts HTTP 路由
   api/agent.ts  agent 只读工具（find_symbol / goto_definition / find_references / file_outline / search_text / read_file / list_projects / index_project）
   registry.ts  项目注册表（以本机目录为单位，持久化到 data/projects.json；含 dispose 资源释放）
@@ -157,6 +211,10 @@ shared/types.ts     前后端共享的 API 契约（位置统一 1-based、列�
 | POST | `/api/projects/:id/hover` | `{ file, line, col }` → 悬停解释（定义 / 字面量 / 失败态） |
 | GET | `/api/projects/:id/density?file=<相对路径>` | 整文件密度（每 20 行一段的代码 / 注释 / 空白占比） |
 | GET | `/api/projects/:id/events` | SSE：`status` / `file-changed` / `file-deleted` / `index-ready` |
+| GET | `/api/projects/:id/index-report` | 索引报告（P9）：扫描 / 已索引 / 降级 / 未索引归类（大文件·二进制·解析失败·读失败·非源码）+ 编码分布 |
+| GET | `/api/projects/:id/ignore` | 忽略规则（P8）：生效的 `.gitignore` / `.wcrignore`、规则数、命中数、被 `!` 找回的路径 |
+| GET | `/api/projects/:id/snapshot` | 索引快照状态（P4）：是否存在 / 写入时间 / 文件数 / schema / 指纹是否命中 / 落盘目录 |
+| POST | `/api/projects/:id/verify` | 对账（P7）：重新比对索引与磁盘，返回 added / changed / deleted 并自动修复 |
 | GET | `/api/projects/:id/resources` | S9c：资源视图 `{ watcher, streams, indexed, filesIndexed }`（宿主自证「没有残留」） |
 | POST | `/api/projects/:id/dispose` | S9c：收起面板时释放资源 —— 关 watcher、断该项目的 SSE、释放内存索引；**保留注册表条目**、不碰磁盘（幂等） |
 | GET | `/api/agent/tools` | S8：agent 工具清单（名字 / 说明 / 参数 schema / 端点） |
@@ -287,10 +345,15 @@ shared/types.ts     前后端共享的 API 契约（位置统一 1-based、列�
   53% 的引用能精确跳转，31% 被正确标为外部依赖，其余 16% 属于上述需要类型推断的情形。
 - 依赖包内部（node_modules / site-packages 等）不建索引，命中即标 `external`。
 - `require('...')` 形式的 CommonJS 导入不解析（ESM `import` 正常）。
-- 超过 1MB 的文件只做文本查看与文本搜索，不进符号索引。
-- 索引为全内存结构，进程重启后首次访问会重新索引（不持久化）。
-- **首次 `overview` 约 2~3 秒**（191 文件实测：3.1s）：概览需要把全项目引用解析一遍，结果按索引版本缓存，
-  之后同版本的 `overview` / `graph` / `dependents` 都是毫秒级；任何文件改动会让缓存失效、下次重新计算。
+- 超过 1MB（且 ≤5MB）的源码文件走**降级索引**：只取顶层定义与导入（没有引用与字面量），
+  仍能出现在大纲 / 符号搜索里；超过 5MB 只做文本查看与文本搜索。降级与跳过的理由都在索引报告里可见。
+- 索引**有快照但不落正文**：符号事实与文件条目落 `data/index/<id>/snapshot.ndjson.gz`，正文按需从磁盘读
+  （懒读带缓存）。二次打开实测（1000 文件合成仓）：文件树 71ms、符号可跳转 1.0s、恢复期零读盘；
+  **万级文件**（10k 实测）文件树 0.48s、符号可跳转 11.5s —— 瓶颈是 18 万条记录的 JSON 解析，
+  下一步用列式二进制格式（见 `docs/06-platform-plan.md` §8）。旧格式快照升级后第一次打开会重写一遍。
+- **首次 `overview` 约 2~3 秒**（191 文件真实仓库实测 3.1s；1000 文件合成仓约 8s）：概览需要把全项目引用解析一遍，
+  结果按索引版本缓存，之后同版本的 `overview` / `graph` / `dependents` 都是毫秒级；任何文件改动会让缓存失效、
+  下次重新计算（属 01 主题的既有项，与索引快照无关）。
 - `git` 只用于「读懂」需要的读数，且只用 `git log` / `git status` / `git rev-parse` / `git diff` /
   `git blame` / `git show` 六个**只读**命令（数组传参、不经 shell、带超时；任何写操作一律不做）；
   不是 git 仓库时自动降级：时间看文件 mtime、变更看阅读快照对比（只报行数增减，不给增删行，界面如实标注）。
@@ -315,15 +378,20 @@ shared/types.ts     前后端共享的 API 契约（位置统一 1-based、列�
 ## 测试
 
 ```bash
-npm test          # 后端全部用例（node:test + tsx），含 5 种语言的定义/引用/大纲、存储层、项目地图与导航
-npm run typecheck # 前后端类型检查
-npm run test:ui   # 浏览器 UI 回归（真 Chromium；会自建/自删一个夹具项目，默认端口 8799）
+npm test              # 后端全部用例（node:test + tsx）：语言解析 / 存储层 / 地图 / 导航 / 透镜 / 底座（快照·忽略·编码·并行·报告）
+npm run typecheck     # 前后端类型检查
+npm run lint          # ESLint 9（要求 0 error）
+npm run format:check  # Prettier 格式检查
+npm run test:unit     # 前端单测（vitest）
+npm run test:ui       # 浏览器 UI 回归（真 Chromium；自建/自删夹具项目，默认端口 8799）
+npm run bench         # 性能基准：合成仓首开 / 索引 / 二次打开 / 查询 P50-P95 / 增量，对照 06 的预算表
 ```
 
-UI 回归用例在 `tests/ui/`：`run.mjs` 负责起夹具项目与后端（依次跑两套），`navigator.mjs` 是导航断言主体
+UI 回归用例在 `tests/ui/`，三套都由 `run.mjs` 统一起夹具项目与后端：`navigator.mjs` 是导航·信使断言主体
 （跳转失败提示、引用面板、调用/类型层级、搜索、复制位置、**复制选中代码（带出处）**、**复制符号摘要**、
 **分享深链**、**批注添加与刷新后仍在**、**打印视图样式**），`guide.mjs` 是向导断言主体
 （首屏起点与推荐路线、开始阅读进第 1 步、「下一步」前进、打开即已读与进度跨刷新、待读跨刷新、
-阅读基线报「没有变化」、解释这段出结构性解释、层级面板展开为调用流图）。
+阅读基线报「没有变化」、解释这段出结构性解释、层级面板展开为调用流图），`platform.mjs` 是底座断言主体
+（常驻隐私承诺与可追证面板、索引报告入口、切亮色真的换主题、字号落 `wcr:prefs` 并即时生效、切 English）。
 后端另有 `tests/dispose.test.ts`（S9c 资源视图 / 释放 / 幂等 / 断 SSE）与
 `tests/agent.test.ts`（S8 工具清单与各工具）两份专用用例。

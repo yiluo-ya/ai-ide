@@ -39,13 +39,19 @@ test('parse-pool: 并行结果与串行逐文件一致，且顺序保持', async
   t.after(() => serial.close());
   const serialResults = await serial.parseBatch(tasks);
   assert.equal(serial.degraded, true, 'workers=0 强制串行');
-  assert.deepEqual(serialResults.map((r) => (r.ok ? r.data.file : 'x')), tasks.map((x) => x.rel));
+  assert.deepEqual(
+    serialResults.map((r) => (r.ok ? r.data.file : 'x')),
+    tasks.map((x) => x.rel),
+  );
 
   const parallel = new ParsePool(3);
   t.after(() => parallel.close());
   const parallelResults = await parallel.parseBatch(tasks);
   if (parallel.degraded) t.diagnostic('本机 worker 不可用，已回落串行（一致性仍验证）');
-  assert.deepEqual(parallelResults.map((r) => (r.ok ? r.data.file : 'x')), tasks.map((x) => x.rel));
+  assert.deepEqual(
+    parallelResults.map((r) => (r.ok ? r.data.file : 'x')),
+    tasks.map((x) => x.rel),
+  );
 
   for (let i = 0; i < tasks.length; i++) {
     const a = serialResults[i];
@@ -84,5 +90,8 @@ test('parse-pool: close 后不再创建新 worker（已降级为串行）', asyn
   t.after(() => pool.close());
   const results = await pool.parseBatch(tasks);
   assert.equal(results.length, tasks.length);
-  assert.deepEqual(results.map((r) => (r.ok ? r.data.file : 'x')), tasks.map((x) => x.rel));
+  assert.deepEqual(
+    results.map((r) => (r.ok ? r.data.file : 'x')),
+    tasks.map((x) => x.rel),
+  );
 });

@@ -115,14 +115,18 @@ export function legacySnapshotPath(dataDir: string, projectId: string): string {
  * 只读 readdir + stat 的轻量扫描就能算出，因而「指纹一致」等价于「无需重解析」。
  */
 export function fingerprintEntries(entries: Iterable<[string, EntryInfo]>): string {
-  const lines = [...entries].map(([rel, info]) => `${rel}|${info.dir ? 1 : 0}|${info.size}|${Math.round(info.mtimeMs)}`);
+  const lines = [...entries].map(
+    ([rel, info]) => `${rel}|${info.dir ? 1 : 0}|${info.size}|${Math.round(info.mtimeMs)}`,
+  );
   lines.sort();
   return createHash('sha1').update(lines.join('\n')).digest('hex');
 }
 
 /** 扫描结果 → header 的紧凑数组形式。 */
 export function encodeEntries(entries: Iterable<[string, EntryInfo]>): Array<[string, number, number, number]> {
-  return [...entries].map(([rel, info]) => [rel, info.size, info.mtimeMs, info.dir ? 1 : 0] as [string, number, number, number]);
+  return [...entries].map(
+    ([rel, info]) => [rel, info.size, info.mtimeMs, info.dir ? 1 : 0] as [string, number, number, number],
+  );
 }
 
 /** header 的紧凑数组 → 扫描结果 Map。 */
@@ -250,7 +254,15 @@ export function encodeFileRecord(rec: SnapshotLine): unknown[] {
       encOpt(d.doc),
       encOpt(d.bases),
     ]),
-    rec.references.map((r) => [r.name, r.kind, encRange(r.range), r.scopeId, encOpt(r.memberParts), r.text, encOpt(r.resolved)]),
+    rec.references.map((r) => [
+      r.name,
+      r.kind,
+      encRange(r.range),
+      r.scopeId,
+      encOpt(r.memberParts),
+      r.text,
+      encOpt(r.resolved),
+    ]),
     rec.imports.map((i) => [
       i.localName,
       i.module,
@@ -470,7 +482,12 @@ async function readNdjsonFile(file: string, handlers: SnapshotStreamHandlers): P
     }
     if (!header) {
       const candidate = obj as SnapshotHeader;
-      if (!candidate || candidate.t !== 'h' || candidate.schema !== SNAPSHOT_SCHEMA || !Array.isArray(candidate.entries)) {
+      if (
+        !candidate ||
+        candidate.t !== 'h' ||
+        candidate.schema !== SNAPSHOT_SCHEMA ||
+        !Array.isArray(candidate.entries)
+      ) {
         failure = new Error('bad snapshot header');
         return;
       }

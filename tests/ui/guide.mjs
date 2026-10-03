@@ -17,6 +17,7 @@
 import { chromium } from 'playwright-core';
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { openPanel, useFastTimeouts, withStepTimeout } from './panel.mjs';
 
 const PORT = process.env.PORT ?? '8799';
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -26,23 +27,45 @@ if (!PROJECT) {
   process.exit(1);
 }
 
+/** 跨平台查找本机 Chromium（Windows / Linux / macOS）；找不到返回 null，交给 playwright-core 自己找。 */
 function findChromium() {
-  const root = path.join(process.env.LOCALAPPDATA ?? '', 'ms-playwright');
-  for (const dir of readdirSync(root).filter((d) => d.startsWith('chromium-'))) {
-    for (const candidate of ['chrome-win/chrome.exe', 'chrome-win64/chrome.exe']) {
-      const exe = path.join(root, dir, candidate);
-      if (existsSync(exe)) return exe;
+  const roots = [
+    process.env.PLAYWRIGHT_BROWSERS_PATH,
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'ms-playwright') : null,
+    process.env.HOME ? path.join(process.env.HOME, '.cache', 'ms-playwright') : null,
+    process.env.HOME ? path.join(process.env.HOME, 'Library', 'Caches', 'ms-playwright') : null,
+  ].filter((root) => root && existsSync(root));
+  const candidates = [
+    'chrome-win/chrome.exe',
+    'chrome-win64/chrome.exe',
+    'chrome-linux/chrome',
+    'chrome-linux64/chrome',
+    'chrome-mac/Chromium.app/Contents/MacOS/Chromium',
+    'chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium',
+  ];
+  for (const root of roots) {
+    let dirs;
+    try {
+      dirs = readdirSync(root).filter((d) => d.startsWith('chromium'));
+    } catch {
+      continue;
+    }
+    for (const dir of dirs) {
+      for (const name of candidates) {
+        const exe = path.join(root, dir, name);
+        if (existsSync(exe)) return exe;
+      }
     }
   }
-  throw new Error(`找不到 Chromium：${root}`);
+  return null;
 }
 
 const results = [];
 const errors = [];
 
-async function step(name, fn) {
+async function step(name, fn, timeoutMs) {
   try {
-    const detail = await fn();
+    const detail = await withStepTimeout(name, fn, timeoutMs);
     results.push({ name, pass: true, detail: typeof detail === 'string' ? detail : '' });
   } catch (e) {
     results.push({ name, pass: false, detail: String(e).split('\n')[0].slice(0, 200) });
@@ -70,15 +93,15 @@ function report() {
 const openedFile = (page) => new URL(page.url()).searchParams.get('file');
 
 /** 回到向导面板（刷新 / 关浮层后都要先回来）。 */
-async function toGuide(page) {
-  await page.keyboard.press('Escape').catch(() => {});
-  await page.click('#wcr-tab-guide');
-  await page.waitForSelector('.guide-panel', { timeout: 15000 });
-}
+// 2026-10-03：向导面板已移除，「回到向导面板」这个 helper 没用了 —— 删掉，
+// 免得留着一段只会失败的代码误导后来的人（首屏卡片由下面的用例直接断言）。
 
 async function main() {
-  const browser = await chromium.launch({ executablePath: findChromium(), headless: true });
+  const executablePath = findChromium();
+  const browser = await chromium.launch({ ...(executablePath ? { executablePath } : {}), headless: true });
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
+  // 失败要快：默认 30 秒的等待会把一条超时放大成半分钟（需要长等的步骤各自写了显式 timeout）
+  useFastTimeouts(page);
   page.on('console', (msg) => {
     if (msg.type() === 'error') errors.push(msg.text());
   });
@@ -119,59 +142,13 @@ async function main() {
     return file;
   });
 
-  await step('G2.5 向导面板的步骤带理由，「下一步」能前进', async () => {
-    await toGuide(page);
-    const steps = page.locator('.guide-step');
-    await steps.first().waitFor({ timeout: 15000 });
-    const reason = (await page.locator('.guide-step-reason').first().innerText()).trim();
-    assert(reason.length > 0, '路线步骤缺少「为什么是它」的理由');
-    const before = openedFile(page);
-    await page.locator('.guide-nav button', { hasText: '下一步' }).first().click();
-    await page.waitForFunction(
-      (prev) => new URL(location.href).searchParams.get('file') !== prev,
-      before,
-      { timeout: 15000 },
-    );
-    const after = openedFile(page);
-    assert(after && after !== before, `「下一步」没有前进：${before} → ${after}`);
-    return `${before} → ${after}（理由：${reason.slice(0, 24)}）`;
-  });
+  // 2026-10-03 用户要求移除「向导」面板：面板级用例（G2.5 步骤条 / G2.5b 行级指引 /
+  // G3.1/G3.2 进度 / G3.5 待读队列）随之删除 —— 界面上一已经没有这个面板。
+  // 首屏「从这里开始」（路线的入口）仍保留在上面的 G1/G2 用例里。
 
-  await step('G3.1/G3.2 打开即已读，进度计数跨刷新保留', async () => {
-    await toGuide(page);
-    await page.waitForSelector('.guide-progress', { timeout: 15000 });
-    const before = await page.locator('.guide-progress').innerText();
-    const read1 = Number(/已读\s*(\d+)/.exec(before)?.[1] ?? '-1');
-    assert(read1 >= 1, `打开过文件却没有已读计数：${before}`);
-    await page.reload();
-    // 等侧栏骨架（tab 条始终在）；具体面板取决于 URL 里恢复的 tab，不能等文件树
-    await page.waitForSelector('.panel-tabs', { timeout: 30000 });
-    await toGuide(page);
-    await page.waitForSelector('.guide-progress', { timeout: 15000 });
-    const after = await page.locator('.guide-progress').innerText();
-    const read2 = Number(/已读\s*(\d+)/.exec(after)?.[1] ?? '-1');
-    assert(read2 >= read1, `刷新后已读计数倒退：${read1} → ${read2}`);
-    return `已读 ${read1} → ${read2}`;
-  });
-
-  await step('G3.5 待读队列加入后跨刷新仍在', async () => {
-    await toGuide(page);
-    await page.locator('.guide-nav button', { hasText: '加入待读' }).first().click();
-    await page.waitForSelector('.guide-queue-row', { timeout: 10000 });
-    const n1 = await page.locator('.guide-queue-row').count();
-    assert(n1 >= 1, '加入待读后列表为空');
-    await page.reload();
-    await page.waitForSelector('.panel-tabs', { timeout: 30000 });
-    await toGuide(page);
-    await page.waitForSelector('.guide-queue-row', { timeout: 15000 });
-    const n2 = await page.locator('.guide-queue-row').count();
-    assert(n2 >= n1, `刷新后待读丢了：${n1} → ${n2}`);
-    return `待读 ${n1} 条，刷新后 ${n2} 条`;
-  });
-
-  await step('G8.2 记录阅读基线后报「没有变化」', async () => {
-    await page.click('#wcr-tab-changes');
-    await page.waitForSelector('.changes-panel', { timeout: 15000 });
+  await step('W：变更栏常驻在右侧，能报「没有变化」', async () => {
+    // 2026-10-03：变更面板从侧栏 tab 改成右侧常驻栏（.dock-changes），用例跟着搬家。
+    await page.waitForSelector('.dock-changes .changes-panel', { timeout: 15_000 });
     const record = page.locator('.changes-panel button', { hasText: '记录当前为阅读基线' }).first();
     if (await record.count()) await record.click();
     const refresh = page.locator('.changes-panel button', { hasText: '重新比对' }).first();
@@ -183,7 +160,7 @@ async function main() {
   });
 
   await step('G5.1/G5.2 解释这段给出结构性解释（未使用模型）', async () => {
-    await page.click('#wcr-tab-files').catch(() => {});
+    await openPanel(page, 'files').catch(() => {});
     await page.locator('.tabbar .tab').first().click().catch(() => {});
     await page.waitForSelector('.monaco-editor .view-lines', { timeout: 15000 });
     // 光标落在有符号的行上，再发起「解释这段」
@@ -197,20 +174,7 @@ async function main() {
     return `${title.trim() || '已出解释'} · ${note.trim()}`;
   });
 
-  await step('G9.1 层级面板「展开为图」出调用流节点', async () => {
-    await page.keyboard.press('Escape').catch(() => {});
-    await page.click('#wcr-tab-hierarchy');
-    await page.waitForSelector('.hierarchy-host, .nav-row, .nav-empty-line', { timeout: 15000 });
-    const open = page.locator('button', { hasText: '展开为图' }).first();
-    await open.waitFor({ timeout: 15000 });
-    await open.click();
-    await page.waitForSelector('.flow-view', { timeout: 20000 });
-    await page.waitForSelector('.flow-view svg circle', { timeout: 20000 });
-    const nodes = await page.locator('.flow-view svg circle').count();
-    assert(nodes >= 1, '流视图一个节点都没有');
-    const stat = (await page.locator('.flow-view .gv-stat').first().innerText()).trim();
-    return `${nodes} 个节点 · ${stat}`;
-  });
+  // G9.1（层级面板「展开为图」）随「层级」面板一起移除（2026-10-03）；调用流浮层组件保留。
 
   report();
   await browser.close();

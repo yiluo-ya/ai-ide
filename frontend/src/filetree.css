@@ -1,14 +1,5 @@
-/* 文件树的叠加层：改动热力 / 来源徽标 / 已读与忽略状态。 */
-
-.file-tree .tree-row.read .tree-name {
-  opacity: 0.55;
-  text-decoration: line-through;
-}
-
-.file-tree .tree-row.ignored .tree-name {
-  opacity: 0.45;
-  font-style: italic;
-}
+/* 文件树的叠加层：改动热力 / 来源徽标。 */
+/* 已读 / 忽略的样式随「已读未读标准」一起移除（2026-10-03 用户要求）。 */
 
 .heat {
   flex: none;
@@ -46,15 +37,7 @@
   color: var(--badge-orphan-fg);
 }
 
-.file-tree .badge.read {
-  background: var(--badge-read-bg);
-  color: var(--badge-read-fg);
-}
-
-.file-tree .badge.ignored {
-  background: var(--badge-ignored-bg);
-  color: var(--badge-ignored-fg);
-}
+/* （.badge.read / .badge.ignored 已随「已读未读标准」一并移除） */
 
 /* M9.3：阅读时 agent 还在写 —— 刚变更的行要跳出来 */
 .file-tree .badge.pulse {

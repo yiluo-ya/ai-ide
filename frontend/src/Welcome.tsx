@@ -138,7 +138,13 @@ export function Welcome({
         <h3 id="wp-step3">{t('welcome.step3')}</h3>
         {indexing ? (
           <>
-            <div className="wp-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
+            <div
+              className="wp-progress"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={percent}
+            >
               <span className="wp-progress-bar" style={{ width: `${percent}%` }} />
             </div>
             <div className="wp-note">
@@ -148,9 +154,7 @@ export function Welcome({
           </>
         ) : projectId ? (
           <>
-            <div className="wp-summary">
-              {t('welcome.indexDone', { files: total, indexed, skipped })}
-            </div>
+            <div className="wp-summary">{t('welcome.indexDone', { files: total, indexed, skipped })}</div>
             {onOpenReport && (
               <button className="ov-linklike" onClick={onOpenReport}>
                 {t('welcome.whySkipped')}
