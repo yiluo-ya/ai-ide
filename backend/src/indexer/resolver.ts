@@ -1225,12 +1225,17 @@ export function signatureTypes(detail: string | null | undefined, lang: LangId):
   if (!detail) return [];
   const line = detail.split('\n')[0].trim();
   if (!line) return [];
-  if (lang === 'go') return goSignatureTypes(line);
-  if (lang === 'java') return javaSignatureTypes(line);
-  if (lang === 'python' || lang === 'typescript' || lang === 'tsx' || lang === 'javascript' || lang === 'jsx') {
-    return colonSignatureTypes(line);
+  // 风格由语言 spec 自述（signatureStyle），不再按 id 分支——插件语言也能带上自己的能力。
+  switch (specById(lang)?.signatureStyle) {
+    case 'go':
+      return goSignatureTypes(line);
+    case 'java':
+      return javaSignatureTypes(line);
+    case 'colon':
+      return colonSignatureTypes(line);
+    default:
+      return [];
   }
-  return [];
 }
 
 // ------------------------------------------------------------ 整文件密度（L10）
@@ -1238,27 +1243,12 @@ export function signatureTypes(detail: string | null | undefined, lang: LangId):
 /** 分段行数：固定 20 行一段（导出便于测试）。 */
 export const DENSITY_SEGMENT_SIZE = 20;
 
-/** 行首注释前缀（按语言；不确定就当代码行）。 */
-const COMMENT_PREFIXES: Partial<Record<LangId, string[]>> = {
-  python: ['#'],
-  typescript: ['//', '/*', '*', '*/'],
-  tsx: ['//', '/*', '*', '*/'],
-  javascript: ['//', '/*', '*', '*/'],
-  jsx: ['//', '/*', '*', '*/'],
-  go: ['//', '/*', '*', '*/'],
-  java: ['//', '/*', '*', '*/'],
-  rust: ['//', '/*', '*', '*/'],
-  shell: ['#'],
-  yaml: ['#'],
-  toml: ['#'],
-  ini: ['#', ';'],
-  dockerfile: ['#'],
-  sql: ['--'],
-};
+/** 行首注释前缀表已下沉到各语言 spec 的 `commentPrefixes`（见 walker.ts 的 LanguageSpec）。 */
 
 /**
  * L10：把整文件压成固定行数分段的统计（代码 / 注释 / 空白占比 + 主要符号名）。
  * 索引未完成也不报错：文件不在索引里时返回空 segments。
+ * 行首注释前缀来自语言 spec 的 `commentPrefixes`（缺省当代码行）。
  */
 export function fileDensity(project: ProjectIndex, file: string): FileDensity {
   const revision = String(project.indexVersion);
@@ -1268,7 +1258,7 @@ export function fileDensity(project: ProjectIndex, file: string): FileDensity {
   }
 
   const totalLines = fi.source.split(/\r?\n/).length;
-  const prefixes = COMMENT_PREFIXES[fi.lang] ?? [];
+  const prefixes = specById(fi.lang)?.commentPrefixes ?? [];
   const kinds: Array<'code' | 'comment' | 'blank'> = new Array(totalLines);
   for (let i = 1; i <= totalLines; i++) {
     const text = fi.text.lineText(i).trim();

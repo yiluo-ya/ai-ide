@@ -28,6 +28,11 @@ const USAGE = [
   '  --help         显示本帮助',
   '  --version      输出版本号',
   '',
+  '子命令：',
+  '  wcr lang list                  列出已加载语言（含插件与加载失败）',
+  '  wcr lang add <包名|目录>       安装语言包（重启后生效）',
+  '  wcr lang remove <包名|语言 id> 卸载语言包（重启后生效）',
+  '',
   '示例：',
   '  wcr                          # 起服务并打开浏览器，之后在页面里填目录',
   '  wcr D:/code/my-project       # 起服务并直接注册打开该目录',
@@ -105,6 +110,12 @@ async function registerProject(
     logWarn('cli.project.register-failed', { root, error: (e as Error).message });
     say(`提示：项目注册失败（${(e as Error).message}），可在页面里手动填路径。`);
   }
+}
+
+// `wcr lang ...`（07-languages-plugin）：语言包管理子命令，不走服务启动流程。
+if (process.argv[2] === 'lang') {
+  const { runLangCommand } = await import('./lang-cli');
+  process.exit(await runLangCommand(process.argv.slice(3)));
 }
 
 const args = parseArgs(process.argv.slice(2), {

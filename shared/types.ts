@@ -127,6 +127,29 @@ export interface ServiceStatus {
   lastAction: { action: string; at: number; detail?: string } | null;
 }
 
+/** Code Agent 后端的定位状态（FR-0007）：设置面板显示它，并据此给出安装指引。 */
+export interface AgentRuntimeStatus {
+  /** 手填的 pi 路径（空 = 走落点与 PATH）。 */
+  piPath: string;
+  pi: {
+    available: boolean;
+    /** 命中的是定位链的哪一环（前端按它取 i18n 文案）。 */
+    source: 'env' | 'config' | 'agents' | 'path';
+    /** 解析到的目标：绝对路径或裸命令名。 */
+    label: string;
+    /** 该目标是否已确认指向一个存在的文件。 */
+    resolved: boolean;
+    version?: string;
+    error?: string;
+  };
+  /** 装在哪：落点绝对路径 + 两条可复制的 npm 命令。 */
+  hint: { dir: string; globalCommand: string; prefixCommand: string };
+  /** 落点根目录（`~/.ide/agents`）。 */
+  agentsDir: string;
+  /** OpenHands 只留位置，适配器未接入。 */
+  openhands: { implemented: boolean; dir: string };
+}
+
 // ------------------------------------------------ 项目命令（FR-0005，2026-10-03）
 
 /** 命令的用途分类；四类为主，其余归 other。 */

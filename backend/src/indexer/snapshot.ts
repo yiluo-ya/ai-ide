@@ -58,6 +58,12 @@ export interface SnapshotHeader {
   savedAt: number;
   indexVersion: number;
   fingerprint: string;
+  /**
+   * 语言集合签名（07-languages-plugin）：语言 id + 扩展名 + 固定文件名 的 sha1。
+   * 装 / 卸语言包后签名会变 —— 老快照里根本没有新扩展名的条目，必须全量重扫。
+   * 老快照没有这个字段 → 视为不一致（一次性重建，可接受）。
+   */
+  langSignature?: string;
   /** `[rel, size, mtimeMs, dirFlag]`（紧凑数组；10k 文件也只占一行）。 */
   entries: Array<[string, number, number, number]>;
   /** 正文编码分布（P9）。 */
@@ -120,6 +126,24 @@ export function fingerprintEntries(entries: Iterable<[string, EntryInfo]>): stri
   );
   lines.sort();
   return createHash('sha1').update(lines.join('\n')).digest('hex');
+}
+
+/**
+ * 语言集合签名（07-languages-plugin）。
+ *
+ * 为什么需要它：快照是「文件 → 语言 → 符号」的物化结果，而「哪些文件值得看」由扩展名决定。
+ * 装了新语言包（多了新扩展名）时，老快照的 `entries` 里根本没有这些文件 —— 直接恢复会表现成
+ * 「新语言的文件在树上看不见」，只有重新 readDir 才能补救。签名不一致就丢弃快照走全量重建。
+ */
+export function languageSignatureOf(
+  specs: Iterable<{ id: string; extensions: string[]; filenames?: string[] }>,
+): string {
+  const parts: string[] = [];
+  for (const s of specs) {
+    parts.push(`${s.id}:${[...s.extensions].sort().join(',')}:${[...(s.filenames ?? [])].sort().join(',')}`);
+  }
+  parts.sort();
+  return createHash('sha1').update(parts.join('|')).digest('hex').slice(0, 16);
 }
 
 /** 扫描结果 → header 的紧凑数组形式。 */

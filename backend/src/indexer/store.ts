@@ -26,6 +26,7 @@ import {
   encodeEntries,
   fingerprintEntries,
   fromFileRecord,
+  languageSignatureOf,
   readSnapshotStream,
   snapshotDir,
   snapshotPath,
@@ -34,7 +35,7 @@ import {
   type SnapshotHeader,
 } from './snapshot';
 import { logInfo, logTiming, logWarn } from '../log';
-import { langForFile, specForFile } from '../languages';
+import { langForFile, specForFile, LANGUAGE_SPECS } from '../languages';
 import { DATA_DIR, PARSE_WORKERS, PERSIST_ENABLED } from '../config';
 import type { ModuleHint } from './walker';
 
@@ -721,7 +722,13 @@ export class ProjectIndex {
         }
       },
     });
-    if (!result || result.header.root !== this.root || result.header.schema !== SNAPSHOT_SCHEMA) {
+    if (
+      !result ||
+      result.header.root !== this.root ||
+      result.header.schema !== SNAPSHOT_SCHEMA ||
+      // 07-languages-plugin：语言集合变了（装了 / 卸了语言包）→ 快照必须重建
+      result.header.langSignature !== languageSignatureOf(LANGUAGE_SPECS)
+    ) {
       this.snapshotFresh = null;
       return null;
     }
@@ -818,6 +825,8 @@ export class ProjectIndex {
         savedAt,
         indexVersion: this.indexVersion,
         fingerprint: fingerprintEntries(this.entries),
+        // 语言集合签名：语言包变化时让下次恢复丢弃快照（见 snapshot.languageSignatureOf）
+        langSignature: languageSignatureOf(LANGUAGE_SPECS),
         entries: encodeEntries(this.entries),
         encodings: Object.fromEntries(this.encodingStats),
         skips: Object.fromEntries([...this.skipLog].map(([rel, info]) => [rel, { ...info }])),

@@ -28,6 +28,12 @@ export interface ScopeRule {
   paramFields?: string[];
   /** 该定义在父作用域里是否算「局部」（默认按所在作用域推断）。 */
   local?: boolean;
+  /**
+   * 该作用域**内部**声明的符号是否算局部（缺省按 `kind` 推断）。
+   * C++ / C# 这类语言用命名空间当模块层：里面的顶层函数 / 类应当能进符号搜索，
+   * 因而要显式写 `localDefs: false`（命名空间不在「按 kind 推 local」的白名单里）。
+   */
+  localDefs?: boolean;
   /** 定义节点的 detail（签名首行）覆盖。 */
   detail?: 'first-line' | 'none';
 }
@@ -128,6 +134,32 @@ export interface LanguageSpec {
    * 只读 AST 语法，不做类型推断：泛型参数、条件类型、动态注册一律不覆盖。
    */
   basesOf?: (node: any) => BaseInfo[] | null;
+
+  // -------------------------------------------------------------- 语言元数据
+  // 语言插件化（07-languages-plugin）后，下面这些事实由 spec 自述、经 /api/languages
+  // 下发给前端 —— 前端不再维护「扩展名 → 语言」「语言 → Monaco 语法」的硬编码表。
+
+  /** Monaco 语言 id（缺省 = id 同名）；Monaco 没有该语法时留空（预览退 plaintext）。 */
+  monaco?: string;
+  /** Markdown 代码围栏标记（缺省 = monaco ?? id）。 */
+  fence?: string;
+  /** 文件树色点 / 语言分布色带色值（缺省用主题灰）。 */
+  color?: string;
+  /** 是否有 hover / 跳定义 / 查引用能力（前端据此注册 provider，按 monaco id 去重）。 */
+  refs?: boolean;
+
+  // ------------------------------------------- 语言差异（下沉自按 id 分支）
+
+  /** 行首注释前缀（L10 密度统计；缺省当代码行）。 */
+  commentPrefixes?: string[];
+  /** 签名类型提取风格（L5）：go / java / colon（`name: Type` 类）。 */
+  signatureStyle?: 'go' | 'java' | 'colon';
+  /** 签名压平（L3d）时把 `:` 也当终止符（Python 的 `def f(...):`）。 */
+  signatureColon?: boolean;
+  /** 入口文件判定：全部正则命中才算，附人话理由（L1「从哪看起」）。 */
+  entryPatterns?: Array<{ res: RegExp[]; reason: string }>;
+  /** 文档 / 配置类（不算「没人引用的死代码」）。 */
+  doc?: boolean;
 }
 
 /** doc 收敛：最多 6 行，每行不超过 200 字符（L4）。 */
@@ -214,7 +246,7 @@ const flatten = (text: string): string => {
  * - Python 参数括号闭合后的 `:`（参数区内的 `:` 深度 ≥1，天然排除）
  * 扫不到终止符（异常语法）时返回 null，由调用方退回原有「首行」行为。
  */
-export function flattenSignature(source: string, lang: LangId): string | null {
+export function flattenSignature(source: string, colonTerminates: boolean): string | null {
   let depth = 0;
   let quote = '';
   let out = '';
@@ -245,7 +277,7 @@ export function flattenSignature(source: string, lang: LangId): string | null {
       out += ch;
       continue;
     }
-    const terminator = ch === '{' || ch === ';' || (ch === ':' && lang === 'python');
+    const terminator = ch === '{' || ch === ';' || (ch === ':' && colonTerminates);
     if (depth === 0 && terminator) return flatten(out);
     out += ch;
   }
@@ -268,6 +300,8 @@ export class WalkContext {
   readonly literals: LitRecord[] = [];
   readonly meta: Record<string, string> = {};
   private stack: ScopeRecord[] = [];
+  /** 作用域 → 其内部定义的 local 判定（由 `ScopeRule.localDefs` 指定；见 enterScope）。 */
+  private scopeLocalDefs = new Map<string, boolean>();
   private counter = 0;
   /** 收集到的注释块（用于「声明上方紧邻注释」的归属）。 */
   private comments: Array<{ startLine: number; endLine: number; lines: string[] }> = [];
@@ -351,6 +385,7 @@ export class WalkContext {
       range: this.rangeOf(node),
     };
     this.scopes.set(scope.id, scope);
+    if (rule.localDefs !== undefined) this.scopeLocalDefs.set(scope.id, rule.localDefs);
     this.stack.push(scope);
     return scope;
   }
@@ -392,6 +427,7 @@ export class WalkContext {
     const nameRange = opts.nameRange ?? (opts.nameNode ? this.rangeOf(opts.nameNode) : this.rangeOf(node));
     const local =
       opts.local ??
+      this.scopeLocalDefs.get(scope.id) ??
       (scope.kind === 'function' || scope.kind === 'block' || scope.kind === 'namespace');
     const decorators = this.spec.decoratorsOf?.(node) ?? null;
     const def: DefRecord = {
@@ -424,7 +460,7 @@ export class WalkContext {
   /** 声明签名：跳过装饰器 / 注解自己占用的行，再把多行签名压平为一行（L3d）。 */
   private detailOf(node: any, decorators: DecoratorInfo[] | null): string {
     const { text, first } = this.signatureBody(node, decorators);
-    return flattenSignature(text, this.spec.id) ?? first;
+    return flattenSignature(text, this.spec.signatureColon === true) ?? first;
   }
 
   /** 声明起点起的文本（已跳过装饰器 / 注解行）与原有「首行」结果（压平失败时保底）。 */

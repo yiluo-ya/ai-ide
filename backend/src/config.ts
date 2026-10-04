@@ -21,6 +21,26 @@ export const DATA_DIR = process.env.READER_DATA_DIR
   ? path.resolve(process.env.READER_DATA_DIR)
   : path.join(os.homedir(), '.ide');
 
+// ------------------------------------------------ 语言插件（07-languages-plugin）
+
+/**
+ * 语言插件目录：本地手放的插件 + `wcr lang add` 装的 npm 插件都落在这里
+ * （目录自带 `package.json`，见 `languages/loader.ts` 的三条发现规则）。
+ */
+export const PLUGINS_DIR = process.env.READER_PLUGINS_DIR
+  ? path.resolve(process.env.READER_PLUGINS_DIR)
+  : path.join(DATA_DIR, 'languages');
+
+/**
+ * 语言插件总开关：`READER_PLUGINS=0`（或 `READER_NO_PLUGINS=1`）→ 一个插件都不加载，
+ * 只保留内置核心语言（排障 / 最小依赖场景）。
+ */
+export const PLUGINS_ENABLED =
+  process.env.READER_PLUGINS !== '0' && process.env.READER_NO_PLUGINS !== '1';
+
+/** 是否加载随仓库预装的官方语言包（`READER_PRESET_PLUGINS=0` 关掉，只留手放/安装的）。 */
+export const PRESET_PLUGINS_ENABLED = PLUGINS_ENABLED && process.env.READER_PRESET_PLUGINS !== '0';
+
 export const FRONTEND_DIST = process.env.READER_FRONTEND_DIST
   ? path.resolve(process.env.READER_FRONTEND_DIST)
   : path.join(REPO_ROOT, 'frontend', 'dist');

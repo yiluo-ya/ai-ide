@@ -18,7 +18,7 @@ import type {
   OverviewFile,
   ProjectOverview,
 } from '../types';
-import { specForFile } from '../languages';
+import { specForFile, specById } from '../languages';
 import { parseSource } from './parser';
 import type { FileIndex } from './model';
 import { basename, dirname } from './paths';
@@ -194,12 +194,9 @@ function entryReasonsFor(project: ProjectIndex, fi: FileIndex): string[] {
   if (declared.includes(fi.file)) reasons.push('包清单声明的入口');
 
   const src = fi.source;
-  if (fi.lang === 'python') {
-    if (/__name__\s*==\s*['"]__main__['"]/.test(src)) reasons.push('Python 的 __main__ 块');
-  } else if (fi.lang === 'go') {
-    if (/^\s*package\s+main\b/m.test(src) && /func\s+main\s*\(/.test(src)) reasons.push('Go 的 main 包');
-  } else if (fi.lang === 'java') {
-    if (/static\s+void\s+main\s*\(/.test(src)) reasons.push('Java 的 main 方法');
+  // 入口特征由语言 spec 自述（entryPatterns），不再按 lang 分支——插件语言可自带。
+  for (const rule of specById(fi.lang)?.entryPatterns ?? []) {
+    if (rule.res.every((re) => re.test(src))) reasons.push(rule.reason);
   }
   return reasons;
 }

@@ -95,6 +95,16 @@ import {
   stopRun,
 } from '../commands';
 import { readUserIgnore, writeUserIgnore } from '../indexer/user-ignore';
+import {
+  languageMetaList,
+  monacoLanguages,
+  pluginErrors,
+  previewMetaList,
+  refLanguages,
+  symbolLanguages,
+} from '../languages';
+import { agentsDir, openhandsAgentsDir, piInstallHint, probePi, resolvePiRuntime } from '../agent/runtime';
+import { readAgentRuntimeConfig, writeAgentRuntimeConfig } from '../agent/runtime-config';
 
 const VERSION = '0.1.0';
 
@@ -206,6 +216,25 @@ export function createApp(
   );
   app.get('/api/integration/manifest', (c) => c.json(manifest));
 
+  // ------------------------------------------------------- 语言（07-languages-plugin）
+
+  /**
+   * 语言清单：前端据此建「扩展名 / 文件名 → 语言」「语言 → Monaco 语法·颜色·能力」的映射，
+   * 不再各自维护硬编码表 —— 这是「装一个语言包 + 重启就支持新语言」的前提。
+   * `refLanguages` / `symbolLanguages` 是 Monaco 语言 id（前端注册 provider 用）。
+   */
+  app.get('/api/languages', (c) =>
+    c.json({
+      languages: languageMetaList(),
+      previews: previewMetaList(),
+      refLanguages: refLanguages(),
+      symbolLanguages: symbolLanguages(),
+      // 插件自带的前端高亮（Monaco 语言 + Monarch 语法）：Monaco 内置没有的语言靠它
+      monacoLanguages: monacoLanguages(),
+      errors: pluginErrors.map((e) => ({ ...e })),
+    }),
+  );
+
   // ------------------------------------------------------- 设置（2026-10-03）
 
   /** 自定义忽略规则（对所有项目生效，存本工具自己的数据目录）。 */
@@ -216,6 +245,45 @@ export function createApp(
     const text = typeof body?.text === 'string' ? body.text : '';
     await writeUserIgnore(text);
     return c.json({ ok: true, text });
+  });
+
+  // --------------------------------------------- Code Agent 后端（FR-0007）
+
+  /**
+   * pi 的定位状态：手填路径、解析来源与目标、`pi --version` 的结果、落点目录与安装命令。
+   * 源码给出去时不含 pi，这里就是「装哪儿能被认出来」的答案（详见 `agent/runtime.ts`）。
+   */
+  const agentRuntimeStatus = async () => {
+    const config = await readAgentRuntimeConfig();
+    const probe = await probePi(resolvePiRuntime(config, ['--version']));
+    return {
+      piPath: config.piPath,
+      pi: {
+        available: probe.ok,
+        source: probe.runtime.source,
+        label: probe.runtime.target,
+        resolved: probe.runtime.resolved,
+        ...(probe.version ? { version: probe.version } : {}),
+        ...(probe.error ? { error: probe.error } : {}),
+      },
+      hint: piInstallHint(),
+      agentsDir: agentsDir(),
+      openhands: { implemented: false, dir: openhandsAgentsDir() },
+    };
+  };
+
+  /** GET 开放：前端要显示状态，共享模式下也只读。 */
+  app.get('/api/settings/agent', async (c) => c.json(await agentRuntimeStatus()));
+
+  /** POST 只在本机可用（改的是宿主机的路径，与其它「本机」路由同一守卫，D3）。 */
+  app.post('/api/settings/agent', async (c) => {
+    if (!LOCAL_HOSTS.has(HOST)) {
+      return fail(c, 403, 'disabled_in_share_mode', '共享模式下不能改 Code Agent 后端（只读阅读）');
+    }
+    const body = await readJson<{ piPath?: unknown }>(c);
+    const piPath = typeof body?.piPath === 'string' ? body.piPath.trim() : '';
+    await writeAgentRuntimeConfig({ piPath });
+    return c.json({ ok: true, ...(await agentRuntimeStatus()) });
   });
 
   // ------------------------------------------------- agent 会话（可写，2026-10-03）
