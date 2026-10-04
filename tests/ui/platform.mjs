@@ -8,9 +8,10 @@
  * 4. P24：设置里切「亮色」→ 真的换主题（data-theme + 背景色）；
  * 5. P24：字号滑到 16 → 落 wcr:prefs 且 --ui-font-size 即时生效；
  * 6. P25：语言切 English → documentElement.lang 与界面文案都变；
- * 7. LAY：左栏四个常驻 tab（文件 / 大纲 / 搜索 / code会话）、右栏三个（变更 / 命令 / 总览）；
- * 8. AP：顶栏「添加项目」→ 文件夹图标 → 弹窗选目录（Shadow DOM 隔离 + 手敲路径跳转 + 确认真实路径）；
- * 9. 全程无 console error。
+ * 7. LAY：左栏两个常驻 tab（文件 / code会话）、右栏五个入口分两行（变更 / 命令 / 总览 ｜ 大纲 / 搜索）；
+ * 8. AG-FONT：设置里改「字号」→ code 会话区正文 / 小字跟着缩放（不再是固定 13px / 12px）；
+ * 9. AP：顶栏「添加项目」→ 文件夹图标 → 弹窗选目录（Shadow DOM 隔离 + 手敲路径跳转 + 确认真实路径）；
+ * 10. 全程无 console error。
  *
  * 跑法：npm run build && npm run test:ui（run.mjs 在 navigator / guide 之后跑本脚本）。
  * 说明：React 受控组件（range / select）必须走原生 value setter 才能触发 onChange，
@@ -193,24 +194,73 @@ async function main() {
   await page.evaluate(() => document.querySelector('.wcr-dialog-head button')?.click());
   await page.waitForTimeout(300);
 
-  await step('LAY：左栏四个常驻 tab、右栏「总览」与变更 / 命令并排', async () => {
-    // 2026-10-03 用户要求：文件 / 大纲 / 搜索 / code会话 在左栏并排；总览从左栏搬去右栏。
+  await step('LAY：左栏只剩文件 / code会话，右栏五个入口分两行', async () => {
+    // 2026-10-03 用户要求：大纲 / 搜索从左栏搬到右栏；右栏一共五个入口，一行放不下 —— 排两行。
     // 把布局本身钉住 —— 以后再动 tab 集合，先撞到这条。
+    // 注意：上一条 P25 用例已把语言切成 English，而 tab 文案（P25 国际化后）随语言变，
+    // 所以这里按当前语言给两套期望值（中文仍是默认语言下的口径）。
+    const en = (await page.evaluate(() => document.documentElement.lang)) === 'en';
+    const wantLeft = en ? ['Files', 'Code sessions'] : ['文件', 'code会话'];
+    const wantDock = en
+      ? ['Changes', 'Commands', 'Overview', 'Outline', 'Search']
+      : ['变更', '命令', '总览', '大纲', '搜索'];
     const left = (await page.locator('.sidebar .panel-tabs > button').allInnerTexts()).map((s) => s.trim());
-    assert(left.join(',') === '文件,大纲,搜索,code会话', `左栏 tab 不对：${left.join(',')}`);
+    assert(left.join(',') === wantLeft.join(','), `左栏 tab 不对：${left.join(',')}（期望 ${wantLeft.join(',')}）`);
 
     // 右栏可能被收着（收着时只剩一个 ◂ 按钮）：先展开，否则看不到 tab
     if (await page.locator('.dock-changes.collapsed').count()) {
       await page.locator('.dock-changes .dock-toggle').click();
     }
     const dock = (await page.locator('.dock-changes .dock-tab').allInnerTexts()).map((s) => s.trim());
-    assert(dock.join(',') === '变更,命令,总览', `右栏 tab 不对：${dock.join(',')}`);
+    assert(dock.join(',') === wantDock.join(','), `右栏 tab 不对：${dock.join(',')}（期望 ${wantDock.join(',')}）`);
+
+    // 一行放不下才分两行：按各入口的纵向位置数行数
+    const rows = await page
+      .locator('.dock-tabs')
+      .evaluate((el) => new Set([...el.children].map((c) => c.getBoundingClientRect().top)).size);
+    assert(rows === 2, `右栏入口没有排成两行：${rows} 行`);
 
     // 点「总览」要真出面板（不是只换高亮）；看完点回「变更」，别把后续用例留在总览上
-    await page.locator('.dock-changes .dock-tab', { hasText: '总览' }).first().click();
+    await page.locator('.dock-changes .dock-tab', { hasText: wantDock[2] }).first().click();
     await page.waitForSelector('.dock-changes .ov-panel, .dock-changes .panel-empty', { timeout: 8000 });
-    await page.locator('.dock-changes .dock-tab', { hasText: '变更' }).first().click();
-    return `左栏 ${left.join(' / ')}；右栏 ${dock.join(' / ')}`;
+    await page.locator('.dock-changes .dock-tab', { hasText: wantDock[0] }).first().click();
+    return `左栏 ${left.join(' / ')}；右栏 ${dock.join(' / ')}（${rows} 行）`;
+  });
+
+  await step('AG-FONT：code 会话区字号跟随设置里的「字号」', async () => {
+    // 2026-10-03 用户要求：设置里改「字号」时，code agent 与会话区也跟着缩放。
+    // 上一条 P24 已把字号设成 16px：会话区正文应是 16px、小字 16-1=15px
+    // （修之前 styles.css 的 --fs-* 是固定 px，这里被钉死在 13px / 12px）。
+    const en = (await page.evaluate(() => document.documentElement.lang)) === 'en';
+    await page
+      .locator('.sidebar .panel-tabs > button', { hasText: en ? 'Code sessions' : 'code会话' })
+      .first()
+      .click();
+    await page.waitForSelector('.ag-side', { timeout: 8000 });
+    await page.waitForSelector('.ag-side .ag-note', { timeout: 8000 });
+
+    const px = await page.evaluate(() => {
+      const pick = (sel) => {
+        const el = document.querySelector(sel);
+        return el ? getComputedStyle(el).fontSize : null;
+      };
+      return {
+        head: pick('.ag-side-head'),
+        sideNote: pick('.ag-side .ag-note'),
+        viewNote: pick('.agent-view .ag-note'),
+      };
+    });
+    assert(px.head === '16px', `会话区正文字号没跟随：${px.head}（期望 16px）`);
+    assert(px.sideNote === '15px', `会话区小字没跟随：${px.sideNote}（期望 15px）`);
+    // 中间区的会话内容不一定渲染（取决于当前是否有会话），有则一并验
+    if (px.viewNote) assert(px.viewNote === '15px', `会话内容区小字没跟随：${px.viewNote}（期望 15px）`);
+
+    // 看完切回「文件」，别把后续用例留在 code 会话上
+    await page
+      .locator('.sidebar .panel-tabs > button', { hasText: en ? 'Files' : '文件' })
+      .first()
+      .click();
+    return `会话区 ${px.head} / ${px.sideNote}、内容区 ${px.viewNote ?? '（未渲染）'}`;
   });
 
   await step('AP：「添加项目」= 顶栏图标 → 弹窗选目录（Shadow DOM 隔离 + 手敲路径跳转）', async () => {

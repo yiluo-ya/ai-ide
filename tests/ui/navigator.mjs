@@ -332,18 +332,18 @@ async function main() {
     return '页眉 + @media print 规则就位';
   });
 
-  await step('CMD：右侧栏「命令」tab 看得到服务状态（不点重启）', async () => {
+  await step('CMD：右侧栏「命令」tab 显示的是当前项目状态（不是阅读器服务）', async () => {
     // 2026-10-03 用户要求：命令面板从侧栏 tab 搬到右侧常驻栏，与「变更」并排（默认变更）。
     const dockTab = page.locator('.dock-changes .dock-tab', { hasText: '命令' }).first();
     await dockTab.waitFor({ timeout: 15_000 });
     await dockTab.click();
     await page.waitForSelector('.service-panel .sv-facts', { timeout: 15_000 });
     const text = await page.locator('.service-panel').innerText();
-    assert(/pid\s*\d+/.test(text), `没显示进程 pid：${text.slice(0, 120)}`);
-    assert(/运行时长/.test(text), `没显示运行时长：${text.slice(0, 120)}`);
-    assert(/重启服务/.test(text) && /停止服务/.test(text), '缺少重启 / 停止按钮');
-    // 注意：这里**不点**重启与停止 —— 那会真的把跑测试的服务杀掉。
-    // 真实重启路径由 bin/restart-worker.mjs 承担，人工验证时点一次即可。
+    // 2026-10-03 晚用户要求：只显示**当前打开项目**的状态、拿得到才显示。
+    assert(/当前项目/.test(text) && /路径/.test(text), `没显示当前项目 / 路径：${text.slice(0, 120)}`);
+    assert(/索引/.test(text), `没显示索引状态：${text.slice(0, 120)}`);
+    // 原来那块是阅读器自身的 pid / 端口 / 重启 / 停止（与当前项目无关），已整块删除。
+    assert(!/重启服务|停止服务|命令 · 服务/.test(text), `阅读器服务那块应已删除：${text.slice(0, 120)}`);
     return text.replace(/\s+/g, ' ').slice(0, 90);
   });
 

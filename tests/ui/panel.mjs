@@ -1,12 +1,27 @@
 /**
  * UI 用例共用的「打开侧栏面板」动作。
  *
- * 左栏四个 tab（文件 / 大纲 / 搜索 / code会话）都并排常驻、直接点。
- * 2026-10-03 起没有「更多 ▾」二级菜单 —— 辅助面板只剩「总览」，它已搬去右栏 dock。
+ * 左栏只剩「文件」与「code会话」（2026-10-03 用户要求）；
+ * 「大纲」「搜索」搬到了右栏常驻栏（与变更 / 命令 / 总览并排，共五个入口）。
  */
 
-/** 打开侧栏面板（按 tab id）。 */
+/** 住在右栏的面板（左栏只剩文件 / code会话）。 */
+const DOCK_PANELS = new Set(['outline', 'search']);
+
+/** 打开面板（按 tab id）：文件 / code会话在左栏，大纲 / 搜索在右栏。 */
 export async function openPanel(page, id) {
+  if (DOCK_PANELS.has(id)) {
+    // 右栏可能被收着（收着时只剩一个箭头按钮）：先展开，否则看不到入口
+    if (await page.locator('.dock-changes.collapsed').count()) {
+      await page.locator('.dock-changes .dock-toggle').click();
+    }
+    const tab = page.locator(`#wcr-dock-tab-${id}`).first();
+    if (!(await tab.count())) throw new Error(`右栏没有这个面板：${id}`);
+    if ((await tab.getAttribute('aria-selected')) === 'true') return;
+    await tab.click();
+    return;
+  }
+
   // 已经是当前面板就不用再点（平白多一次点击与等待）
   const labelledBy = await page.locator('#wcr-side-panel').getAttribute('aria-labelledby').catch(() => null);
   if (labelledBy === `wcr-tab-${id}`) return;
