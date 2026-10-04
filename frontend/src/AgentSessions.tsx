@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { BackendKind } from './agentApi';
 import { BACKEND_LABEL, useAgent } from './agentStore';
+import { useI18n } from './i18n';
 
 /** 可选后端：内置 agent（本项目模型）/ 本机 pi（pi 自己的凭证）/ OpenHands（还没接）。 */
 const BACKENDS: BackendKind[] = ['builtin', 'pi', 'openhands'];
@@ -28,6 +29,7 @@ export function AgentSessions({
   /** 选中某个会话：主区切到对话内容（左栏只列会话，见 2026-10-03 的布局调整）。 */
   onOpen?: () => void;
 }) {
+  const { t } = useI18n();
   const config = useAgent((s) => s.config);
   const sessions = useAgent((s) => s.sessions);
   const activeId = useAgent((s) => s.activeId);
@@ -86,8 +88,8 @@ export function AgentSessions({
     <div className="ag-side">
       <div className="ag-side-head">
         <span className="ag-side-title">Code Agent</span>
-        <button className="btn ghost small" onClick={onBack} title="回到代码阅读">
-          回到代码
+        <button className="btn ghost small" onClick={onBack} title={t('agent.backToReadingTitle')}>
+          {t('app.backToCode')}
         </button>
       </div>
 
@@ -104,49 +106,50 @@ export function AgentSessions({
             >
               <span className="ag-session-name">{s.name}</span>
               <span className="ag-session-meta">
-                {BACKEND_LABEL[s.backend] ?? s.backend} · {s.messageCount} 条
-                {s.isStreaming ? ' · 运行中' : ''}
-                {s.alive ? '' : ' · 已停'}
+                {BACKEND_LABEL[s.backend] ? t(BACKEND_LABEL[s.backend]) : s.backend} ·{' '}
+                {t('agent.messageCount', { n: s.messageCount })}
+                {s.isStreaming ? ` · ${t('agent.running')}` : ''}
+                {s.alive ? '' : ` · ${t('agent.stopped')}`}
               </span>
             </button>
-            <button className="ag-session-x" title="删除会话" onClick={() => void remove(s.id)}>
+            <button className="ag-session-x" title={t('agent.deleteSession')} onClick={() => void remove(s.id)}>
               ✕
             </button>
           </div>
         ))}
-        {mine.length === 0 && !loading && <p className="ag-note">还没有会话。</p>}
-        {loading && mine.length === 0 && <p className="ag-note">加载中…</p>}
+        {mine.length === 0 && !loading && <p className="ag-note">{t('agent.noSessions')}</p>}
+        {loading && mine.length === 0 && <p className="ag-note">{t('app.loading')}</p>}
       </div>
 
       <div className="ag-side-new">
         <select
           className="ag-select full"
-          aria-label="用哪个 code agent 后端"
+          aria-label={t('agent.backendAria')}
           value={backend}
           onChange={(e) => setBackend(e.target.value as BackendKind)}
         >
           {BACKENDS.map((b) => (
             <option key={b} value={b}>
-              {BACKEND_LABEL[b]}
-              {b === 'openhands' ? '（还没接）' : ''}
+              {t(BACKEND_LABEL[b])}
+              {b === 'openhands' ? t('agent.notYet') : ''}
             </option>
           ))}
         </select>
 
         {backend === 'pi' && (
-          <p className="ag-note">pi 用本机的凭证与工具（~/.pi/agent/auth.json），模型在 pi 里配。</p>
+          <p className="ag-note">{t('agent.piNote')}</p>
         )}
         {backend === 'openhands' && (
-          <p className="ag-note">OpenHands 适配器还没接：可走 agent-server 的 REST + 事件 WebSocket。</p>
+          <p className="ag-note">{t('agent.openhandsNote')}</p>
         )}
 
         {needsModel &&
           (config && providers.length === 0 ? (
-            <p className="ag-note">还没有模型 provider：去顶栏「模型」填 base URL + API key + 模型 id。</p>
+            <p className="ag-note">{t('agent.noProvider')}</p>
           ) : (
             <select
               className="ag-select full"
-              aria-label="新会话用哪个模型"
+              aria-label={t('agent.modelAria')}
               value={current ? `${current.provider}::${current.modelId}` : ''}
               onChange={(e) => {
                 const [provider, ...rest] = e.target.value.split('::');
@@ -156,15 +159,15 @@ export function AgentSessions({
               {options.map((o) => (
                 <option key={`${o.provider}::${o.modelId}`} value={`${o.provider}::${o.modelId}`}>
                   {o.label}
-                  {o.hasKey ? '' : '（缺 key）'}
+                  {o.hasKey ? '' : t('agent.missingKey')}
                 </option>
               ))}
-              {options.length === 0 && <option value="">没有可用的模型</option>}
+              {options.length === 0 && <option value="">{t('agent.noModels')}</option>}
             </select>
           ))}
 
         <button className="btn" disabled={busy || !canCreate} onClick={() => void createSession()}>
-          {busy ? '创建中…' : '新建会话'}
+          {busy ? t('agent.creating') : t('agent.newSession')}
         </button>
       </div>
     </div>

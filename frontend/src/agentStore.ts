@@ -17,6 +17,7 @@ import {
   type BackendKind,
   type ModelConfigPublic,
 } from './agentApi';
+import { translate } from './i18n';
 
 /** 当前会话的事件流订阅；切会话时换掉（模块级，保证只有一份）。 */
 let unsubscribe: (() => void) | null = null;
@@ -207,7 +208,7 @@ function applyEvent(
         .catch(() => {});
       return;
     case 'tool_execution_start':
-      set({ toolNote: `正在${toolLabel(event.toolName)}${summarizeArgs(event.args)}` });
+      set({ toolNote: translate('agent.toolRunning', { what: `${toolLabel(event.toolName)}${summarizeArgs(event.args)}` }) });
       return;
     case 'tool_execution_end':
       set({ toolNote: null });
@@ -226,22 +227,22 @@ function applyEvent(
 
 /** 工具名 → 中文动作（只影响显示）。 */
 export const TOOL_LABEL: Record<string, string> = {
-  read_file: '读文件',
-  write_file: '写文件',
-  edit_file: '改文件',
-  list_dir: '列目录',
-  glob: '找文件',
-  grep: '搜文本',
-  find_symbol: '查符号定义',
-  goto_definition: '跳定义',
-  find_references: '查引用',
-  file_outline: '看大纲',
-  search_text: '索引搜索',
+  read_file: 'agent.toolReadFile',
+  write_file: 'agent.toolWriteFile',
+  edit_file: 'agent.toolEditFile',
+  list_dir: 'agent.toolListDir',
+  glob: 'agent.toolGlob',
+  grep: 'agent.toolGrep',
+  find_symbol: 'agent.toolFindSymbol',
+  goto_definition: 'agent.toolGotoDefinition',
+  find_references: 'agent.toolFindReferences',
+  file_outline: 'agent.toolFileOutline',
+  search_text: 'agent.toolSearchText',
 };
 
 export function toolLabel(name: unknown): string {
   const key = String(name ?? '');
-  return TOOL_LABEL[key] ?? (key || '工具');
+  return TOOL_LABEL[key] ? translate(TOOL_LABEL[key]) : (key || translate('agent.tool'));
 }
 
 /** 工具参数里最有信息量的一项，接在「正在…」后面。 */
@@ -250,14 +251,14 @@ export function summarizeArgs(args: unknown): string {
   const record = args as Record<string, unknown>;
   for (const key of ['path', 'file', 'pattern', 'name', 'query']) {
     const value = record[key];
-    if (typeof value === 'string' && value) return `：${value}`;
+    if (typeof value === 'string' && value) return translate('agent.argsSep', { value });
   }
   return '';
 }
 
 /** 后端类型显示名。 */
 export const BACKEND_LABEL: Record<string, string> = {
-  builtin: '内置 agent',
-  pi: 'pi',
-  openhands: 'OpenHands',
+  builtin: 'agent.backendBuiltin',
+  pi: 'agent.backendPi',
+  openhands: 'agent.backendOpenhands',
 };

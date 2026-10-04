@@ -6,14 +6,22 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { agentMessageText, type AgentContentBlock, type AgentMessage } from './agentApi';
-import { toolLabel, useAgent } from './agentStore';
+import { BACKEND_LABEL, toolLabel, useAgent } from './agentStore';
+import { downloadFile, sessionFilename, sessionToHtml, sessionToMarkdown } from './agentExport';
+import { looksRichText } from './markdown';
+import { RichText } from './RichText';
+import { showToast } from './state';
+import { useI18n } from './i18n';
+import './agent.css';
+import './share.css';
 
 function Block({ block }: { block: AgentContentBlock }) {
-  if (block.type === 'text') return <div className="ag-text">{block.text}</div>;
+  const { t } = useI18n();
+  if (block.type === 'text') return <RichText text={block.text ?? ''} className="ag-text" />;
   if (block.type === 'thinking') {
     return (
       <details className="ag-fold">
-        <summary>思考</summary>
+        <summary>{t('agent.thinking')}</summary>
         <pre className="ag-pre dim">{block.thinking}</pre>
       </details>
     );
@@ -22,7 +30,8 @@ function Block({ block }: { block: AgentContentBlock }) {
     return (
       <details className="ag-fold">
         <summary>
-          调用工具 · <b>{toolLabel(block.name)}</b>
+          {t('agent.toolCallPrefix')}
+          <b>{toolLabel(block.name)}</b>
         </summary>
         <pre className="ag-pre">{JSON.stringify(block.arguments ?? {}, null, 2)}</pre>
       </details>
@@ -31,7 +40,29 @@ function Block({ block }: { block: AgentContentBlock }) {
   return null;
 }
 
+/**
+ * 工具结果：日志 / 文件内容 / JSON 默认原样最忠实；
+ * 只有带明确 Markdown 结构或 HTML 文档特征（见 markdown.ts）时才按富文本画，并给「源码」切回去。
+ */
+function ToolResultBody({ text }: { text: string }) {
+  const { t } = useI18n();
+  const rich = useMemo(() => looksRichText(text), [text]);
+  const [raw, setRaw] = useState(false);
+  if (!rich) return <pre className="ag-pre">{text}</pre>;
+  return (
+    <div className="ag-rich">
+      <div className="ag-rich-bar">
+        <button className="md-btn" onClick={() => setRaw((v) => !v)}>
+          {raw ? t('md.render') : t('md.source')}
+        </button>
+      </div>
+      {raw ? <pre className="ag-pre">{text}</pre> : <RichText text={text} />}
+    </div>
+  );
+}
+
 function MessageRow({ message }: { message: AgentMessage }) {
+  const { t } = useI18n();
   if (message.role === 'system') return null;
 
   if (message.role === 'user') {
@@ -46,10 +77,11 @@ function MessageRow({ message }: { message: AgentMessage }) {
     return (
       <details className={`ag-fold tool${message.isError ? ' bad' : ''}`}>
         <summary>
-          工具结果 · {toolLabel(message.toolName)}
-          {message.isError ? ' · 失败' : ''}
+          {t('agent.toolResultPrefix')}
+          {toolLabel(message.toolName)}
+          {message.isError ? ` · ${t('agent.failed')}` : ''}
         </summary>
-        <pre className="ag-pre">{agentMessageText(message)}</pre>
+        <ToolResultBody text={agentMessageText(message)} />
       </details>
     );
   }
@@ -65,7 +97,16 @@ function MessageRow({ message }: { message: AgentMessage }) {
   );
 }
 
-export function AgentView({ projectId, projectName, onBack }: { projectId: string; projectName: string; onBack: () => void }) {
+export function AgentView({
+  projectId,
+  projectName,
+  onBack,
+}: {
+  projectId: string;
+  projectName: string;
+  onBack: () => void;
+}) {
+  const { t } = useI18n();
   const sessions = useAgent((s) => s.sessions);
   const activeId = useAgent((s) => s.activeId);
   const messages = useAgent((s) => s.messages);
@@ -80,6 +121,7 @@ export function AgentView({ projectId, projectName, onBack }: { projectId: strin
   const setError = useAgent((s) => s.setError);
 
   const [draft, setDraft] = useState('');
+  const [exportOpen, setExportOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
@@ -87,7 +129,9 @@ export function AgentView({ projectId, projectName, onBack }: { projectId: strin
 
   const options = useMemo(
     () =>
-      (config?.providers ?? []).flatMap((p) => p.models.map((m) => ({ provider: p.id, providerName: p.name, modelId: m }))),
+      (config?.providers ?? []).flatMap((p) =>
+        p.models.map((m) => ({ provider: p.id, providerName: p.name, modelId: m })),
+      ),
     [config],
   );
 
@@ -104,6 +148,26 @@ export function AgentView({ projectId, projectName, onBack }: { projectId: strin
     void send(text);
   };
 
+  /** 把当前会话导出成 .md / .html（含正在流式生成的那条，所见即所得）。 */
+  const exportSession = (format: 'md' | 'html') => {
+    setExportOpen(false);
+    if (!active) return;
+    const at = new Date();
+    const input = {
+      name: active.name,
+      projectName,
+      projectRoot: active.projectRoot,
+      backendLabel: BACKEND_LABEL[active.backend] ? t(BACKEND_LABEL[active.backend]) : active.backend,
+      model: active.model,
+      messages: rows,
+      at,
+    };
+    const filename = sessionFilename(active.name, format, at);
+    if (format === 'md') downloadFile(filename, sessionToMarkdown(input), 'text/markdown');
+    else downloadFile(filename, sessionToHtml(input), 'text/html');
+    showToast(t('agent.exportedTo', { name: filename }));
+  };
+
   return (
     <section className="agent-view">
       <header className="ag-head">
@@ -117,7 +181,7 @@ export function AgentView({ projectId, projectName, onBack }: { projectId: strin
         {active && active.backend === 'builtin' && (
           <select
             className="ag-select"
-            aria-label="这个会话用哪个模型"
+            aria-label={t('agent.sessionModelAria')}
             value={active.model ? `${active.model.provider}::${active.model.id}` : ''}
             onChange={(e) => {
               const [provider, ...rest] = e.target.value.split('::');
@@ -138,8 +202,36 @@ export function AgentView({ projectId, projectName, onBack }: { projectId: strin
               ))}
           </select>
         )}
-        <button className="btn ghost" onClick={onBack} title="回到代码阅读（也可点左栏的「回到代码」）">
-          回到代码
+        {active && (
+          <div className="share-wrap">
+            <button
+              className="btn ghost"
+              onClick={() => setExportOpen((v) => !v)}
+              aria-expanded={exportOpen}
+              aria-haspopup="true"
+            >
+              {t('agent.export')}
+            </button>
+            {exportOpen && (
+              <>
+                <div className="share-backdrop" onClick={() => setExportOpen(false)} />
+                <div className="share-menu">
+                  <div className="share-section">{t('agent.exportSection')}</div>
+                  <button className="share-item" onClick={() => exportSession('md')}>
+                    {t('agent.exportMd')}
+                    <span className="share-hint">{t('agent.exportMdHint')}</span>
+                  </button>
+                  <button className="share-item" onClick={() => exportSession('html')}>
+                    {t('agent.exportHtml')}
+                    <span className="share-hint">{t('agent.exportHtmlHint')}</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        <button className="btn ghost" onClick={onBack} title={t('agent.backToReadingHint')}>
+          {t('app.backToCode')}
         </button>
       </header>
 
@@ -147,29 +239,24 @@ export function AgentView({ projectId, projectName, onBack }: { projectId: strin
         <div className="ag-banner bad">
           <span>{error}</span>
           <button className="btn ghost small" onClick={() => setError(null)}>
-            知道了
+            {t('agent.gotIt')}
           </button>
         </div>
       )}
 
       {!hasSession ? (
         <div className="ag-empty">
-          <h3>这个项目还没有会话</h3>
-          <p className="ag-note">
-            agent 在工作目录里读代码、改代码、写代码；找「定义在哪 / 谁在调用」用的是这个阅读器自己的索引，
-            而不是 grep 猜。在左栏选好模型后点「新建会话」。
-          </p>
+          <h3>{t('agent.projectNoSessions')}</h3>
+          <p className="ag-note">{t('agent.emptyLead')}</p>
         </div>
       ) : !active ? (
         <div className="ag-empty">
-          <h3>在左栏选一个会话</h3>
+          <h3>{t('agent.pickSession')}</h3>
         </div>
       ) : (
         <div className="ag-chat">
           <div className="ag-stream" ref={scrollRef}>
-            {rows.length === 0 && (
-              <p className="ag-note">在下面说出你要做的事，例如「把 src/util.ts 的 helper 改成支持空值」。</p>
-            )}
+            {rows.length === 0 && <p className="ag-note">{t('agent.composeHint')}</p>}
             {rows.map((m, i) => (
               <MessageRow key={i} message={m} />
             ))}
@@ -180,7 +267,7 @@ export function AgentView({ projectId, projectName, onBack }: { projectId: strin
             <textarea
               className="ag-input"
               rows={3}
-              placeholder={busy ? 'agent 正在干活…' : 'Enter 发送，Shift+Enter 换行'}
+              placeholder={busy ? t('agent.busyPlaceholder') : t('agent.inputPlaceholder')}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -194,11 +281,11 @@ export function AgentView({ projectId, projectName, onBack }: { projectId: strin
               {active.lastError && <span className="ag-dim">{active.lastError}</span>}
               {busy && (
                 <button className="btn ghost" onClick={() => void stop()}>
-                  停止
+                  {t('agent.stop')}
                 </button>
               )}
               <button className="btn" disabled={!draft.trim() || !activeId} onClick={submit}>
-                发送
+                {t('agent.send')}
               </button>
             </div>
           </div>

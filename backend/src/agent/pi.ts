@@ -13,6 +13,8 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { piNotFoundMessage, piSpawnOptions, resolvePiRuntime, type PiRuntime } from './runtime';
+import { readAgentRuntimeConfig } from './runtime-config';
 import {
   type AdapterExit,
   type AdapterOptions,
@@ -128,22 +130,18 @@ export class PiAgent extends EventEmitter implements AgentAdapter {
 
   // ------------------------------------------------------------------ 内部
 
-  private spawn(): Promise<void> {
+  /**
+   * 起 pi：命令与参数都来自定位链（`runtime.ts`，FR-0007），参数本身仍是固定字面量。
+   * 定位链没落到真实文件时（PATH 兜底），起不来就用安装指引代替原始报错（D5）。
+   */
+  private async spawn(): Promise<void> {
+    const runtime = resolvePiRuntime(await readAgentRuntimeConfig(), ['--mode', 'rpc', '--no-session']);
     return new Promise((resolve, reject) => {
-      const args = ['--mode', 'rpc', '--no-session'];
       let child: ChildProcess;
       try {
-        // Windows 上 npm 全局装的是 `pi.cmd`（shim），交给 cmd.exe 解析；
-        // 命令与参数都是固定字面量，不经用户输入拼接。
-        child =
-          process.platform === 'win32'
-            ? spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `pi ${args.join(' ')}`], {
-                cwd: this.cwd,
-                windowsHide: true,
-              })
-            : spawn(process.env.READER_PI_COMMAND ?? 'pi', args, { cwd: this.cwd });
+        child = spawn(runtime.command, runtime.prefixArgs, piSpawnOptions(runtime, this.cwd));
       } catch (error) {
-        reject(new Error(`启动 pi 失败：${message(error)}`));
+        reject(new Error(startFailure(runtime, error)));
         return;
       }
       this.child = child;
@@ -153,12 +151,23 @@ export class PiAgent extends EventEmitter implements AgentAdapter {
       child.stderr?.on('data', (chunk: string) => this.note(chunk));
       child.once('spawn', () => resolve());
       child.once('error', (error) => {
-        this.failPending(message(error));
-        reject(new Error(`启动 pi 失败：${message(error)}`));
+        const detail = startFailure(runtime, error);
+        // 未解析到真实文件时，命令行的原话（Windows 上是 GBK 乱码）没有诊断价值，
+        // 还可能被 sessions 层拼到给用户看的指引后面 —— 这一支一律丢开。
+        if (!runtime.resolved) this.stderrLines.length = 0;
+        this.failPending(detail);
+        reject(new Error(detail));
       });
       child.once('exit', (code, signal) => {
-        const detail = this.stderrLines.slice(-3).join(' | ');
-        this.failPending(detail || `pi 进程已退出（code=${code ?? 'null'}）`);
+        // 没定位到真实文件（PATH 兜底）又立刻非 0 退出：几乎都是「压根没装」。
+        // 这里**不拼原始输出**：Windows 下 cmd 的报错是 GBK，按 utf8 读是一串问号，
+        // 拼上去只会污染给用户看的指引（原因已在指引第一句里说了）。
+        const detail =
+          !runtime.resolved && code !== 0
+            ? piNotFoundMessage()
+            : this.stderrLines.slice(-3).join(' | ') || `pi 进程已退出（code=${code ?? 'null'}）`;
+        if (!runtime.resolved) this.stderrLines.length = 0;
+        this.failPending(detail);
         const info: AdapterExit = {
           code,
           signal,
@@ -239,6 +248,14 @@ export class PiAgent extends EventEmitter implements AgentAdapter {
     if (this.stderrLines.length > MAX_STDERR_LINES * 2)
       this.stderrLines.splice(0, this.stderrLines.length - MAX_STDERR_LINES);
   }
+}
+
+/**
+ * 起不来时的说法：定位链没落到真实文件就给安装指引（D5），否则原样带上原因。
+ * 前者**不拼系统原话**：Windows 上多是 GBK 乱码，而「未找到」这个原因指引里已经说了。
+ */
+function startFailure(runtime: PiRuntime, error: unknown): string {
+  return runtime.resolved ? `启动 pi 失败：${message(error)}` : piNotFoundMessage();
 }
 
 /** pi 的 get_state → 适配层的 SessionState。 */
