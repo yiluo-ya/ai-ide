@@ -31,11 +31,15 @@ const USAGE = [
   '子命令：',
   '  wcr lang list                  列出已加载语言（含插件与加载失败）',
   '  wcr lang add <包名|目录>       安装语言包（重启后生效）',
+  '  wcr lang link <插件目录>       软链一个正在开发的插件目录（改完重启即生效）',
+  '  wcr lang new <语言 id> [目录]  生成插件项目骨架（默认 ./wcr-lang-<id>）',
   '  wcr lang remove <包名|语言 id> 卸载语言包（重启后生效）',
+  '  （语言插件标准见 docs/08-language-plugin-spec.md）',
   '',
   '示例：',
   '  wcr                          # 起服务并打开浏览器，之后在页面里填目录',
   '  wcr D:/code/my-project       # 起服务并直接注册打开该目录',
+  '  wcr lang new zig             # 生成一个语言插件项目骨架',
 ].join('\n');
 
 export interface CliArgs {
