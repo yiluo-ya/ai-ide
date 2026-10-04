@@ -6,7 +6,7 @@
  * - key 找不到时回落中文，再回落 key 本身（宁可显示 key，也不显示空白）；
  * - `{name}` 占位符由 params 替换，缺参保留原样（便于发现漏传）。
  */
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { loadPrefs, savePrefs, subscribePrefs, type Locale } from '../prefs';
 import { en } from './en';
 import { zh } from './zh';
@@ -30,12 +30,14 @@ export function setLocale(locale: Locale): void {
   savePrefs({ locale });
 }
 
-/** 组件里用：locale 变化会触发重渲染。 */
+/** 组件里用：locale 变化会触发重渲染；`t` / `setLocale` 引用稳定（可安全进 deps）。 */
 export function useI18n(): { locale: Locale; t: TFunc; setLocale: (locale: Locale) => void } {
   const locale = useSyncExternalStore(
     subscribePrefs,
     () => loadPrefs().locale,
     () => loadPrefs().locale,
   );
-  return { locale, setLocale, t: (key, params) => translate(key, params, locale) };
+  // t 必须缓存：否则每次渲染都是新函数，把它放进 deps 的 useCallback / useEffect 会全部失效
+  const t = useCallback<TFunc>((key, params) => translate(key, params, locale), [locale]);
+  return { locale, setLocale, t };
 }
