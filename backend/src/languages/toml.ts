@@ -12,6 +12,10 @@ export const toml: LanguageSpec = {
   id: 'toml',
   label: 'TOML',
   extensions: ['.toml'],
+  monaco: 'ini', // Monaco 没有 TOML 语法，用最接近的 ini（与前端原映射一致）
+  fence: 'toml',
+  color: '#9c4221',
+  commentPrefixes: ['#'],
   grammar: Toml,
 
   scopes: {},

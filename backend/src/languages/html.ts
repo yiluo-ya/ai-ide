@@ -29,6 +29,9 @@ export const html: LanguageSpec = {
   id: 'html',
   label: 'HTML',
   extensions: ['.html', '.htm'],
+  monaco: 'html',
+  fence: 'html',
+  color: '#e34c26',
   grammar: Html,
 
   scopes: {},

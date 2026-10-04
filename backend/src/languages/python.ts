@@ -136,6 +136,16 @@ export const python: LanguageSpec = {
   id: 'python',
   label: 'Python',
   extensions: ['.py'],
+  monaco: 'python',
+  fence: 'python',
+  color: '#3572a5',
+  refs: true,
+  commentPrefixes: ['#'],
+  signatureStyle: 'colon',
+  signatureColon: true,
+  entryPatterns: [
+    { res: [/__name__\s*==\s*['"]__main__['"]/], reason: 'Python 的 __main__ 块' },
+  ],
   grammar: Python,
 
   scopes: {

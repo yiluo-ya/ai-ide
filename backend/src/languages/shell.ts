@@ -21,6 +21,11 @@ export const shell: LanguageSpec = {
   id: 'shell',
   label: 'Shell',
   extensions: ['.sh', '.bash', '.zsh'],
+  monaco: 'shell',
+  fence: 'bash',
+  color: '#89e051',
+  refs: true,
+  commentPrefixes: ['#'],
   grammar: Bash,
 
   scopes: {

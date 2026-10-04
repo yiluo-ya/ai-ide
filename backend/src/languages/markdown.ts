@@ -28,6 +28,10 @@ export const markdown: LanguageSpec = {
   id: 'markdown',
   label: 'Markdown',
   extensions: ['.md', '.markdown'],
+  monaco: 'markdown',
+  fence: 'markdown',
+  color: '#519aba',
+  doc: true,
   grammar: Markdown,
 
   scopes: {},

@@ -439,6 +439,9 @@ export const rust: LanguageSpec = {
   id: 'rust',
   label: 'Rust',
   extensions: ['.rs'],
+  monaco: 'rust',
+  fence: 'rust',
+  commentPrefixes: ['//', '/*', '*', '*/'],
   grammar: Rust,
 
   scopes: {

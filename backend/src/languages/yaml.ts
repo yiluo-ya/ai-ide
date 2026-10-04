@@ -25,6 +25,10 @@ export const yaml: LanguageSpec = {
   id: 'yaml',
   label: 'YAML',
   extensions: ['.yml', '.yaml'],
+  monaco: 'yaml',
+  fence: 'yaml',
+  color: '#cb171e',
+  commentPrefixes: ['#'],
   grammar: Yaml,
 
   scopes: {},

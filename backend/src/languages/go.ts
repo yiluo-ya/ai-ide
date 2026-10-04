@@ -86,6 +86,15 @@ export const go: LanguageSpec = {
   id: 'go',
   label: 'Go',
   extensions: ['.go'],
+  monaco: 'go',
+  fence: 'go',
+  color: '#00add8',
+  refs: true,
+  commentPrefixes: ['//', '/*', '*', '*/'],
+  signatureStyle: 'go',
+  entryPatterns: [
+    { res: [/^\s*package\s+main\b/m, /func\s+main\s*\(/], reason: 'Go 的 main 包' },
+  ],
   grammar: Go,
 
   scopes: {

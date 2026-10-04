@@ -140,6 +140,13 @@ export const java: LanguageSpec = {
   id: 'java',
   label: 'Java',
   extensions: ['.java'],
+  monaco: 'java',
+  fence: 'java',
+  color: '#b07219',
+  refs: true,
+  commentPrefixes: ['//', '/*', '*', '*/'],
+  signatureStyle: 'java',
+  entryPatterns: [{ res: [/static\s+void\s+main\s*\(/], reason: 'Java 的 main 方法' }],
   grammar: Java,
 
   scopes: {

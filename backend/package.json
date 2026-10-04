@@ -9,7 +9,7 @@
     "start": "tsx src/server.ts",
     "cli": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test --test-force-exit --test-timeout=20000 tests/*.test.ts",
+    "test": "tsx --test --import ./tests/setup.ts --test-force-exit --test-timeout=20000 tests/*.test.ts",
     "bench": "tsx bench/bench.ts"
   },
   "dependencies": {

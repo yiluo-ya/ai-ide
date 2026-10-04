@@ -18,11 +18,17 @@ function defineNamed(node: any, childType: string, ctx: WalkContext, kind: 'clas
 }
 
 /** id 选择器不算「函数」，用 constant 表达「全局唯一的名字」。 */
-function makeCss(id: LangId, label: string, extensions: string[]): LanguageSpec {
+function makeCss(
+  id: LangId,
+  label: string,
+  extensions: string[],
+  meta: Partial<LanguageSpec>,
+): LanguageSpec {
   return {
     id,
     label,
     extensions,
+    ...meta,
     grammar: Css,
 
     scopes: {},
@@ -51,6 +57,6 @@ function makeCss(id: LangId, label: string, extensions: string[]): LanguageSpec 
   };
 }
 
-export const css = makeCss('css', 'CSS', ['.css']);
-export const scss = makeCss('scss', 'SCSS', ['.scss']);
-export const less = makeCss('less', 'Less', ['.less']);
+export const css = makeCss('css', 'CSS', ['.css'], { monaco: 'css', fence: 'css', color: '#563d7c' });
+export const scss = makeCss('scss', 'SCSS', ['.scss'], { monaco: 'scss', fence: 'scss', color: '#c6538c' });
+export const less = makeCss('less', 'Less', ['.less'], { monaco: 'less', fence: 'less', color: '#2e5c99' });

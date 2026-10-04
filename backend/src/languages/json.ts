@@ -12,6 +12,9 @@ export const json: LanguageSpec = {
   id: 'json',
   label: 'JSON',
   extensions: ['.json', '.jsonc'],
+  monaco: 'json',
+  fence: 'json',
+  color: '#8b949e',
   grammar: Json,
 
   scopes: {},

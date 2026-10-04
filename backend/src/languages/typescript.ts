@@ -371,11 +371,13 @@ function makeTsSpec(
   label: string,
   grammar: unknown,
   extensions: string[],
+  meta: Partial<LanguageSpec>,
 ): LanguageSpec {
   return {
     id,
     label,
     extensions,
+    ...meta,
     grammar,
 
     scopes: {
@@ -652,14 +654,45 @@ function makeTsSpec(
 }
 
 export function makeTsLanguages(): LanguageSpec[] {
+  /** 四种 TS/JS 方言共用同一套注释前缀（L10 密度统计）。 */
+  const jsComment = ['//', '/*', '*', '*/'];
   const typescript = makeTsSpec(
     'typescript',
     'TypeScript',
     TypeScript.typescript,
     ['.ts', '.d.ts', '.mts', '.cts'],
+    {
+      monaco: 'typescript',
+      fence: 'ts',
+      color: '#3178c6',
+      refs: true,
+      commentPrefixes: jsComment,
+      signatureStyle: 'colon',
+    },
   );
-  const tsx = makeTsSpec('tsx', 'TypeScript JSX', TypeScript.tsx, ['.tsx']);
-  const javascript = makeTsSpec('javascript', 'JavaScript', JavaScript, ['.js', '.mjs', '.cjs']);
-  const jsx = makeTsSpec('jsx', 'JavaScript JSX', TypeScript.tsx, ['.jsx']);
+  const tsx = makeTsSpec('tsx', 'TypeScript JSX', TypeScript.tsx, ['.tsx'], {
+    monaco: 'typescript',
+    fence: 'tsx',
+    color: '#3178c6',
+    refs: true,
+    commentPrefixes: jsComment,
+    signatureStyle: 'colon',
+  });
+  const javascript = makeTsSpec('javascript', 'JavaScript', JavaScript, ['.js', '.mjs', '.cjs'], {
+    monaco: 'javascript',
+    fence: 'js',
+    color: '#f1e05a',
+    refs: true,
+    commentPrefixes: jsComment,
+    signatureStyle: 'colon',
+  });
+  const jsx = makeTsSpec('jsx', 'JavaScript JSX', TypeScript.tsx, ['.jsx'], {
+    monaco: 'javascript',
+    fence: 'jsx',
+    color: '#f1e05a',
+    refs: true,
+    commentPrefixes: jsComment,
+    signatureStyle: 'colon',
+  });
   return [typescript, tsx, javascript, jsx];
 }
