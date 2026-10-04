@@ -166,3 +166,8 @@ wcr lang remove wcr-lang-zig             # 卸掉（也可以用语言 id）
   [04 向导](docs/04-guide.md) · [05 分享与导出](docs/05-share.md) · [06 底座与交付](docs/06-platform.md)
 - 语言插件：[07 方案](docs/07-languages-plugin-plan.md) · [08 标准（十项能力）](docs/08-language-plugin-spec.md)
 - 需求见 `FR/`；各主题的 `*-plan.md` / `*-decisions.md` / `*-verify.md` 是决策与验收过程文档。
+
+
+## 许可证
+
+基于 [MIT](LICENSE) 许可发布，© 2026 yiluo-ya

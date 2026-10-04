@@ -185,3 +185,8 @@ Full list (with the boundaries and measured basis of each item) in
 - Language plugins: [07 plan](docs/07-languages-plugin-plan.md) · [08 spec (ten capabilities)](docs/08-language-plugin-spec.md)
 - The topic docs are written in Chinese (the project's primary language); `*-plan.md` /
   `*-decisions.md` / `*-verify.md` are decision and acceptance records. Requirements live in `FR/`.
+
+
+## License
+
+Released under the [MIT License](LICENSE). © 2026 yiluo-ya
