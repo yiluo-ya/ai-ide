@@ -141,9 +141,9 @@ export function FolderBrowser({ initialPath, onClose, onPick }: Props) {
     async (real: string, depth = 0): Promise<string> => {
       const hit = realOf.current.get(real);
       if (hit !== undefined) return hit;
-      if (depth > 40) throw new Error('路径层级过深');
+      if (depth > 40) throw new Error(t('folderBrowser.tooDeep'));
       const res = await api.fsDirs(real);
-      if (!res.path) throw new Error('无法解析该路径');
+      if (!res.path) throw new Error(t('folderBrowser.unresolved'));
       const abs = res.path;
       const known = realOf.current.get(abs);
       if (known !== undefined) return known;

@@ -4,6 +4,8 @@
  *
  * 这里只做纯格式化（无副作用、可单测）；写剪贴板与轻提示在 state 的动作里。
  */
+import { fenceLang as fenceLangOf } from './languages';
+
 /** 位置的最小形态：`path:line:col`（README「位置契约」，1-based）。 */
 export function formatLocation(file: string, line: number, col: number): string {
   return `${file}:${line}:${col}`;
@@ -14,31 +16,12 @@ export function formatLineRange(file: string, startLine: number, endLine: number
   return startLine === endLine ? `${file}:${startLine}` : `${file}:${startLine}-${endLine}`;
 }
 
-/** Monaco 语言 id → Markdown 代码围栏标记；不认识的语言不标（交给 Markdown 自己猜）。 */
+/**
+ * 语言 id → Markdown 代码围栏标记；不认识的语言不标（交给 Markdown 自己猜）。
+ * 映射来自后端下发的语言元数据（07-languages-plugin，见 languages.ts）。
+ */
 export function fenceLang(lang: string): string {
-  const map: Record<string, string> = {
-    python: 'python',
-    typescript: 'ts',
-    tsx: 'tsx',
-    javascript: 'js',
-    jsx: 'jsx',
-    go: 'go',
-    java: 'java',
-    rust: 'rust',
-    shell: 'bash',
-    json: 'json',
-    yaml: 'yaml',
-    toml: 'toml',
-    ini: 'ini',
-    dockerfile: 'dockerfile',
-    markdown: 'markdown',
-    css: 'css',
-    scss: 'scss',
-    less: 'less',
-    html: 'html',
-    sql: 'sql',
-  };
-  return map[lang] ?? '';
+  return fenceLangOf(lang);
 }
 
 export interface SnippetInput {

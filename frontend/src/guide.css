@@ -17,21 +17,21 @@
   border: 1px solid var(--notice-border);
   background: var(--notice-bg);
   color: var(--fg);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   padding: 6px 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .guide-section {
   border: 1px solid var(--border);
   background: var(--bg-2);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   padding: 8px 10px;
 }
 
 .guide-section h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 
@@ -49,12 +49,12 @@
 
 .guide-muted {
   color: var(--fg-dim);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .guide-empty {
   color: var(--fg-dim);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: 6px 2px;
 }
 
@@ -83,7 +83,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   padding: 2px 4px;
   min-width: 0;
 }
@@ -101,7 +101,7 @@
   flex: none;
   text-align: right;
   color: var(--fg-dim);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -121,7 +121,7 @@
 }
 
 .guide-step-file {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -134,7 +134,7 @@
 
 /* 行级指引：这一步的入口在哪一行、先看哪几个符号 */
 .guide-step-hints {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--accent-2);
   max-width: 100%;
   overflow: hidden;
@@ -147,7 +147,7 @@
 }
 
 .guide-step-reason {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--fg-dim);
   max-width: 100%;
   overflow: hidden;
@@ -157,7 +157,7 @@
 
 .guide-step-state {
   flex: none;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--fg-dim);
 }
 
@@ -171,7 +171,7 @@
 
 .guide-step-here {
   flex: none;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--code-ref);
 }
 
@@ -193,7 +193,7 @@
 /* ---------------------------------------------------------------- 进度 / 待读 */
 
 .guide-progress {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg);
 }
 
@@ -224,14 +224,14 @@
 }
 
 .guide-queue-file {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .guide-queue-note {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--fg-dim);
   max-width: 40%;
   overflow: hidden;
@@ -258,7 +258,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-dim);
 }
 
@@ -268,7 +268,7 @@
   border: none;
   padding: 0;
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .guide-start-step:hover {
@@ -312,7 +312,7 @@
   color: var(--fg);
   cursor: pointer;
   text-align: left;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .summary-toggle:hover {
@@ -346,7 +346,7 @@
 }
 
 .summary-block-head {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-dim);
   margin-bottom: 4px;
 }
@@ -366,7 +366,7 @@
   color: var(--chip-fg);
   border-radius: 10px;
   padding: 1px 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -377,7 +377,7 @@
 
 .summary-chip-kind {
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .summary-inbound {
@@ -391,7 +391,7 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .summary-inbound:hover .summary-inbound-file {
@@ -406,7 +406,7 @@
 }
 
 .summary-note {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-dim);
 }
 
@@ -451,10 +451,10 @@
   flex-direction: column;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: var(--bg-2);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   box-shadow: 0 6px 20px rgb(0 0 0 / 30%);
 }
 
@@ -471,7 +471,7 @@
 .tree-menu button {
   padding: 4px 6px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: none;
   color: inherit;
   font: inherit;
@@ -492,7 +492,7 @@
   height: 16px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   background: none;
   color: var(--fg-dim);
   line-height: 1;
@@ -524,7 +524,7 @@
   gap: 6px;
   padding: 1px 6px;
   border: 1px solid var(--warn);
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   background: var(--bg-2);
   color: var(--warn);
 }
@@ -532,7 +532,7 @@
 .summary-stale-btn {
   padding: 0 6px;
   border: 1px solid var(--warn);
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   background: none;
   color: var(--warn);
   font: inherit;
@@ -552,7 +552,7 @@
   min-height: 0;
   background: var(--bg-2);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
@@ -575,7 +575,7 @@
 .ex-static-note {
   padding: 1px 6px;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   color: var(--fg-dim);
 }
 
@@ -620,7 +620,7 @@
   align-items: baseline;
   gap: 6px;
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -643,11 +643,11 @@
   margin: 6px 0 0;
   padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: var(--bg);
   color: var(--fg-dim);
-  font-family: var(--mono, monospace);
-  font-size: 11px;
+  font-family: var(--mono-font);
+  font-size: var(--fs-xs);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -659,7 +659,7 @@
   width: 100%;
   padding: 2px 8px;
   border: none;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   background: none;
   color: inherit;
   font: inherit;
@@ -692,7 +692,7 @@
   flex: none;
   padding: 0 4px;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   color: var(--fg-dim);
 }
 
@@ -740,7 +740,7 @@
 .nav-act {
   padding: 3px 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: none;
   color: var(--fg);
   font: inherit;

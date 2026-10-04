@@ -11,18 +11,20 @@
 import { create } from 'zustand';
 import type { GitChangeEntry, GitChangesResult, GitWriteAction } from '../../shared/types';
 import { api } from './api';
+import { translate } from './i18n';
 import { showToast } from './state';
 
 /**
- * 变更状态 → 徽标元信息（中文短标签 + 配色档 + 悬浮说明）。
+ * 变更状态 → 徽标元信息（配色档 + 悬浮说明）。
+ * label / hint 存的是 i18n key，由 statusMeta() 现取现翻（本模块不在渲染路径里，用纯函数）。
  * 没有「未跟踪」一档：git 不列被忽略的文件，剩下的未跟踪文件就是新增。
  */
 export const STATUS_META: Record<GitChangeEntry['status'], { label: string; cls: string; hint: string }> = {
-  modified: { label: '修改', cls: 'mod', hint: '已修改（未提交）' },
-  added: { label: '新增', cls: 'add', hint: '新增（未提交的新文件 / 已暂存）' },
-  deleted: { label: '删除', cls: 'del', hint: '已删除' },
-  renamed: { label: '重命名', cls: 'ren', hint: '重命名' },
-  conflicted: { label: '冲突', cls: 'conflict', hint: '冲突（需要解决）' },
+  modified: { label: 'changes.status.M', cls: 'mod', hint: 'changes.hintModified' },
+  added: { label: 'changes.status.A', cls: 'add', hint: 'changes.hintAdded' },
+  deleted: { label: 'changes.status.D', cls: 'del', hint: 'changes.hintDeleted' },
+  renamed: { label: 'changes.status.R', cls: 'ren', hint: 'changes.hintRenamed' },
+  conflicted: { label: 'changes.status.C', cls: 'conflict', hint: 'changes.hintConflicted' },
 };
 
 /**
@@ -32,7 +34,8 @@ export const STATUS_META: Record<GitChangeEntry['status'], { label: string; cls:
  * 未知档位一律按「新增」显示：没被忽略的未跟踪文件本来就是新增。
  */
 export function statusMeta(status: GitChangeEntry['status']): { label: string; cls: string; hint: string } {
-  return STATUS_META[status] ?? STATUS_META.added;
+  const meta = STATUS_META[status] ?? STATUS_META.added;
+  return { label: translate(meta.label), cls: meta.cls, hint: translate(meta.hint) };
 }
 
 interface ChangesState {

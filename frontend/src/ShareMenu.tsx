@@ -20,6 +20,7 @@ import {
 import { formatLineRange, formatSnippet } from './share';
 import { copyCanvasPng, exportCanvasPng, renderCodeSnapshot, type SnapshotHit } from './snapshot';
 import { showFlash, useStore } from './state';
+import { useI18n } from './i18n';
 import './share.css';
 import './print.css';
 
@@ -69,6 +70,7 @@ function visibleRange(): { startLine: number; endLine: number } | null {
 
 export function ShareMenu({ cursor, searchQuery }: Props) {
   const store = useStore();
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -126,7 +128,7 @@ export function ShareMenu({ cursor, searchQuery }: Props) {
 
   const copyDeepLink = async () => {
     const link = deepLink(cursor.line, cursor.col);
-    say((await copyText(link)) ? `已复制链接（含第 ${cursor.line} 行）` : '复制失败：浏览器拒绝了剪贴板');
+    say((await copyText(link)) ? t('share.copiedDeepLink', { line: cursor.line }) : t('share.copyFailed'));
   };
 
   /** S3a 的取选区分支：菜单里也能复制选中段（右键菜单之外的第二个入口）。 */
@@ -151,7 +153,7 @@ export function ShareMenu({ cursor, searchQuery }: Props) {
     const sel = editor?.getSelection?.();
     const model = editor?.getModel?.();
     if (!file || !sel || !model?.getValueInRange || sel.isEmpty?.()) {
-      say('当前没有选中的代码');
+      say(t('share.noSelection'));
       return;
     }
     const text = model.getValueInRange(sel);
@@ -162,7 +164,7 @@ export function ShareMenu({ cursor, searchQuery }: Props) {
       endLine: sel.endLineNumber,
       text,
     });
-    say((await copyText(snippet)) ? `已复制片段 ${formatLineRange(file, sel.startLineNumber, sel.endLineNumber)}` : '复制失败：浏览器拒绝了剪贴板');
+    say((await copyText(snippet)) ? t('share.copiedSnippet', { range: formatLineRange(file, sel.startLineNumber, sel.endLineNumber) }) : t('share.copyFailed'));
   };
 
   const loadHighlights = async (): Promise<HighlightItem[]> => {
@@ -180,7 +182,7 @@ export function ShareMenu({ cursor, searchQuery }: Props) {
     setBusy(true);
     const highlights = await loadHighlights();
     const md = fileReportMarkdown({
-      projectName: store.project?.name ?? '项目',
+      projectName: store.project?.name ?? t('share.projectFallback'),
       projectRoot: store.project?.root,
       file,
       lang: store.fileLang,
@@ -190,22 +192,22 @@ export function ShareMenu({ cursor, searchQuery }: Props) {
     });
     downloadText(reportFilename({ project: store.project?.name, kind: 'file', file }), md);
     setBusy(false);
-    say('已导出当前文件的 Markdown 报告');
+    say(t('share.exportedFileReport'));
   };
 
   /** S4b-2：搜索结果报告。 */
   const exportSearchReport = async () => {
     if (!store.searchHits.length) {
-      say('搜索面板还没有结果，先搜一次');
+      say(t('share.noSearchResults'));
       return;
     }
     const md = searchReportMarkdown({
-      projectName: store.project?.name ?? '项目',
+      projectName: store.project?.name ?? t('share.projectFallback'),
       query: searchQuery,
       hits: store.searchHits,
     });
     downloadText(reportFilename({ project: store.project?.name, kind: 'search', query: searchQuery }), md);
-    say(`已导出搜索报告（${store.searchHits.length} 个文件）`);
+    say(t('share.exportedSearchReport', { n: store.searchHits.length }));
   };
 
   /** S4b-3：项目概览报告（拿不到就现拉一次）。 */
@@ -214,13 +216,13 @@ export function ShareMenu({ cursor, searchQuery }: Props) {
     setBusy(true);
     const data = await mapApi.overview(projectId, { hot: 'files', denoise: true }).catch(() => null);
     const md = overviewReportMarkdown({
-      projectName: store.project?.name ?? '项目',
+      projectName: store.project?.name ?? t('share.projectFallback'),
       root: store.project?.root,
       overview: data ?? {},
     });
     downloadText(reportFilename({ project: store.project?.name, kind: 'overview' }), md);
     setBusy(false);
-    say(data ? '已导出项目概览报告' : '索引未就绪，已导出可得的部分');
+    say(data ? t('share.exportedOverview') : t('share.exportedOverviewPartial'));
   };
 
   /** S4a：把可见范围内的代码画成 PNG（自绘 canvas，零依赖）。 */
@@ -250,11 +252,11 @@ export function ShareMenu({ cursor, searchQuery }: Props) {
     const name = `code-${(file.split('/').pop() ?? 'snippet').replace(/[^\w.-]+/g, '-')}-${start}-${end}.png`;
     if (toClipboard) {
       const ok = await copyCanvasPng(canvas);
-      say(ok ? '截图已复制到剪贴板' : '复制图片被浏览器拒绝，已改为下载');
+      say(ok ? t('share.screenshotCopied') : t('share.screenshotCopyDenied'));
       if (!ok) await exportCanvasPng(canvas, name);
     } else {
       await exportCanvasPng(canvas, name);
-      say(`已导出截图 ${start}-${end} 行`);
+      say(t('share.exportedScreenshot', { start, end }));
     }
     setBusy(false);
   };
@@ -270,7 +272,7 @@ export function ShareMenu({ cursor, searchQuery }: Props) {
 
   const copyAgentTools = async () => {
     const url = `${window.location.origin}/api/agent/tools`;
-    say((await copyText(url)) ? '已复制 agent 工具清单地址' : '复制失败：浏览器拒绝了剪贴板');
+    say((await copyText(url)) ? t('share.copiedAgentTools') : t('share.copyFailed'));
   };
 
   return (
@@ -279,72 +281,72 @@ export function ShareMenu({ cursor, searchQuery }: Props) {
         ref={btnRef}
         className="btn ghost"
         onClick={() => setOpen((v) => !v)}
-        title="信使：把位置 / 片段 / 理解 / 交付物带得走"
+        title={t('share.buttonTitle')}
         aria-expanded={open}
         aria-haspopup="true"
       >
-        分享 ▾
+        {t('share.button')}
       </button>
 
       {open && (
         <>
           <div className="share-backdrop" onClick={() => close(false)} />
           <div className="share-menu" ref={menuRef} tabIndex={-1}>
-            <div className="share-section">带得走</div>
+            <div className="share-section">{t('share.sectionPortable')}</div>
             <button className="share-item" onClick={() => void copyDeepLink()}>
-              复制分享链接（含行号）
-              <span className="share-hint">同事 / 未来的我打开就落在同一行</span>
+              {t('share.copyDeepLink')}
+              <span className="share-hint">{t('share.copyDeepLinkHint')}</span>
             </button>
             <button className="share-item" onClick={() => void copySelection()}>
-              复制选中代码（带出处）
-              <span className="share-hint">出处行 + 围栏代码块，贴进聊天窗即可讨论</span>
+              {t('share.copySelection')}
+              <span className="share-hint">{t('share.copySelectionHint')}</span>
             </button>
 
-            <div className="share-section">导出（脱离阅读器也能读）</div>
+            <div className="share-section">{t('share.sectionExport')}</div>
             <button className="share-item" disabled={!file || busy} onClick={() => void exportFileReport()}>
-              Markdown：当前文件
-              <span className="share-hint">大纲 + 带行号正文 + 着色结论 + 批注</span>
+              {t('share.mdFile')}
+              <span className="share-hint">{t('share.mdFileHint')}</span>
             </button>
             <button className="share-item" disabled={!store.searchHits.length || busy} onClick={() => void exportSearchReport()}>
-              Markdown：当前搜索结果
-              <span className="share-hint">按文件分组，位置是 path:line:col</span>
+              {t('share.mdSearch')}
+              <span className="share-hint">{t('share.mdSearchHint')}</span>
             </button>
             <button className="share-item" disabled={!projectId || busy} onClick={() => void exportOverviewReport()}>
-              Markdown：项目概览
-              <span className="share-hint">规模 / 从哪看起 / 热点 / 孤立 / 环 / 最近改动</span>
+              {t('share.mdOverview')}
+              <span className="share-hint">{t('share.mdOverviewHint')}</span>
             </button>
             <button className="share-item" disabled={!file || busy} onClick={() => void exportScreenshot(false)}>
-              截图 PNG（当前可见范围）
-              <span className="share-hint">保留语法色与着色档位，底部带出处</span>
+              {t('share.screenshot')}
+              <span className="share-hint">{t('share.screenshotHint')}</span>
             </button>
             <button className="share-item" disabled={!file || busy} onClick={() => void exportScreenshot(true)}>
-              截图并复制到剪贴板
-              <span className="share-hint">贴进 PR / 设计文档最直接</span>
+              {t('share.screenshotClipboard')}
+              <span className="share-hint">{t('share.screenshotClipboardHint')}</span>
             </button>
             <button className="share-item" onClick={printView}>
-              打印 / 存 PDF
-              <span className="share-hint">打印视图只留代码与页眉，页眉带 path:line 与项目名</span>
+              {t('share.print')}
+              <span className="share-hint">{t('share.printHint')}</span>
             </button>
 
-            <div className="share-section">分享给同事（同一台机器 / 同一目录）</div>
+            <div className="share-section">{t('share.sectionColleague')}</div>
             <div className="share-note">
               {share?.shareHint ? (
-                <>可访问地址：<code>{share.shareHint}</code></>
+                <>{t('share.reachableAt')}<code>{share.shareHint}</code></>
               ) : (
-                <>当前只在 <code>{share?.host ?? '127.0.0.1'}</code> 监听，只能同机打开。要给别人，用 <code>HOST=0.0.0.0</code> 启动，再用 <code>READER_CORS_ORIGIN</code> 收紧来源。</>
+                <>{t('share.localOnlyA')}<code>{share?.host ?? '127.0.0.1'}</code>{t('share.localOnlyB')}<code>HOST=0.0.0.0</code>{t('share.localOnlyC')}<code>READER_CORS_ORIGIN</code>{t('share.localOnlyD')}</>
               )}
             </div>
-            <button className="share-item" onClick={() => void copyText(deepLink(cursor.line, cursor.col)).then((ok) => say(ok ? '已复制链接' : '复制失败'))}>
-              复制链接（发给同事）
+            <button className="share-item" onClick={() => void copyText(deepLink(cursor.line, cursor.col)).then((ok) => say(ok ? t('share.copiedLink') : t('share.copyFailedShort')))}>
+              {t('share.copyLinkToColleague')}
             </button>
 
-            <div className="share-section">给 agent 用（只读，替代 grep 猜）</div>
+            <div className="share-section">{t('share.sectionAgent')}</div>
             <div className="share-note">
-              工具清单：<code>/api/agent/tools</code> —— find_symbol / goto_definition / find_references / file_outline / search_text / read_file / list_projects / index_project。
-              解析不出的位置如实返回 <code>unresolved</code>，不编造答案。
+              {t('share.agentToolsLabel')}<code>/api/agent/tools</code>{t('share.agentToolsList')}
+              {t('share.agentUnresolvedA')}<code>unresolved</code>{t('share.agentUnresolvedB')}
             </div>
             <button className="share-item" onClick={() => void copyAgentTools()}>
-              复制 agent 工具清单地址
+              {t('share.copyAgentTools')}
             </button>
 
             {note && <div className="share-flash">{note}</div>}
@@ -355,9 +357,9 @@ export function ShareMenu({ cursor, searchQuery }: Props) {
       {/* S4c：只在打印时出现 —— 不带这个页眉，打印出来的纸没人知道是哪份代码 */
       }
       <div className="wcr-print-header">
-        <div className="wcr-print-title">{file ?? '（未打开文件）'}</div>
+        <div className="wcr-print-title">{file ?? t('share.noFile')}</div>
         <div className="wcr-print-meta">
-          {store.project?.name ?? ''} · {projectId ? '只读阅读器' : ''} · 行 {cursor.line}
+          {store.project?.name ?? ''} · {projectId ? t('share.readonlyReader') : ''} · {t('share.printLine', { line: cursor.line })}
         </div>
       </div>
     </div>

@@ -3,13 +3,13 @@
 .file-search {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 0 8px 4px;
+  gap: 6px;
+  padding: 0 8px 6px;
 }
 
 .fs-result {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   max-height: 40vh;
   overflow: auto;
 }
@@ -19,9 +19,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 6px 8px;
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
   border-bottom: 1px solid var(--border);
 }
 
@@ -30,9 +31,9 @@
 }
 
 .fs-file-name {
-  padding: 3px 8px;
-  font-size: 11px;
+  padding: 4px 8px;
   color: var(--hl-project);
+  font-size: var(--fs-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -45,15 +46,17 @@
 
 .fs-hit {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
   width: 100%;
+  min-height: var(--row-height);
   padding: 2px 8px 2px 14px;
   border: 0;
   background: transparent;
   color: var(--fg);
   text-align: left;
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -63,8 +66,9 @@
 
 .fs-line {
   flex: none;
-  min-width: 28px;
+  min-width: 30px;
   color: var(--fg-dim);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
 

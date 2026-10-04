@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FileNode, SymbolInfo } from './api';
 import { api } from './api';
 import { KindIcon } from './SidePanel';
+import { useI18n } from './i18n';
 
 export type QuickOpenMode = 'file' | 'symbol' | null;
 
@@ -43,6 +44,7 @@ function score(text: string, query: string): number {
 }
 
 export function QuickOpen({ mode, projectId, tree, recent = [], onClose, onOpenFile }: Props) {
+  const { t } = useI18n();
   const [query, setQuery] = useState('');
   const [symbols, setSymbols] = useState<SymbolInfo[]>([]);
   const [kind, setKind] = useState('');
@@ -141,9 +143,9 @@ export function QuickOpen({ mode, projectId, tree, recent = [], onClose, onOpenF
           placeholder={
             mode === 'file'
               ? recent.length
-                ? '按文件名搜索（Ctrl/Cmd+P）· 空查询显示最近打开'
-                : '按文件名搜索（Ctrl/Cmd+P）'
-              : '按符号名搜索（Ctrl/Cmd+T）'
+                ? t('quickopen.placeholderFileRecent')
+                : t('quickopen.placeholderFile')
+              : t('quickopen.placeholderSymbol')
           }
           value={query}
           onChange={(e) => {
@@ -156,7 +158,7 @@ export function QuickOpen({ mode, projectId, tree, recent = [], onClose, onOpenF
           {mode === 'symbol' && (
             <>
               <select className="ov-select" value={kind} onChange={(e) => setKind(e.target.value)}>
-                <option value="">全部类型</option>
+                <option value="">{t('quickopen.allKinds')}</option>
                 {['function', 'method', 'class', 'interface', 'variable', 'constant', 'type'].map((k) => (
                   <option key={k} value={k}>
                     {k}
@@ -165,13 +167,13 @@ export function QuickOpen({ mode, projectId, tree, recent = [], onClose, onOpenF
               </select>
               <label className="quickopen-toggle">
                 <input type="checkbox" checked={hideTests} onChange={(e) => setHideTests(e.target.checked)} />
-                只看非测试
+                {t('quickopen.onlyNonTest')}
               </label>
             </>
           )}
         </div>
         <div className="quickopen-list">
-          {results.length === 0 && <div className="quickopen-empty">无匹配结果</div>}
+          {results.length === 0 && <div className="quickopen-empty">{t('quickopen.empty')}</div>}
           {mode === 'file'
             ? fileResults.map((f, i) => (
                 <div
@@ -181,7 +183,7 @@ export function QuickOpen({ mode, projectId, tree, recent = [], onClose, onOpenF
                   onClick={() => pick(i)}
                 >
                   <span className="quickopen-name">{f.split('/').pop()}</span>
-                  {!query.trim() && recent.includes(f) && <span className="refs-badge">最近</span>}
+                  {!query.trim() && recent.includes(f) && <span className="refs-badge">{t('quickopen.recent')}</span>}
                   <span className="quickopen-path">{f}</span>
                 </div>
               ))
@@ -194,7 +196,7 @@ export function QuickOpen({ mode, projectId, tree, recent = [], onClose, onOpenF
                 >
                   <KindIcon kind={s.kind} />
                   <span className="quickopen-name">{s.name}</span>
-                  {s.isTest && <span className="refs-badge">测试</span>}
+                  {s.isTest && <span className="refs-badge">{t('quickopen.test')}</span>}
                   <span className="quickopen-path">
                     {s.location.file}:{s.location.range.start.line}
                     {s.containerName ? ` · ${s.containerName}` : ''}

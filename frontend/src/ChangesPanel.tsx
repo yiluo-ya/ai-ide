@@ -21,11 +21,12 @@ import { useMemo, useState } from 'react';
 import type { GitChangeEntry } from '../../shared/types';
 import { statusMeta, useChangesStore } from './changesState';
 import { Dialog } from './Dialog';
+import { translate, useI18n } from './i18n';
 import './changes.css';
 
 /** 行数增减：拿不到数字（未跟踪 / 二进制）就不显示，不写 +0 -0。 */
 function deltaText(entry: GitChangeEntry): string {
-  if (entry.binary) return '二进制';
+  if (entry.binary) return translate('changes.binary');
   if (entry.added == null || entry.removed == null) return '';
   return entry.removed === 0 ? `+${entry.added}` : `+${entry.added} -${entry.removed}`;
 }
@@ -89,6 +90,7 @@ function FileRow({
   onOpenDiff: (file: string) => void;
   onOpenFile: (file: string) => void;
 }) {
+  const { t } = useI18n();
   const shown = full ? entry.file : (entry.file.split('/').pop() ?? entry.file);
   // statusMeta 自带兜底：未知状态（例如旧后端还在发的 untracked）按「新增」显示，不会白屏
   const st = statusMeta(entry.status);
@@ -101,7 +103,9 @@ function FileRow({
       <button
         className="changes-file"
         style={{ paddingLeft: indent * 12 }}
-        title={`${entry.file}${entry.from ? `（原 ${entry.from}）` : ''} — 打开`}
+        title={t('changesPanel.fileOpenTitle', {
+          file: entry.from ? `${entry.file}${t('changesPanel.originalFrom', { from: entry.from })}` : entry.file,
+        })}
         onClick={() => onOpenFile(entry.file)}
       >
         {shown}
@@ -109,7 +113,7 @@ function FileRow({
       {delta ? (
         <button
           className="changes-delta changes-delta-btn"
-          title={`${entry.file} — 看差异（git diff）`}
+          title={t('changesPanel.fileDiffTitle', { file: entry.file })}
           onClick={() => onOpenDiff(entry.file)}
         >
           {delta}
@@ -136,6 +140,7 @@ function DirNode({
   onOpenDiff: (file: string) => void;
   onOpenFile: (file: string) => void;
 }) {
+  const { t } = useI18n();
   const open = expanded.has(group.path);
   const sub = [...group.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
   const own = [...group.files].sort((a, b) => a.file.localeCompare(b.file));
@@ -144,8 +149,8 @@ function DirNode({
     <>
       <div className="changes-dir" style={{ paddingLeft: depth * 12 }} onClick={() => onToggle(group.path)}>
         <span className={`chevron ${open ? 'open' : ''}`}>▸</span>
-        <span className="changes-dir-name">{depth === 0 ? '项目根目录' : `${group.name}/`}</span>
-        <span className="changes-dir-count">{sum.files} 个</span>
+        <span className="changes-dir-name">{depth === 0 ? t('changesPanel.rootDir') : `${group.name}/`}</span>
+        <span className="changes-dir-count">{t('changesPanel.dirCount', { n: sum.files })}</span>
         {(sum.added > 0 || sum.removed > 0) && (
           <span className="changes-delta">
             +{sum.added} -{sum.removed}
@@ -189,6 +194,7 @@ export function ChangesPanel({
   /** 打开只读 diff 浮层（点增删行数触发）。 */
   onOpenDiff: (file: string) => void;
 }) {
+  const { t } = useI18n();
   const result = useChangesStore((s) => s.result);
   const busy = useChangesStore((s) => s.busy);
   const running = useChangesStore((s) => s.running);
@@ -221,12 +227,12 @@ export function ChangesPanel({
   return (
     <div className="changes-panel">
       <div className="changes-head">
-        <h3>变更 · git</h3>
-        <button className="btn ghost small" onClick={() => setByDir((v) => !v)} title="切换平铺 / 按目录">
-          {byDir ? '按目录' : '平铺'}
+        <h3>{t('changesPanel.title')}</h3>
+        <button className="btn ghost small" onClick={() => setByDir((v) => !v)} title={t('changesPanel.toggleViewTitle')}>
+          {byDir ? t('changesPanel.viewByDir') : t('changesPanel.viewFlat')}
         </button>
         <button className="btn ghost small" onClick={() => void refresh()} disabled={busy}>
-          {busy ? '读取中…' : '刷新'}
+          {busy ? t('changesPanel.reading') : t('changesPanel.refresh')}
         </button>
       </div>
 
@@ -235,7 +241,7 @@ export function ChangesPanel({
         <button
           className="btn ghost small"
           disabled={running !== null}
-          title="git add -A：把所有改动（含新文件）加入暂存区"
+          title={t('changesPanel.addTitle')}
           onClick={() => void run('add')}
         >
           git add all
@@ -243,7 +249,7 @@ export function ChangesPanel({
         <button
           className="btn ghost small"
           disabled={running !== null}
-          title="git commit -m：写一句提交说明再提交"
+          title={t('changesPanel.commitCmdTitle')}
           onClick={() => setCommitOpen(true)}
         >
           git commit
@@ -251,7 +257,7 @@ export function ChangesPanel({
         <button
           className="btn ghost small"
           disabled={running !== null}
-          title="git pull --ff-only：只做快进拉取，不产生合并提交"
+          title={t('changesPanel.pullTitle')}
           onClick={() => void run('pull')}
         >
           git pull
@@ -259,19 +265,19 @@ export function ChangesPanel({
         <button
           className="btn ghost small"
           disabled={running !== null}
-          title="git push：推到远端（对外可见，会先弹一次确认）"
+          title={t('changesPanel.pushTitle')}
           onClick={() => setPushOpen(true)}
         >
           git push
         </button>
-        {running && <span className="changes-cmd-busy">git {running} 执行中…</span>}
+        {running && <span className="changes-cmd-busy">{t('changesPanel.cmdBusy', { cmd: running })}</span>}
       </div>
 
       {result?.isRepo && (
         <div className="changes-counts">
-          <span>分支 {result.branch ?? '（无提交）'}</span>
+          <span>{t('changesPanel.branch', { branch: result.branch ?? t('changesPanel.noCommit') })}</span>
           <span>·</span>
-          <span>{entries.length === 0 ? '工作区干净' : `${totals.files} 个未提交改动`}</span>
+          <span>{entries.length === 0 ? t('changesPanel.clean') : t('changesPanel.uncommitted', { n: totals.files })}</span>
           {totals.files > 0 && (totals.added > 0 || totals.removed > 0) && (
             <span className="changes-delta">
               +{totals.added} -{totals.removed}
@@ -282,17 +288,17 @@ export function ChangesPanel({
 
       {error && (
         <div className="changes-error" role="alert">
-          读取失败：{error}
+          {t('changesPanel.readError', { error })}
         </div>
       )}
 
       {!error && result && !result.isRepo && (
         <div className="changes-nogit">
-          这个目录不是 git 仓库（或本机没装 git），所以看不到变更 —— 变更只以 git 为准，不自记录。
+          {t('changesPanel.noGit')}
         </div>
       )}
 
-      {result?.isRepo && entries.length === 0 && <div className="changes-nobase">工作区干净：没有未提交的改动。</div>}
+      {result?.isRepo && entries.length === 0 && <div className="changes-nobase">{t('changesPanel.cleanDetail')}</div>}
 
       {entries.length > 0 && (
         <div className="changes-rows">
@@ -318,16 +324,17 @@ export function ChangesPanel({
             ))
           )}
           {result && result.truncated > 0 && (
-            <div className="changes-note-summary">另有 {result.truncated} 个改动未列出（太多）。</div>
+            <div className="changes-note-summary">{t('changesPanel.truncated', { n: result.truncated })}</div>
           )}
         </div>
       )}
 
       {commitOpen && (
-        <Dialog title="提交（git commit）" onClose={() => setCommitOpen(false)}>
+        <Dialog title={t('changesPanel.commitDialog')} onClose={() => setCommitOpen(false)}>
           <p className="confirm-text">
-            提交说明会原样传给 <code>git commit -m</code>（不经 shell）。暂存区为空、或没有可提交的内容时，
-            git 会拒绝 —— 它的原话会冒泡到右下角，不假装成功。
+            {t('changesPanel.commitNoteLead')}
+            <code>git commit -m</code>
+            {t('changesPanel.commitNoteRest')}
           </p>
           <textarea
             className="changes-commit-input"
@@ -335,12 +342,12 @@ export function ChangesPanel({
             autoFocus
             rows={4}
             maxLength={2000}
-            placeholder="一句话说清这次改了什么"
+            placeholder={t('changesPanel.commitPlaceholder')}
             onChange={(e) => setCommitMessage(e.target.value)}
           />
           <div className="confirm-actions">
             <button className="btn ghost" onClick={() => setCommitOpen(false)}>
-              取消
+              {t('common.cancel')}
             </button>
             <button
               className="btn"
@@ -352,20 +359,18 @@ export function ChangesPanel({
                 void run('commit', message);
               }}
             >
-              提交
+              {t('changesPanel.commit')}
             </button>
           </div>
         </Dialog>
       )}
 
       {pushOpen && (
-        <Dialog title="推送（git push）？" onClose={() => setPushOpen(false)}>
-          <p className="confirm-text">
-            会把当前分支的提交推到远端 —— 这一步对别人可见。没有远端 / 需要登录 / 被拒绝都会如实冒泡。
-          </p>
+        <Dialog title={t('changesPanel.pushDialog')} onClose={() => setPushOpen(false)}>
+          <p className="confirm-text">{t('changesPanel.pushConfirm')}</p>
           <div className="confirm-actions">
             <button className="btn ghost" onClick={() => setPushOpen(false)}>
-              取消
+              {t('common.cancel')}
             </button>
             <button
               className="btn"
@@ -374,7 +379,7 @@ export function ChangesPanel({
                 void run('push');
               }}
             >
-              推送
+              {t('changesPanel.push')}
             </button>
           </div>
         </Dialog>

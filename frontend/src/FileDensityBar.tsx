@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { DensitySegment, FileDensity } from './api';
 import { api } from './api';
+import { translate, useI18n } from './i18n';
 
 interface Props {
   projectId: string | null;
@@ -29,11 +30,12 @@ function tierOf(seg: DensitySegment): 'code' | 'comment' | 'blank' {
 
 /** tooltip：段起止行 + 主要符号名（没有符号就只给行区间）。 */
 function segTitle(seg: DensitySegment): string {
-  const range = `第 ${seg.startLine}-${seg.endLine} 行`;
+  const range = translate('density.lineRange', { start: seg.startLine, end: seg.endLine });
   return seg.symbols.length ? `${range} · ${seg.symbols.join('、')}` : range;
 }
 
 export function FileDensityBar({ projectId, file, highlightsToken, rightInset, onJump }: Props) {
+  const { t } = useI18n();
   const [density, setDensity] = useState<FileDensity | null>(null);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -62,12 +64,12 @@ export function FileDensityBar({ projectId, file, highlightsToken, rightInset, o
     <div
       className={`density-bar${collapsed ? ' collapsed' : ''}`}
       style={{ right: rightInset }}
-      title="行密度（代码 / 注释 / 空白占比）：悬停看行区间与主要符号，点击跳到该段起始行"
+      title={t('density.barTitle')}
     >
       <button
         className="density-toggle"
         onClick={() => setCollapsed((v) => !v)}
-        title={collapsed ? '展开行密度' : '收起行密度'}
+        title={collapsed ? t('density.expand') : t('density.collapse')}
       >
         {collapsed ? '‹' : '›'}
       </button>

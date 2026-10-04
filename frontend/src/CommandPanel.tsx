@@ -1,11 +1,18 @@
 /**
- * 命令面板（FR-0005，2026-10-03 用户要求）：命令管理 —— 项目命令 + 阅读器服务。
+ * 命令面板（FR-0005；2026-10-03 晚按用户要求收敛）。
  *
- * 上半「项目命令」：说一句话 → 让 code agent（只读）读本项目 → 得出**编译 / 后台启动 /
- * 后台停止 / 测试**这些命令（仓库里没有的给建议）→ 每条点一下就能真跑。
- * 下半「服务」：原功能（阅读器后端自己的状态 / 重启 / 停止）。
+ * 只讲**当前打开的项目**自己的事，三块：
+ * ① 当前项目：名称 / 路径 / 索引状态 / git 分支与未提交改动（拿不到的行不出现）；
+ * ② 项目命令：说一句话 → code agent（只读）读本项目 → 得出**编译 / 后台启动 / 后台停止 /
+ *    测试**这些命令（仓库里没有的给建议）→ 每条点一下就能真跑；
+ * ③ 后台任务：当前项目**从这里启动**的后台进程（pid / 状态 / 日志 / 停止），没有就不显示。
  *
- * 安全：共享模式（status.manageable=false）下按钮全禁用；执行一律走确认对话框；
+ * 2026-10-03 晚用户要求（原话：「我需要关注的当前打开的项目状态，如果无法获取，就不做」）：
+ * 原来这里显示的是**阅读器自身**的 pid / 端口 / 重启 / 停止 —— 那是跑界面的进程，与当前项目无关
+ * （打开的项目一个服务都没起，这里照样是「运行中」），已整块删除；重启 / 停止阅读器改用
+ * `POST /api/service/restart|stop`（后端接口仍在）。命令行自己起的项目服务后端拿不到，也不显示。
+ *
+ * 安全：共享模式（service.manageable=false）下按钮全禁用；执行一律走确认对话框；
  * warn 级命令要在对话框里额外勾选；block 级命令没有运行按钮（后端也会拒）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -14,20 +21,23 @@ import type {
   CommandPlan,
   CommandRisk,
   CommandRun,
+  GitChangesResult,
+  IndexStatus,
   ProjectCommand,
-  ServiceStatus,
+  ProjectInfo,
 } from '../../shared/types';
 import { agentApi } from './agentApi';
 import { api } from './api';
 import { Dialog } from './Dialog';
+import { translate, useI18n } from './i18n';
 import './service.css';
 
 const KIND_LABEL: Record<CommandKind, string> = {
-  build: '编译',
-  start: '启动',
-  stop: '停止',
-  test: '测试',
-  other: '其他',
+  build: 'cmd.kindBuild',
+  start: 'cmd.kindStart',
+  stop: 'cmd.kindStop',
+  test: 'cmd.kindTest',
+  other: 'cmd.kindOther',
 };
 
 /** 待确认的一次执行（来自卡片或自定义输入）。 */
@@ -42,10 +52,10 @@ interface Pending {
 
 function fmtDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s} 秒`;
+  if (s < 60) return translate('cmd.durationSec', { n: s });
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m} 分 ${s % 60} 秒`;
-  return `${Math.floor(m / 60)} 小时 ${m % 60} 分`;
+  if (m < 60) return translate('cmd.durationMinSec', { m, s: s % 60 });
+  return translate('cmd.durationHourMin', { h: Math.floor(m / 60), m: m % 60 });
 }
 
 function fmtTime(at: number): string {
@@ -60,65 +70,63 @@ function fmtElapsed(run: CommandRun): string {
   return fmtDuration(Math.max(0, end - run.startedAt));
 }
 
+/** 索引状态一句话（拿不到就不显示这一行）；一个源文件都没有的项目如实说。 */
+function fmtIndex(status: IndexStatus): string {
+  if (status.indexing) return translate('cmd.indexing', { indexed: status.filesIndexed, total: status.filesTotal });
+  if (status.filesTotal === 0) return translate('cmd.noSourceFiles');
+  return translate('cmd.indexedFiles', { n: status.filesIndexed });
+}
+
+/** git 一句话：分支 + 未提交改动数（不是 git 仓库时调用方不显示这一行）。 */
+function fmtGit(git: GitChangesResult): string {
+  const branch = git.branch ?? translate('cmd.noCommits');
+  return git.entries.length === 0
+    ? translate('cmd.gitClean', { branch })
+    : translate('cmd.gitDirty', { branch, n: git.entries.length });
+}
+
 const STATUS_LABEL: Record<CommandRun['status'], string> = {
-  running: '运行中',
-  done: '成功',
-  failed: '失败',
-  stopped: '已停止',
-  lost: '已失联',
+  running: 'cmd.statusRunning',
+  done: 'cmd.statusDone',
+  failed: 'cmd.statusFailed',
+  stopped: 'cmd.statusStopped',
+  lost: 'cmd.statusLost',
 };
 
 export function CommandPanel({
   projectId,
+  project,
   onOpenSession,
 }: {
   projectId: string | null;
+  /** 当前项目（名称 / 路径）：面板顶部展示；拿不到就不渲染（2026-10-03 用户要求）。 */
+  project?: ProjectInfo | null;
   /** 去 Agent 面板看这次分析的会话（分析过程留在那儿）。 */
   onOpenSession?: (sessionId: string) => void;
 }) {
-  // ------------------------------------------------------------ 阅读器服务
-  const [status, setStatus] = useState<ServiceStatus | null>(null);
-  const [svError, setSvError] = useState<string | null>(null);
-  const [svBusy, setSvBusy] = useState(false);
-  const [svConfirm, setSvConfirm] = useState<'restart' | 'stop' | null>(null);
-  const [svNote, setSvNote] = useState<string | null>(null);
+  const { t } = useI18n();
 
-  const loadStatus = async () => {
-    try {
-      setStatus(await api.serviceStatus());
-      setSvError(null);
-    } catch (e) {
-      setSvError(e instanceof Error ? e.message : String(e));
-    }
-  };
+  // ------------------------------------------------ 当前项目状态（2026-10-03 晚用户要求）
+  /** 索引状态：单独拉一份（项目快照可能过期），拿不到就不显示这一行。 */
+  const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
+  /** git 状态：不是仓库（isRepo=false）就不显示这一行。 */
+  const [git, setGit] = useState<GitChangesResult | null>(null);
+  /**
+   * 是否可管理（共享模式 = false，按钮全禁用）。取值来自阅读器自身的服务状态 ——
+   * 只用来做这个开关，服务信息本身不再显示（2026-10-03 晚）。
+   */
+  const [manageable, setManageable] = useState(false);
 
   useEffect(() => {
-    void loadStatus();
-    const timer = window.setInterval(() => {
-      setStatus((s) => (s ? { ...s, uptimeMs: Date.now() - s.startedAt } : s));
-    }, 1000);
-    return () => window.clearInterval(timer);
+    void api
+      .serviceStatus()
+      .then((s) => setManageable(s.manageable))
+      .catch(() => setManageable(false));
   }, []);
-
-  const runService = async (kind: 'restart' | 'stop') => {
-    setSvConfirm(null);
-    setSvBusy(true);
-    setSvNote(null);
-    try {
-      const res = kind === 'restart' ? await api.serviceRestart() : await api.serviceStop();
-      setSvNote(res.note ?? '已执行');
-    } catch (e) {
-      setSvError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSvBusy(false);
-    }
-  };
-
-  const manageable = status?.manageable ?? false;
 
   // ------------------------------------------------------------ 项目命令
   const [plan, setPlan] = useState<CommandPlan | null>(null);
-  const [prompt, setPrompt] = useState('获取本项目的命令');
+  const [prompt, setPrompt] = useState(t('cmd.promptDefault'));
   const [analyzing, setAnalyzing] = useState(false);
   const [cmdError, setCmdError] = useState<string | null>(null);
   const [cmdNote, setCmdNote] = useState<string | null>(null);
@@ -146,12 +154,23 @@ export function CommandPanel({
     setCmdError(null);
     setCmdNote(null);
     setRuns([]);
+    setIndexStatus(null);
+    setGit(null);
     if (!projectId) return;
     void api
       .projectCommands(projectId)
       .then(({ plan: saved }) => setPlan(saved))
       .catch((e: unknown) => setCmdError(e instanceof Error ? e.message : String(e)));
     void refreshRuns();
+    // 当前项目状态：两次调用各自容错 —— 拿不到的那行就不出现，不占位。
+    void api
+      .status(projectId)
+      .then(setIndexStatus)
+      .catch(() => setIndexStatus(null));
+    void api
+      .gitChanges(projectId)
+      .then(setGit)
+      .catch(() => setGit(null));
     void agentApi
       .modelConfig()
       .then((config) => {
@@ -186,14 +205,14 @@ export function CommandPanel({
     try {
       const { plan: next } = await api.discoverCommands(
         projectId,
-        prompt.trim() || '获取本项目的命令',
+        prompt.trim() || t('cmd.promptDefault'),
         controller.signal,
       );
       setPlan(next);
-      setCmdNote(`分析完成：${next.commands.length} 条命令`);
+      setCmdNote(t('cmd.analyzeDone', { n: next.commands.length }));
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') {
-        setCmdNote('已停止等待（后端仍可能在分析，稍后点「刷新」即可看到结果）');
+        setCmdNote(t('cmd.analyzeAborted'));
       } else {
         setCmdError(e instanceof Error ? e.message : String(e));
       }
@@ -237,7 +256,7 @@ export function CommandPanel({
         command,
         kind: 'other',
         background: false,
-        label: '自定义命令',
+        label: t('cmd.customLabel'),
         risk,
         ...(reason ? { reason } : {}),
       });
@@ -254,7 +273,7 @@ export function CommandPanel({
       const { run } = await api.runCommand(projectId, input);
       setRuns((prev) => [run, ...prev]);
       setExpanded((prev) => ({ ...prev, [run.id]: true }));
-      setCmdNote(run.background ? `已在后台启动（pid ${run.pid ?? '?'}）` : `已执行（退出码 ${run.exitCode ?? '?'}）`);
+      setCmdNote(run.background ? t('cmd.startedBackground', { pid: run.pid ?? '?' }) : t('cmd.executed', { code: run.exitCode ?? '?' }));
     } catch (e) {
       setCmdError(e instanceof Error ? e.message : String(e));
     }
@@ -270,34 +289,71 @@ export function CommandPanel({
     }
   };
 
+  /** 索引状态：以单独拉取为准，退回项目快照；都没有就不显示这一行。 */
+  const index = indexStatus ?? project?.status ?? null;
+
   return (
     <div className="service-panel">
+      {/* ------------------------------------------------ 当前项目（2026-10-03 晚用户要求） */}
+      {project && (
+        <section className="cp-section">
+          <div className="cp-head">
+            <h3>{t('cmd.currentProject')}</h3>
+          </div>
+          <dl className="sv-facts">
+            <div>
+              <dt>{t('cmd.project')}</dt>
+              <dd title={project.name}>{project.name}</dd>
+            </div>
+            <div>
+              <dt>{t('cmd.path')}</dt>
+              <dd className="sv-path" title={project.root}>
+                {project.root}
+              </dd>
+            </div>
+            {index && (
+              <div>
+                <dt>{t('cmd.index')}</dt>
+                <dd>{fmtIndex(index)}</dd>
+              </div>
+            )}
+            {git?.isRepo && (
+              <div>
+                <dt>git</dt>
+                <dd>{fmtGit(git)}</dd>
+              </div>
+            )}
+          </dl>
+        </section>
+      )}
+
       {/* ------------------------------------------------ 项目命令 */}
       <section className="cp-section">
         <div className="cp-head">
-          <h3>项目命令</h3>
+          <h3>{t('cmd.projectCommands')}</h3>
           {plan && (
             <button className="btn ghost small" onClick={() => void refreshPlan()} disabled={analyzing}>
-              刷新
+              {t('cmd.refresh')}
             </button>
           )}
         </div>
 
         {!projectId ? (
-          <div className="sv-hint">先打开一个项目，再来这里拿它的命令。</div>
+          <div className="sv-hint">{t('cmd.needProject')}</div>
         ) : (
           <>
+            {!manageable && (
+              <div className="sv-note">{t('cmd.sharedReadonly')}</div>
+            )}
             {hasModel === false && (
-              <div className="cp-notice">
-                还没有配置大模型：点顶栏「模型」填 base URL + API key + 模型 id，回来就能分析。
-              </div>
+              <div className="cp-notice">{t('cmd.noModel')}</div>
             )}
 
             <div className="cp-input-row">
               <input
                 className="cp-input"
                 value={prompt}
-                placeholder="获取本项目的命令"
+                placeholder={t('cmd.promptDefault')}
                 onChange={(e) => setPrompt(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void analyze();
@@ -306,24 +362,22 @@ export function CommandPanel({
               />
               {analyzing ? (
                 <button className="btn ghost" onClick={() => abortRef.current?.abort()}>
-                  停止等待
+                  {t('cmd.stopWaiting')}
                 </button>
               ) : (
                 <button
                   className="btn"
                   onClick={() => void analyze()}
                   disabled={hasModel === false}
-                  title={hasModel === false ? '先在顶栏「模型」里配置' : '让 code agent 读本项目'}
+                  title={hasModel === false ? t('cmd.configureModelFirst') : t('cmd.letAgentRead')}
                 >
-                  {plan ? '重新分析' : '分析'}
+                  {plan ? t('cmd.reanalyze') : t('cmd.analyze')}
                 </button>
               )}
             </div>
 
             {analyzing && (
-              <div className="cp-notice">
-                正在读项目（package.json / Makefile / CI / README…），最多 3 分钟。分析过程可以在 Agent 面板看到。
-              </div>
+              <div className="cp-notice">{t('cmd.analyzingNote')}</div>
             )}
             {plan?.summary && (
               <div className="cp-summary">
@@ -331,7 +385,7 @@ export function CommandPanel({
                 <span className="cp-meta"> · {fmtTime(plan.createdAt)}</span>
                 {plan.sessionId && onOpenSession && (
                   <button className="cp-link" onClick={() => onOpenSession(plan.sessionId as string)}>
-                    看分析过程
+                    {t('cmd.viewAnalysis')}
                   </button>
                 )}
               </div>
@@ -352,37 +406,37 @@ export function CommandPanel({
                   return (
                     <li className={`cmd-card${cmd.risk === 'warn' ? ' risky' : ''}`} key={cmd.id}>
                       <div className="cmd-card-head">
-                        <span className={`cmd-kind k-${cmd.kind}`}>{KIND_LABEL[cmd.kind]}</span>
+                        <span className={`cmd-kind k-${cmd.kind}`}>{t(KIND_LABEL[cmd.kind])}</span>
                         <span className="cmd-label" title={cmd.label}>
                           {cmd.label}
                         </span>
-                        {cmd.source === 'generated' && <span className="cmd-tag">建议</span>}
+                        {cmd.source === 'generated' && <span className="cmd-tag">{t('cmd.suggested')}</span>}
                         <button
                           className="cp-copy"
-                          title="复制命令"
+                          title={t('cmd.copyCommand')}
                           onClick={() => void navigator.clipboard?.writeText(cmd.command).catch(() => undefined)}
                         >
-                          复制
+                          {t('cmd.copy')}
                         </button>
                       </div>
                       <code className="cmd-text">{cmd.command}</code>
                       {cmd.note && <div className="cmd-note">{cmd.note}</div>}
-                      {cmd.risk === 'warn' && <div className="cmd-risk">⚠ 危险命令：执行前请确认</div>}
-                      {blocked && <div className="cmd-risk">⛔ 自毁级命令，已禁止执行</div>}
+                      {cmd.risk === 'warn' && <div className="cmd-risk">{t('cmd.riskWarn')}</div>}
+                      {blocked && <div className="cmd-risk">{t('cmd.blocked')}</div>}
                       <div className="cmd-actions">
                         <button
                           className="btn small"
                           disabled={blocked || !manageable}
                           onClick={() => askRun({ ...cmd, background: false })}
                         >
-                          运行
+                          {t('cmd.run')}
                         </button>
                         <button
                           className="btn ghost small"
                           disabled={blocked || !manageable}
                           onClick={() => askRun({ ...cmd, background: true })}
                         >
-                          后台运行
+                          {t('cmd.runBackground')}
                         </button>
                       </div>
                       {run && (
@@ -403,7 +457,7 @@ export function CommandPanel({
               <input
                 className="cp-input"
                 value={custom}
-                placeholder="自定义命令（在项目根执行）"
+                placeholder={t('cmd.customPlaceholder')}
                 onChange={(e) => setCustom(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void askCustom();
@@ -414,13 +468,13 @@ export function CommandPanel({
                 disabled={!custom.trim() || !manageable}
                 onClick={() => void askCustom()}
               >
-                运行
+                {t('cmd.run')}
               </button>
             </div>
 
             {hasRunning && (
               <div className="cp-runs">
-                <h4>后台任务</h4>
+                <h4>{t('cmd.backgroundTasks')}</h4>
                 {runs
                   .filter((run) => run.background && run.status === 'running')
                   .map((run) => (
@@ -439,124 +493,34 @@ export function CommandPanel({
         )}
       </section>
 
-      {/* ------------------------------------------------ 阅读器服务 */}
-      <section className="cp-section">
-        <div className="sv-head">
-          <h3>命令 · 服务</h3>
-          <button className="btn ghost small" onClick={() => void loadStatus()} disabled={svBusy}>
-            刷新状态
-          </button>
-        </div>
-
-        {svError && (
-          <div className="sv-error" role="alert">
-            {svError}
-          </div>
-        )}
-
-        {status && (
-          <dl className="sv-facts">
-            <div>
-              <dt>状态</dt>
-              <dd>运行中</dd>
-            </div>
-            <div>
-              <dt>进程</dt>
-              <dd>pid {status.pid}</dd>
-            </div>
-            <div>
-              <dt>监听</dt>
-              <dd>
-                {status.host}:{status.port}
-              </dd>
-            </div>
-            <div>
-              <dt>运行时长</dt>
-              <dd>{fmtDuration(status.uptimeMs)}</dd>
-            </div>
-            <div>
-              <dt>日志</dt>
-              <dd className="sv-path" title={status.logPath}>
-                {status.logPath}
-              </dd>
-            </div>
-            {status.lastAction && (
-              <div>
-                <dt>上次动作</dt>
-                <dd>
-                  {status.lastAction.action} · {new Date(status.lastAction.at).toLocaleTimeString()}
-                </dd>
-              </div>
-            )}
-          </dl>
-        )}
-
-        {!manageable && status && <div className="sv-note">共享模式下不提供命令管理（只读阅读），按钮已禁用。</div>}
-
-        <div className="sv-actions">
-          <button className="btn" disabled={!manageable || svBusy} onClick={() => setSvConfirm('restart')}>
-            重启服务
-          </button>
-          <button className="btn ghost" disabled={!manageable || svBusy} onClick={() => setSvConfirm('stop')}>
-            停止服务
-          </button>
-        </div>
-
-        {svNote && <div className="sv-note">{svNote}</div>}
-
-        <div className="sv-hint">
-          重启会先停掉当前进程、再用同一条命令拉起来（日志追加到上面的文件）。 停止后界面就没法再启动它了 ——
-          回到命令行跑 <code>npm start</code>。
-        </div>
-      </section>
-
-      {svConfirm && (
-        <Dialog title={svConfirm === 'restart' ? '重启服务？' : '停止服务？'} onClose={() => setSvConfirm(null)}>
-          <p className="confirm-text">
-            {svConfirm === 'restart'
-              ? '当前进程会退出，随后由独立 worker 拉起新进程（约 2~5 秒）。这段时间页面上的请求会失败，稍后刷新即可。'
-              : '服务会立即退出，之后这个页面就打不开了。要重新启动，请在命令行运行 npm start。'}
-          </p>
-          <div className="confirm-actions">
-            <button className="btn ghost" onClick={() => setSvConfirm(null)}>
-              取消
-            </button>
-            <button className="btn" onClick={() => void runService(svConfirm)}>
-              {svConfirm === 'restart' ? '重启' : '停止'}
-            </button>
-          </div>
-        </Dialog>
-      )}
-
       {pending && (
         <Dialog title={pending.label} onClose={() => setPending(null)}>
           <div className="cmd-confirm">
             <code className="cmd-text">{pending.command}</code>
             <p className="confirm-text">
-              {pending.background ? '后台运行' : '执行'}：在项目根目录运行这条命令
-              {pending.background ? '，进程由后端托管，可随时停止。' : '，跑完把输出显示在这里。'}
+              {pending.background ? t('cmd.confirmBackground') : t('cmd.confirmForeground')}
             </p>
-            {pending.reason && <p className="cmd-note">说明：{pending.reason}</p>}
+            {pending.reason && <p className="cmd-note">{t('cmd.reason', { reason: pending.reason })}</p>}
             {pending.risk === 'block' && (
-              <div className="cmd-risk">⛔ 这条命令属于自毁级操作，后端会直接拒绝执行。</div>
+              <div className="cmd-risk">{t('cmd.confirmBlocked')}</div>
             )}
             {pending.risk === 'warn' && (
               <label className="cmd-ack">
                 <input type="checkbox" checked={acked} onChange={(e) => setAcked(e.target.checked)} />
-                我知道这条命令有风险（{pending.reason ?? '可能的破坏性操作'}）
+                {t('cmd.ackRisk', { reason: pending.reason ?? t('cmd.possibleDestructive') })}
               </label>
             )}
           </div>
           <div className="confirm-actions">
             <button className="btn ghost" onClick={() => setPending(null)}>
-              取消
+              {t('common.cancel')}
             </button>
             <button
               className="btn"
               disabled={pending.risk === 'block' || (pending.risk === 'warn' && !acked)}
               onClick={() => void confirmRun()}
             >
-              {pending.background ? '后台运行' : '运行'}
+              {pending.background ? t('cmd.runBackground') : t('cmd.run')}
             </button>
           </div>
         </Dialog>
@@ -579,26 +543,28 @@ function RunView({
   onStop: () => void;
   compact?: boolean;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className={`cmd-run${compact ? ' compact' : ''}`}>
       <div className="cmd-run-head">
         <span className={`cmd-dot s-${run.status}`} />
-        <span className="cmd-run-status">{STATUS_LABEL[run.status]}</span>
+        <span className="cmd-run-status">{t(STATUS_LABEL[run.status])}</span>
         <span className="cp-meta">
           {run.pid ? `pid ${run.pid} · ` : ''}
           {fmtElapsed(run)}
-          {run.exitCode !== undefined && run.exitCode !== null ? ` · 退出码 ${run.exitCode}` : ''}
+          {run.exitCode !== undefined && run.exitCode !== null ? t('cmd.exitCode', { code: run.exitCode }) : ''}
         </span>
         {run.status === 'running' && (
           <button className="btn ghost small" onClick={onStop}>
-            停止
+            {t('cmd.stop')}
           </button>
         )}
         <button className="cp-link" onClick={onToggle}>
-          {expanded ? '收起输出' : '看输出'}
+          {expanded ? t('cmd.collapseOutput') : t('cmd.viewOutput')}
         </button>
       </div>
-      {expanded && <pre className="cmd-output">{run.output?.trim() ? run.output : '（还没有输出）'}</pre>}
+      {expanded && <pre className="cmd-output">{run.output?.trim() ? run.output : t('cmd.noOutput')}</pre>}
     </div>
   );
 }

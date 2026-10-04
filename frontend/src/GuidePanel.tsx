@@ -144,7 +144,13 @@ export function GuidePanel({
                     className="guide-step-main"
                     onClick={() => onOpenFile(step.file, step.line ?? 1)}
                     title={`${step.file}:${step.line ?? 1}\n${step.reason}${
-                      step.hints?.length ? `\n关注点：${step.hints.map((h) => `${h.name}（第 ${h.line} 行）`).join('、')}` : ''
+                      step.hints?.length
+                        ? t('guide.hints.title', {
+                            list: step.hints
+                              .map((h) => t('guide.hints.item', { name: h.name, line: h.line }))
+                              .join(t('guide.hints.sep')),
+                          })
+                        : ''
                     }`}
                   >
                     <span className="guide-step-file">{step.file}</span>
@@ -152,7 +158,7 @@ export function GuidePanel({
                     {/* 说到「打开哪一行、看什么」才叫向导：只给文件名，人还得自己在文件里找入口 */}
                     {step.hints?.length ? (
                       <span className="guide-step-hints">
-                        先看第 {step.line ?? 1} 行 · {step.hints.map((h) => h.name).join(' / ')}
+                        {t('guide.hints.preview', { line: step.line ?? 1, names: step.hints.map((h) => h.name).join(' / ') })}
                       </span>
                     ) : null}
                   </button>

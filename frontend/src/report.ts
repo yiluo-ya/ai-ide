@@ -9,6 +9,7 @@
  * 纯格式化：无 IO、无 React。碰浏览器 API 的只有文件末尾的下载 / 复制两个小工具。
  */
 import type { HotMetric, SymbolInfo } from '../../shared/types';
+import { translate } from './i18n';
 import { fenceLang, formatLocation } from './share';
 import type { SearchHit } from './state';
 
@@ -174,26 +175,26 @@ export function fileReportMarkdown(input: {
   const out: string[] = [];
 
   out.push(`# ${file}`, '');
-  out.push(`- 项目：${input.projectName}`);
-  if (input.projectRoot) out.push(`- 根目录：${tidyPath(input.projectRoot)}`);
-  out.push(`- 语言：${input.lang || 'plaintext'}`);
-  out.push(`- 行数：${group(lines.length)}`);
-  out.push(`- 生成时间：${stamp(new Date())}`, '');
+  out.push(translate('report.projectLine', { name: input.projectName }));
+  if (input.projectRoot) out.push(translate('report.rootLine', { path: tidyPath(input.projectRoot) }));
+  out.push(translate('report.langLine', { lang: input.lang || 'plaintext' }));
+  out.push(translate('report.lineCount', { n: group(lines.length) }));
+  out.push(translate('report.generatedAt', { time: stamp(new Date()) }), '');
 
-  out.push('## 大纲', '');
-  if (input.symbols.length === 0) out.push('（未取到符号）');
+  out.push(translate('report.outline'), '');
+  if (input.symbols.length === 0) out.push(translate('report.noSymbols'));
   else out.push(...symbolOutline(input.symbols));
   out.push('');
 
-  out.push('## 正文', '');
+  out.push(translate('report.body'), '');
   out.push(...numberedCode(lines, input.lang));
   out.push('');
 
   const tiers = tierNames(input.highlights ?? []);
   if (tiers.project.length > 0 || tiers.external.length > 0) {
-    out.push('## 着色（本项目 vs 外部）', '');
-    if (tiers.project.length) out.push(`- 本项目符号：${tiers.project.join('、')}`);
-    if (tiers.external.length) out.push(`- 外部依赖：${tiers.external.join('、')}`);
+    out.push(translate('report.tiers'), '');
+    if (tiers.project.length) out.push(translate('report.tierProject', { names: tiers.project.join('、') }));
+    if (tiers.external.length) out.push(translate('report.tierExternal', { names: tiers.external.join('、') }));
     out.push('');
   }
 
@@ -215,20 +216,20 @@ export function searchReportMarkdown(input: {
   const lineCount = input.hits.reduce((n, hit) => n + hit.matches.length, 0);
   const out: string[] = [];
 
-  out.push(`# 搜索「${input.query}」— ${group(fileCount)} 个文件 / ${group(lineCount)} 行`, '');
-  out.push(`- 项目：${input.projectName}`);
+  out.push(translate('report.searchTitle', { query: input.query, files: group(fileCount), lines: group(lineCount) }), '');
+  out.push(translate('report.projectLine', { name: input.projectName }));
   const options = formatOptions(input.options);
-  if (options) out.push(`- 选项：${options}`);
-  out.push(`- 生成时间：${stamp(new Date())}`, '');
+  if (options) out.push(translate('report.optionsLine', { options }));
+  out.push(translate('report.generatedAt', { time: stamp(new Date()) }), '');
 
   if (fileCount === 0) {
-    out.push('（没有命中）');
+    out.push(translate('report.noHits'));
     return `${out.join('\n')}\n`;
   }
 
   for (const hit of input.hits) {
     const file = tidyPath(hit.file);
-    out.push(`### ${file}${hit.isTest ? '（测试）' : ''}`, '');
+    out.push(translate('report.fileHeading', { file, tag: hit.isTest ? translate('report.testTag') : '' }), '');
     for (const match of hit.matches) {
       out.push(`- ${formatLocation(file, match.line, match.col)} — ${match.lineText.trim()}`);
     }
@@ -282,13 +283,14 @@ function scaleLine(identity: OverviewLike['identity']): string {
   if (!identity) return '';
   const parts: string[] = [];
   if (identity.files !== undefined) {
-    parts.push(`${group(identity.files)} 个文件${identity.testFiles ? `（含测试 ${group(identity.testFiles)}）` : ''}`);
+    const tests = identity.testFiles ? translate('report.withTests', { tests: group(identity.testFiles) }) : '';
+    parts.push(translate('report.scaleFiles', { n: group(identity.files) }) + tests);
   }
-  if (identity.dirs !== undefined) parts.push(`${group(identity.dirs)} 个目录`);
-  if (identity.lines !== undefined) parts.push(`${group(identity.lines)} 行`);
+  if (identity.dirs !== undefined) parts.push(translate('report.scaleDirs', { n: group(identity.dirs) }));
+  if (identity.lines !== undefined) parts.push(translate('report.scaleLines', { n: group(identity.lines) }));
   if (identity.bytes !== undefined) parts.push(formatBytes(identity.bytes));
   if (identity.indexedFiles !== undefined && identity.files !== undefined && identity.indexedFiles < identity.files) {
-    parts.push(`已索引 ${group(identity.indexedFiles)} 个`);
+    parts.push(translate('report.scaleIndexed', { n: group(identity.indexedFiles) }));
   }
   return parts.join(' / ');
 }
@@ -303,31 +305,31 @@ export function overviewReportMarkdown(input: {
   overview: OverviewLike;
 }): string {
   const overview = input.overview;
-  const out: string[] = [`# ${input.projectName} 项目概览`, ''];
+  const out: string[] = [translate('report.overviewTitle', { name: input.projectName }), ''];
 
-  if (input.root) out.push(`- 根目录：${tidyPath(input.root)}`);
+  if (input.root) out.push(translate('report.rootLine', { path: tidyPath(input.root) }));
   const scale = scaleLine(overview.identity);
-  if (scale) out.push(`- 规模：${scale}`);
-  out.push(`- 生成时间：${stamp(new Date())}`, '');
+  if (scale) out.push(translate('report.scaleLine', { scale }));
+  out.push(translate('report.generatedAt', { time: stamp(new Date()) }), '');
 
   const partial = overview.partial;
   if (partial?.indexing) {
-    const progress = partial.progress !== undefined ? `（${Math.round(partial.progress * 100)}%）` : '';
+    const progress = partial.progress !== undefined ? translate('report.percent', { pct: Math.round(partial.progress * 100) }) : '';
     const counts =
       partial.filesIndexed !== undefined && partial.filesTotal !== undefined
-        ? `：已索引 ${group(partial.filesIndexed)} / ${group(partial.filesTotal)}`
+        ? translate('report.indexedProgress', { done: group(partial.filesIndexed), total: group(partial.filesTotal) })
         : '';
-    out.push(`> 索引进行中${counts}${progress}，以下数字是部分结果。`, '');
+    out.push(translate('report.indexingNote', { counts, progress }), '');
     if (partial.notes?.length) out.push(...partial.notes.map((note) => `> ${note}`), '');
   }
 
   const langs = overview.identity?.langs ?? [];
   if (langs.length) {
-    out.push('## 语言分布', '');
+    out.push(translate('report.langBreakdown'), '');
     for (const lang of langs) {
-      const files = lang.files !== undefined ? `${group(lang.files)} 文件` : '';
-      const lines = lang.lines !== undefined ? `${group(lang.lines)} 行` : '';
-      const tests = lang.tests ? `（含测试 ${group(lang.tests)}）` : '';
+      const files = lang.files !== undefined ? translate('report.langFiles', { n: group(lang.files) }) : '';
+      const lines = lang.lines !== undefined ? translate('report.scaleLines', { n: group(lang.lines) }) : '';
+      const tests = lang.tests ? translate('report.withTests', { tests: group(lang.tests) }) : '';
       out.push(`- ${lang.lang}：${[files, lines].filter(Boolean).join(' / ')}${tests}`);
     }
     out.push('');
@@ -335,10 +337,10 @@ export function overviewReportMarkdown(input: {
 
   const entries = overview.entries ?? [];
   if (entries.length) {
-    out.push('## 从哪看起（入口候选）', '');
+    out.push(translate('report.entryPoints'), '');
     for (const entry of entries) {
-      const kind = entry.kind === 'hot' ? '热点' : '入口';
-      const score = entry.score !== undefined ? `，评分 ${round1(entry.score)}` : '';
+      const kind = entry.kind === 'hot' ? translate('report.kindHot') : translate('report.kindEntry');
+      const score = entry.score !== undefined ? translate('report.scoreSuffix', { score: round1(entry.score) }) : '';
       const why = entry.reasons?.length ? ` — ${entry.reasons.join('；')}` : '';
       out.push(`- ${tidyPath(entry.file)}（${kind}${score}）${why}`);
     }
@@ -347,11 +349,11 @@ export function overviewReportMarkdown(input: {
 
   const hot = overview.hot ?? [];
   if (hot.length) {
-    out.push(`## 热点榜（口径：${overview.hotMetric ?? 'files'}）`, '');
+    out.push(translate('report.hotTitle', { metric: overview.hotMetric ?? 'files' }), '');
     for (const item of hot) {
-      const refs = item.inbound !== undefined ? `被引用 ${group(item.inbound)} 条` : '';
-      const files = item.inDegree !== undefined ? `${group(item.inDegree)} 个文件` : '';
-      const score = item.score !== undefined ? `评分 ${round1(item.score)}` : '';
+      const refs = item.inbound !== undefined ? translate('report.refsCount', { n: group(item.inbound) }) : '';
+      const files = item.inDegree !== undefined ? translate('report.scaleFiles', { n: group(item.inDegree) }) : '';
+      const score = item.score !== undefined ? translate('report.score', { score: round1(item.score) }) : '';
       const tail = [refs && files ? `${refs}（${files}）` : refs || files, score].filter(Boolean).join('，');
       out.push(`- ${tidyPath(item.file)}${tail ? ` — ${tail}` : ''}`);
     }
@@ -360,9 +362,9 @@ export function overviewReportMarkdown(input: {
 
   const orphans = overview.orphans ?? [];
   if (orphans.length) {
-    out.push('## 孤立文件（没有被项目内文件引用）', '');
+    out.push(translate('report.orphans'), '');
     for (const orphan of orphans) {
-      const lines = orphan.lines !== undefined ? `（${group(orphan.lines)} 行）` : '';
+      const lines = orphan.lines !== undefined ? translate('report.parenLines', { n: group(orphan.lines) }) : '';
       out.push(`- ${tidyPath(orphan.file)}${lines}`);
     }
     out.push('');
@@ -370,7 +372,7 @@ export function overviewReportMarkdown(input: {
 
   const cycles = overview.cycles ?? [];
   if (cycles.length) {
-    out.push('## 循环依赖（文件级 SCC）', '');
+    out.push(translate('report.cycles'), '');
     for (const cycle of cycles) {
       const names = cycle.map(tidyPath);
       // 每个数组是一个强连通分量：首尾相接写成环，读者一眼看出「绕回起点」
@@ -382,13 +384,13 @@ export function overviewReportMarkdown(input: {
   const recent = overview.recent;
   if (recent) {
     const counts: string[] = [];
-    if (recent.today !== undefined) counts.push(`今天 ${group(recent.today)}`);
-    if (recent.last3d !== undefined) counts.push(`3 天内 ${group(recent.last3d)}`);
-    if (recent.last7d !== undefined) counts.push(`7 天内 ${group(recent.last7d)}`);
-    if (recent.older !== undefined) counts.push(`更早 ${group(recent.older)}`);
+    if (recent.today !== undefined) counts.push(translate('report.recentToday', { n: group(recent.today) }));
+    if (recent.last3d !== undefined) counts.push(translate('report.recent3d', { n: group(recent.last3d) }));
+    if (recent.last7d !== undefined) counts.push(translate('report.recent7d', { n: group(recent.last7d) }));
+    if (recent.older !== undefined) counts.push(translate('report.recentOlder', { n: group(recent.older) }));
     if (counts.length || recent.newest?.length) {
-      out.push('## 最近改动', '');
-      if (counts.length) out.push(`- 改动分布：${counts.join(' / ')}`);
+      out.push(translate('report.recent'), '');
+      if (counts.length) out.push(translate('report.recentDistribution', { counts: counts.join(' / ') }));
       for (const item of (recent.newest ?? []).slice(0, 5)) {
         out.push(`- ${tidyPath(item.file)}（${stamp(new Date(item.mtimeMs))}）`);
       }

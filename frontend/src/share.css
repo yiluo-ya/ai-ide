@@ -1,4 +1,6 @@
-/* 05 信使 Share 的样式：分享下拉 + 批注面板。单独成文件，避免与 03/06 共用 styles.css 打架。 */
+/* 05 信使 Share 的样式：分享下拉 + 批注面板。单独成文件，避免与 03/06 共用 styles.css 打架。
+   2026-10-03 统一：颜色全走变量（原来写死深色，亮色主题下会黑底白字），
+   尺寸 / 字号 / 圆角沿用 styles.css 的设计令牌。 */
 
 .share-wrap {
   position: relative;
@@ -16,38 +18,40 @@
   top: 28px;
   right: 0;
   z-index: 41;
-  width: 320px;
+  width: 340px;
   max-height: 70vh;
   overflow: auto;
   padding: 6px;
-  background: #252526;
-  border: 1px solid #3c3c3c;
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elev-2);
 }
 
 .share-section {
-  margin: 8px 6px 4px;
-  font-size: 11px;
-  color: var(--fg-dim, #9aa7b6);
-  text-transform: none;
+  margin: 8px 8px 4px;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
 }
 
 .share-item {
   display: block;
   width: 100%;
-  padding: 6px 8px;
-  text-align: left;
-  font-size: 12px;
-  color: var(--fg, #d4d4d4);
+  min-height: var(--row-height);
+  padding: 5px 8px;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  text-align: left;
   cursor: pointer;
+  transition: background var(--dur) var(--ease);
 }
 
 .share-item:hover:not(:disabled) {
-  background: #2a2d2e;
+  background: var(--row-hover);
 }
 
 .share-item:disabled {
@@ -58,30 +62,35 @@
 .share-hint {
   display: block;
   margin-top: 2px;
-  font-size: 11px;
-  color: var(--fg-dim, #9aa7b6);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
 }
 
 .share-note {
   margin: 0 6px 6px;
-  padding: 6px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--fg-dim, #9aa7b6);
-  background: #1f1f22;
-  border-radius: 4px;
+  padding: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  line-height: var(--lh);
 }
 
 .share-note code {
-  color: var(--fg, #d4d4d4);
+  padding: 0 3px;
+  border-radius: var(--r-xs);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono-font);
 }
 
 .share-flash {
   margin: 6px;
-  padding: 4px 6px;
-  font-size: 11px;
-  color: #0b0b0b;
-  background: var(--hl-local, #cfe2ff);
-  border-radius: 4px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  background: var(--row-active);
+  color: var(--fg);
+  font-size: var(--fs-xs);
 }
-

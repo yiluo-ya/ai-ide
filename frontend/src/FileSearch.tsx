@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useStore } from './state';
+import { useI18n } from './i18n';
 import './filesearch.css';
 
 /** 少于这么长不搜内容：只按文件名过滤（2026-10-03 用户要求，从 2 提到 4）。 */
@@ -24,6 +25,7 @@ export function FileSearch({
   query: string;
   onOpen: (file: string, line: number, col: number) => void;
 }) {
+  const { t } = useI18n();
   const hits = useStore((s) => s.searchHits);
   const busy = useStore((s) => s.searchBusy);
   const truncated = useStore((s) => s.searchTruncated);
@@ -54,12 +56,12 @@ export function FileSearch({
       <div className="fs-result">
         <div className="fs-summary">
           <span>
-            {busy ? '搜内容中…' : total === 0 ? '内容没有命中' : `内容 ${total} 处命中 · ${hits.length} 个文件`}
-            {truncated && !busy && ' · 已截断'}
+            {busy ? t('search.busy') : total === 0 ? t('search.noHit') : t('search.hits', { total, files: hits.length })}
+            {truncated && !busy && t('search.truncated')}
           </span>
           {busy && (
-            <button className="btn ghost small" onClick={() => useStore.getState().cancelSearch()} title="停止搜索">
-              停止
+            <button className="btn ghost small" onClick={() => useStore.getState().cancelSearch()} title={t('search.stopTitle')}>
+              {t('search.stop')}
             </button>
           )}
         </div>
@@ -85,7 +87,7 @@ export function FileSearch({
           </div>
         ))}
         {!busy && hits.length > MAX_FILES && (
-          <div className="fs-summary">还有 {hits.length - MAX_FILES} 个文件未列出（到「更多 → 搜索」看全部）</div>
+          <div className="fs-summary">{t('search.moreFiles', { n: hits.length - MAX_FILES })}</div>
         )}
       </div>
     </div>

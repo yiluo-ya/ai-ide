@@ -10,10 +10,10 @@ import { useI18n } from './i18n';
 import './guide.css';
 
 const REL_LABEL: Record<TypeNode['relation'], string> = {
-  extends: '继承',
-  implements: '实现',
-  embeds: '嵌入',
-  overrides: '重写',
+  extends: 'nav.relExtends',
+  implements: 'nav.relImplements',
+  embeds: 'nav.relEmbeds',
+  overrides: 'nav.relOverrides',
 };
 
 function TypeRow({
@@ -27,18 +27,19 @@ function TypeRow({
   onCopy: (file: string, line: number, col: number) => void;
   prefix?: string;
 }) {
+  const { t } = useI18n();
   return (
     <div
       className="nav-row"
       title={`${node.file}:${node.location.range.start.line}`}
       onClick={() => onJump(node.file, node.location.range.start.line, node.location.range.start.col)}
     >
-      <span className="nav-rel">{prefix ?? REL_LABEL[node.relation]}</span>
+      <span className="nav-rel">{prefix ?? t(REL_LABEL[node.relation])}</span>
       <span className="nav-name">{node.name}</span>
-      {node.isTest && <span className="refs-badge">测试</span>}
+      {node.isTest && <span className="refs-badge">{t('explain.tagTest')}</span>}
       <button
         className="copy-btn"
-        title="复制位置 path:line:col"
+        title={t('nav.copyLocationTitle')}
         onClick={(e) => {
           e.stopPropagation();
           onCopy(node.file, node.location.range.start.line, node.location.range.start.col);
@@ -67,6 +68,7 @@ function CallRow({
   defaultOpen: boolean;
 }) {
   const expandable = !!node.children?.length;
+  const { t } = useI18n();
   const [open, setOpen] = useState(defaultOpen && expandable);
   const leaf = node.external || node.unresolved || !node.file;
   return (
@@ -84,13 +86,13 @@ function CallRow({
         <span className={node.external ? 'nav-dim' : node.unresolved ? 'nav-warn' : 'nav-name'}>
           {node.name}
         </span>
-        {node.isEntry && <span className="refs-badge entry">入口候选</span>}
-        {node.isTest && <span className="refs-badge">测试</span>}
-        <span className="nav-count">{node.callCount} 处</span>
+        {node.isEntry && <span className="refs-badge entry">{t('nav.entryCandidate')}</span>}
+        {node.isTest && <span className="refs-badge">{t('explain.tagTest')}</span>}
+        <span className="nav-count">{t('summary.refCount', { n: node.callCount })}</span>
         {!leaf && (
           <button
             className="copy-btn"
-            title="复制位置 path:line:col"
+            title={t('nav.copyLocationTitle')}
             onClick={(e) => {
               e.stopPropagation();
               onCopy(node.file, node.location.range.start.line, node.location.range.start.col);
@@ -149,18 +151,18 @@ export function CallsPanel({
       <div className="nav-head">
         <div className="nav-switch">
           <button className={direction === 'in' ? 'active' : ''} onClick={() => onDirection('in')}>
-            谁调用我
+            {t('flow.kind.callers')}
           </button>
           <button className={direction === 'out' ? 'active' : ''} onClick={() => onDirection('out')}>
-            我调用了谁
+            {t('flow.kind.calls')}
           </button>
         </div>
         <label className="nav-depth">
-          深度
+          {t('flow.depth')}
           <select className="ov-select" value={depth} onChange={(e) => onDepth(Number(e.target.value))}>
-            <option value={1}>1 层</option>
-            <option value={2}>2 层</option>
-            <option value={3}>3 层</option>
+            <option value={1}>{t('flow.depthValue', { n: 1 })}</option>
+            <option value={2}>{t('flow.depthValue', { n: 2 })}</option>
+            <option value={3}>{t('flow.depthValue', { n: 3 })}</option>
           </select>
         </label>
       </div>
@@ -188,17 +190,21 @@ export function CallsPanel({
         </div>
       )}
       <div className="nav-body">
-        {busy && <div className="panel-empty">查询中…</div>}
-        {!busy && !data && <div className="panel-empty">把光标放在一个符号上，这里显示调用层级</div>}
-        {!busy && data && !data.root && <div className="panel-empty">{data.message ?? '无法展开'}</div>}
+        {busy && <div className="panel-empty">{t('nav.querying')}</div>}
+        {!busy && !data && <div className="panel-empty">{t('nav.callsHint')}</div>}
+        {!busy && data && !data.root && <div className="panel-empty">{data.message ?? t('nav.cannotExpand')}</div>}
         {!busy && data?.root && <CallRow node={data.root} depth={0} onJump={onJump} onCopy={onCopy} defaultOpen />}
       </div>
       {data && (
         <div className="nav-foot">
           {data.coverage.resolved + data.coverage.unresolved + data.coverage.external > 0
-            ? `已解析 ${data.coverage.resolved} 处 · 未归属 ${data.coverage.unresolved} 处 · 外部 ${data.coverage.external} 处`
-            : '没有调用关系'}
-          {data.coverage.unresolved > 0 && <span className="nav-warn">（未归属需要类型推断）</span>}
+            ? t('nav.coverage', {
+                resolved: data.coverage.resolved,
+                unresolved: data.coverage.unresolved,
+                external: data.coverage.external,
+              })
+            : t('nav.noCalls')}
+          {data.coverage.unresolved > 0 && <span className="nav-warn">{t('nav.unresolvedNote')}</span>}
         </div>
       )}
     </div>
@@ -221,44 +227,48 @@ export function TypesPanel({
   onJump: (file: string, line: number, col: number) => void;
   onCopy: (file: string, line: number, col: number) => void;
 }) {
+  const { t } = useI18n();
   const implItems = useMemo(() => impls?.items ?? [], [impls]);
   return (
     <div className="nav-panel">
       <div className="nav-body">
-        {busy && <div className="panel-empty">查询中…</div>}
-        {!busy && !data && <div className="panel-empty">把光标放在一个类 / 接口上，这里显示类型层级</div>}
+        {busy && <div className="panel-empty">{t('nav.querying')}</div>}
+        {!busy && !data && <div className="panel-empty">{t('nav.typesHint')}</div>}
         {!busy && data && data.reason !== 'resolved' && (
-          <div className="panel-empty">{data.message ?? '无法给出类型层级'}</div>
+          <div className="panel-empty">{data.message ?? t('nav.cannotTypeHierarchy')}</div>
         )}
         {!busy && data?.reason === 'resolved' && (
           <>
-            <div className="nav-section">父类 / 接口（{data.bases.length}）</div>
+            <div className="nav-section">{t('nav.basesSection', { n: data.bases.length })}</div>
             {data.bases.map((b) => (
               <TypeRow key={`b:${b.file}:${b.name}`} node={b} onJump={onJump} onCopy={onCopy} />
             ))}
-            {!data.bases.length && <div className="nav-empty-line">没有项目内的显式基类</div>}
+            {!data.bases.length && <div className="nav-empty-line">{t('nav.noBases')}</div>}
             {data.unresolvedBases.length > 0 && (
               <div className="nav-empty-line">
-                无法定位的基名：{data.unresolvedBases.join('、')}
-                <span className="nav-warn">（外部依赖或未索引）</span>
+                {t('nav.unresolvedBases', { list: data.unresolvedBases.join('、') })}
+                <span className="nav-warn">{t('nav.externalOrUnindexed')}</span>
               </div>
             )}
-            <div className="nav-section">谁继承 / 实现它（{data.derived.length}）</div>
+            <div className="nav-section">{t('nav.derivedSection', { n: data.derived.length })}</div>
             {data.derived.map((d) => (
               <TypeRow key={`d:${d.file}:${d.name}`} node={d} onJump={onJump} onCopy={onCopy} />
             ))}
-            {!data.derived.length && <div className="nav-empty-line">项目内没有显式继承它的类型</div>}
-            <div className="nav-section">实现（N15）{implsBusy ? ' · 查询中…' : ''}</div>
+            {!data.derived.length && <div className="nav-empty-line">{t('nav.noDerived')}</div>}
+            <div className="nav-section">
+              {t('nav.implSection')}
+              {implsBusy ? t('nav.implBusy') : ''}
+            </div>
             {implItems.map((i) => (
               <TypeRow key={`i:${i.file}:${i.name}`} node={i} onJump={onJump} onCopy={onCopy} />
             ))}
             {!implsBusy && !implItems.length && (
-              <div className="nav-empty-line">{impls?.message ?? '没有显式实现'}</div>
+              <div className="nav-empty-line">{impls?.message ?? t('nav.noImpls')}</div>
             )}
           </>
         )}
       </div>
-      <div className="nav-foot">只覆盖源码里显式写出的继承 / 实现；动态注册与鸭子类型不覆盖</div>
+      <div className="nav-foot">{t('nav.footNote')}</div>
     </div>
   );
 }

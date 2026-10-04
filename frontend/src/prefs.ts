@@ -9,6 +9,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
+import { translate } from './i18n';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export type Locale = 'zh' | 'en';
@@ -133,7 +134,7 @@ export function applyPrefs(prefs: Prefs = current): void {
   // 动效减弱：由 CSS 用 [data-motion='reduced'] 关掉过渡与动画
   root.dataset.motion = prefs.reduceMotion ? 'reduced' : 'full';
   root.lang = prefs.locale === 'zh' ? 'zh-CN' : 'en';
-  document.title = prefs.locale === 'en' ? 'Web Code Reader' : '代码阅读器';
+  document.title = translate('app.title', undefined, prefs.locale);
   if (prefs.theme === 'system') watchSystemTheme();
 }
 

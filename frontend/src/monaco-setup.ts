@@ -23,6 +23,8 @@ import type {
   SymbolKind,
 } from '../../shared/types';
 import { api } from './api';
+import { translate } from './i18n';
+import { ensureLanguages, guessLangFor, monacoContributions, monacoLangFor, refLanguageList, symbolLanguageList } from './languages';
 
 declare global {
   interface Window {
@@ -52,67 +54,13 @@ window.MonacoEnvironment = {
   },
 };
 
-/** 后端语言 id → Monaco 语言 id。 */
-const MONACO_LANG: Record<string, string> = {
-  python: 'python',
-  typescript: 'typescript',
-  tsx: 'typescript',
-  javascript: 'javascript',
-  jsx: 'javascript',
-  go: 'go',
-  java: 'java',
-  shell: 'shell',
-  json: 'json',
-  yaml: 'yaml',
-  toml: 'ini', // Monaco 没有 TOML 语法，用最接近的 ini
-  ini: 'ini',
-  dockerfile: 'dockerfile',
-  markdown: 'markdown',
-  css: 'css',
-  scss: 'scss',
-  less: 'less',
-  html: 'html',
-  sql: 'sql',
-  // 包依赖 / 构建清单（只高亮预览，见后端 languages/manifests.ts）：Monaco 没有的语法借最接近的
-  xml: 'xml',
-  gomod: 'go',
-  groovy: 'java',
-  kotlin: 'kotlin',
-  scala: 'scala',
-  ruby: 'ruby',
-  elixir: 'elixir',
-  swift: 'swift',
-  pip: 'ini',
-  makefile: 'shell',
-};
-
-export function monacoLangFor(lang: string | undefined): string {
-  if (!lang) return 'plaintext';
-  return MONACO_LANG[lang] ?? 'plaintext';
-}
-
-/** 有引用能力的语言：hover / 跳到定义 / 查找引用（与后端 LanguageSpec 的引用索引对应）。 */
-export const PROVIDER_LANGUAGES = ['python', 'typescript', 'javascript', 'go', 'java', 'shell'];
-
 /**
- * 有符号索引的语言：文件大纲（Ctrl+Shift+O）。比上面多出只有键 / 标题 / 名字的文件类型。
- * 这里是 Monaco 语言 id：toml 与 ini 共用 `ini`。
+ * 后端语言 id → Monaco 语言 id。
+ *
+ * 07-languages-plugin 起这张表不再硬编码在前端：语言元数据由后端 `/api/languages` 下发
+ * （见 `languages.ts`）—— 装一个语言包 + 重启后端即可支持新语言，前端无需重新构建。
  */
-export const SYMBOL_LANGUAGES = [
-  ...new Set([
-    ...PROVIDER_LANGUAGES,
-    'json',
-    'yaml',
-    'ini',
-    'dockerfile',
-    'markdown',
-    'css',
-    'scss',
-    'less',
-    'html',
-    'sql',
-  ]),
-];
+export { monacoLangFor };
 
 export const MODEL_SCHEME = 'wcr';
 
@@ -406,7 +354,7 @@ function head(name: string | null | undefined, kind: SymbolKind | null, badge?: 
 function definitionCard(d: HoverDefinition): string {
   const rows: string[] = [head(d.name, d.kind)];
   if (d.local) {
-    rows.push(el(HC.local, '局部'));
+    rows.push(el(HC.local, translate('monaco.local')));
     rows.push(locLine(d.location));
     return card(rows);
   }
@@ -435,8 +383,8 @@ function definitionCard(d: HoverDefinition): string {
       el(
         HC.refs,
         d.refCount > 0
-          ? commandLink(HOVER_CMD_REFS, targetOf(d.location), `引用 ${d.refCount} 处`)
-          : `<span class="codicon ${HC.none}">无引用</span>`,
+          ? commandLink(HOVER_CMD_REFS, targetOf(d.location), translate('monaco.refsCount', { n: d.refCount }))
+          : `<span class="codicon ${HC.none}">${translate('monaco.noRefs')}</span>`,
       ),
     );
   }
@@ -450,36 +398,37 @@ function definitionCard(d: HoverDefinition): string {
 /** 同名多定义：全部列出，不替用户猜一个。 */
 function multiCard(name: string, defs: HoverDefinition[]): string {
   const rows: string[] = [head(name, defs[0]?.kind)];
-  rows.push(el(HC.note, `同名定义 ${defs.length} 处，未替你选择`));
+  rows.push(el(HC.note, translate('monaco.multiDefs', { n: defs.length })));
   for (const d of defs) rows.push(locLine(d.location, d.containerName ? `${d.name}（${d.containerName}）` : d.name));
   return card(rows);
 }
 
 /** 字面量绑定的种类用词（仅按 symbol kind 直译，不做推断）。 */
 const LITERAL_BIND_WORD: Record<string, string> = {
-  constant: '常量',
-  variable: '变量',
-  field: '字段',
-  property: '属性',
-  parameter: '参数',
+  constant: 'kind.constant',
+  variable: 'kind.variable',
+  field: 'kind.field',
+  property: 'kind.property',
+  parameter: 'kind.parameter',
 };
 
 /** 字面量溯源卡片（§3.3）：回答「这个值是什么、从哪来」。 */
 function literalCard(lit: HoverLiteral): string {
-  const rows: string[] = [head(`值 ${lit.text}`, null)];
+  const rows: string[] = [head(translate('monaco.literalValue', { text: lit.text }), null)];
   if (lit.boundTo) {
-    const word = LITERAL_BIND_WORD[lit.boundTo.kind] ?? '定义';
-    rows.push(el(HC.note, `绑定到${word} ${esc(lit.boundTo.name)}`));
+    const wordKey = LITERAL_BIND_WORD[lit.boundTo.kind];
+    const word = wordKey ? translate(wordKey) : translate('monaco.definition');
+    rows.push(el(HC.note, translate('monaco.boundTo', { word, name: esc(lit.boundTo.name) })));
     rows.push(locLine(lit.boundTo.location));
     if (typeof lit.refCount === 'number') {
-      rows.push(el(HC.note, lit.refCount > 0 ? `该名字的其他引用 ${lit.refCount} 处` : '无其他引用'));
+      rows.push(el(HC.note, lit.refCount > 0 ? translate('monaco.otherRefs', { n: lit.refCount }) : translate('monaco.noOtherRefs')));
     }
   } else {
-    rows.push(el(HC.note, '字面量，无关联定义'));
+    rows.push(el(HC.note, translate('monaco.literalNoDef')));
   }
-  if (typeof lit.sameValueCount === 'number') rows.push(el(HC.note, `同值出现 ${lit.sameValueCount} 处`));
+  if (typeof lit.sameValueCount === 'number') rows.push(el(HC.note, translate('monaco.sameValueCount', { n: lit.sameValueCount })));
   // L6 keyOf：只陈述「被当作哪个对象的下标键使用」这一事实，不给跳转（契约里没有键的定义位置）
-  if (lit.keyOf) rows.push(el(HC.note, `作为 ${esc(lit.keyOf)} 的键使用`));
+  if (lit.keyOf) rows.push(el(HC.note, translate('monaco.usedAsKey', { key: esc(lit.keyOf) })));
   return card(rows);
 }
 
@@ -490,13 +439,13 @@ function failureCard(res: HoverResult): string | null {
   switch (res.reason) {
     case 'external':
       return card([
-        head(name || null, null, '外部依赖'),
-        el(HC.note, '标准库 / 第三方包，不在项目索引内'),
+        head(name || null, null, translate('flow.external')),
+        el(HC.note, translate('monaco.externalNote')),
       ]);
     case 'infer-needed': {
       const rows = [
-        head(name || null, null, '需类型推断'),
-        el(HC.note, esc(res.message ?? '无法确定类型，暂不能定位定义')),
+        head(name || null, null, translate('monaco.inferNeeded')),
+        el(HC.note, esc(res.message ?? translate('monaco.inferNeededNote'))),
       ];
       // 链头（如 user）仍是确定的事实，给它可点位置
       const chainHead = defs[0];
@@ -504,11 +453,11 @@ function failureCard(res: HoverResult): string | null {
       return card(rows);
     }
     case 'indexing':
-      return card([el(HC.note, esc(res.message ?? '索引进行中，符号信息稍后可查'))]);
+      return card([el(HC.note, esc(res.message ?? translate('app.noticeIndexing')))]);
     case 'unresolved': {
       const rows = [
-        head(name || null, null, '未解析'),
-        el(HC.note, esc(res.message ?? '未找到定义：可能是运行时注入或未索引文件')),
+        head(name || null, null, translate('explain.tagUnresolved')),
+        el(HC.note, esc(res.message ?? translate('monaco.unresolvedNote'))),
       ];
       for (const d of defs) rows.push(locLine(d.location, d.containerName ? `${d.name}（${d.containerName}）` : d.name));
       return card(rows);
@@ -619,94 +568,12 @@ export function registerCodeProviders() {
 
   registerHoverCommands();
 
-  for (const lang of PROVIDER_LANGUAGES) {
-    monaco.languages.registerHoverProvider(lang, {
-      async provideHover(model, position) {
-        if (!ctx.projectId) return null;
-        const file = fileOfModel(model);
-        const res = await api
-          .hover(ctx.projectId, file, position.lineNumber, position.column)
-          .catch(() => null);
-        // 光标处没有可解释的符号 / 请求失败：不弹卡片，保持安静（§3.1 收敛规则）
-        if (!res || res.reason === 'no-symbol') return null;
-        const html = hoverCardHtml(res);
-        if (!html) return null;
-        const word = model.getWordAtPosition(position);
-        return {
-          contents: [
-            {
-              value: html,
-              supportHtml: true,
-              // 只放行卡片自己的两个只读命令，其它 command: 链接无效（卡片无写回入口）
-              isTrusted: { enabledCommands: [HOVER_CMD_OPEN, HOVER_CMD_REFS] },
-            },
-          ],
-          // 高亮范围取光标处的词；取不到就退化为光标右侧一个字符
-          range: word
-            ? new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn)
-            : new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column + 1),
-        };
-      },
-    });
-
-    monaco.languages.registerDefinitionProvider(lang, {
-      async provideDefinition(model, position) {
-        if (!ctx.projectId) return null;
-        const file = fileOfModel(model);
-        const res = await api
-          .gotoDefinition(ctx.projectId, file, position.lineNumber, position.column)
-          .catch(() => null);
-        if (!res) return null;
-        if (!res.locations.length) {
-          ctx.onGotoFailed?.({
-            kind: 'definition',
-            reason: res.reason === 'resolved' ? 'unresolved' : res.reason,
-            symbol: res.symbol ?? null,
-            external: res.external,
-          });
-          return null;
-        }
-        return res.locations.map((loc) => toLocation(loc.file, loc.range));
-      },
-    });
-
-    monaco.languages.registerReferenceProvider(lang, {
-      async provideReferences(model, position) {
-        if (!ctx.projectId) return null;
-        const file = fileOfModel(model);
-        const res = await api
-          .findReferences(ctx.projectId, {
-            file,
-            line: position.lineNumber,
-            col: position.column,
-            includeDeclaration: true,
-          })
-          .catch(() => null);
-        if (!res) return null;
-        if (!res.locations.length) {
-          ctx.onGotoFailed?.({
-            kind: 'references',
-            reason: res.reason === 'resolved' ? 'unresolved' : res.reason,
-            symbol: res.symbol ?? null,
-          });
-          return null;
-        }
-        return res.locations.map((loc) => toLocation(loc.file, loc.range));
-      },
-    });
-  }
-
-  for (const lang of SYMBOL_LANGUAGES) {
-    monaco.languages.registerDocumentSymbolProvider(lang, {
-      async provideDocumentSymbols(model) {
-        if (!ctx.projectId) return null;
-        const file = fileOfModel(model);
-        const symbols = await api.documentSymbols(ctx.projectId, file).catch(() => []);
-        return symbols.map(toDocumentSymbol);
-      },
-    });
-  }
-
+  // 语言清单来自后端（07-languages-plugin）：拿到清单后再注册插件语言与三类 Provider。
+  void ensureLanguages().then(() => {
+    applyMonacoContributions();
+    for (const lang of refLanguageList()) registerRefProviders(lang);
+    for (const lang of symbolLanguageList()) registerSymbolProvider(lang);
+  });
   // 跨文件跳转：Monaco 打开 wcr:// model 时交给 App 处理
   monaco.editor.registerEditorOpener({
     openCodeEditor(_source, resource, selectionOrPosition) {
@@ -788,8 +655,56 @@ export function registerLinkProviders() {
     },
   });
 
-  for (const lang of PROVIDER_LANGUAGES) {
-    monaco.languages.registerLinkProvider(lang, {
+  // 语言清单来自后端（07-languages-plugin）：拿到清单后再按语言注册。
+  void ensureLanguages().then(() => {
+    applyMonacoContributions();
+    for (const lang of refLanguageList()) registerLinkProviderFor(lang);
+  });
+}
+
+let contributionsApplied = false;
+
+/**
+ * 注册插件自带的 Monaco 语言（07-languages-plugin）：
+ * `register` → `setMonarchTokensProvider`（词法着色）→ `setLanguageConfiguration`（注释 / 括号 / 自动闭合）。
+ *
+ * 这就是「Monaco 内置没有的语言也能高亮」的实现点：插件的语法定义作为数据随
+ * `/api/languages` 下发，前端运行时装上去 —— 不需要改前端源码、也不需要重新构建。
+ *
+ * 幂等：两个入口（代码 Provider / 链接 Provider）都会调它，真正的注册只做一次。
+ */
+function applyMonacoContributions() {
+  if (contributionsApplied) return;
+  contributionsApplied = true;
+
+  const known = new Set(monaco.languages.getLanguages().map((l) => l.id));
+  for (const c of monacoContributions()) {
+    if (!known.has(c.id)) {
+      monaco.languages.register({ id: c.id, aliases: c.aliases, extensions: c.extensions });
+      known.add(c.id);
+    }
+    if (c.monarch) {
+      monaco.languages.setMonarchTokensProvider(c.id, c.monarch as monaco.languages.IMonarchLanguage);
+    }
+    if (c.configuration) {
+      monaco.languages.setLanguageConfiguration(c.id, c.configuration as monaco.languages.LanguageConfiguration);
+    }
+  }
+
+  // 语言注册可能晚于 model 创建（首屏打开文件与拉取元数据是并发的）：
+  // 对已存在的 model 重设语言，触发一次重新分词，避免停在 plaintext。
+  for (const model of monaco.editor.getModels()) {
+    if (model.uri.scheme !== MODEL_SCHEME) continue;
+    const file = model.uri.path.replace(/^\//, '');
+    if (!file) continue;
+    const target = monacoLangFor(guessLangFor(file));
+    if (target && model.getLanguageId() !== target) monaco.editor.setModelLanguage(model, target);
+  }
+}
+
+/** 单个语言的正文链接 Provider（N25）。 */
+function registerLinkProviderFor(lang: string) {
+  monaco.languages.registerLinkProvider(lang, {
       async provideLinks(model, token) {
         if (!ctx.projectId) return null;
         const lineCount = Math.min(model.getLineCount(), MAX_SCAN_LINES);
@@ -810,7 +725,7 @@ export function registerLinkProviders() {
             links.push({
               range: new monaco.Range(lineNo, start + 1, lineNo, start + raw.length + 1),
               url: linkUrlFor(raw, line),
-              tooltip: `打开 ${raw}${m[2] ? ` 第 ${line} 行` : ''}`,
+              tooltip: m[2] ? translate('monaco.openLinkLine', { path: raw, line }) : translate('monaco.openLink', { path: raw }),
             });
             if (links.length >= MAX_LINKS) break;
           }
@@ -835,15 +750,107 @@ export function registerLinkProviders() {
           links.push({
             range: cand.range,
             url: linkUrlFor(loc.file, loc.range.start.line, loc.range.start.col),
-            tooltip: `跳到 ${loc.file}:${loc.range.start.line}`,
+            tooltip: translate('monaco.jumpTo', { target: `${loc.file}:${loc.range.start.line}` }),
           });
         }
 
         if (!links.length) return null;
         return { links };
       },
-    });
-  }
+  });
+}
+
+/**
+ * 单个语言的引用类 Provider（hover / 跳定义 / 查引用）。
+ * 注册时机：语言清单从后端拿到之后（见 registerCodeProviders）。
+ */
+function registerRefProviders(lang: string) {
+  monaco.languages.registerHoverProvider(lang, {
+    async provideHover(model, position) {
+      if (!ctx.projectId) return null;
+      const file = fileOfModel(model);
+      const res = await api
+        .hover(ctx.projectId, file, position.lineNumber, position.column)
+        .catch(() => null);
+      // 光标处没有可解释的符号 / 请求失败：不弹卡片，保持安静（§3.1 收敛规则）
+      if (!res || res.reason === 'no-symbol') return null;
+      const html = hoverCardHtml(res);
+      if (!html) return null;
+      const word = model.getWordAtPosition(position);
+      return {
+        contents: [
+          {
+            value: html,
+            supportHtml: true,
+            // 只放行卡片自己的两个只读命令，其它 command: 链接无效（卡片无写回入口）
+            isTrusted: { enabledCommands: [HOVER_CMD_OPEN, HOVER_CMD_REFS] },
+          },
+        ],
+        // 高亮范围取光标处的词；取不到就退化为光标右侧一个字符
+        range: word
+          ? new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn)
+          : new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column + 1),
+      };
+    },
+  });
+
+  monaco.languages.registerDefinitionProvider(lang, {
+    async provideDefinition(model, position) {
+      if (!ctx.projectId) return null;
+      const file = fileOfModel(model);
+      const res = await api
+        .gotoDefinition(ctx.projectId, file, position.lineNumber, position.column)
+        .catch(() => null);
+      if (!res) return null;
+      if (!res.locations.length) {
+        ctx.onGotoFailed?.({
+          kind: 'definition',
+          reason: res.reason === 'resolved' ? 'unresolved' : res.reason,
+          symbol: res.symbol ?? null,
+          external: res.external,
+        });
+        return null;
+      }
+      return res.locations.map((loc) => toLocation(loc.file, loc.range));
+    },
+  });
+
+  monaco.languages.registerReferenceProvider(lang, {
+    async provideReferences(model, position) {
+      if (!ctx.projectId) return null;
+      const file = fileOfModel(model);
+      const res = await api
+        .findReferences(ctx.projectId, {
+          file,
+          line: position.lineNumber,
+          col: position.column,
+          includeDeclaration: true,
+        })
+        .catch(() => null);
+      if (!res) return null;
+      if (!res.locations.length) {
+        ctx.onGotoFailed?.({
+          kind: 'references',
+          reason: res.reason === 'resolved' ? 'unresolved' : res.reason,
+          symbol: res.symbol ?? null,
+        });
+        return null;
+      }
+      return res.locations.map((loc) => toLocation(loc.file, loc.range));
+    },
+  });
+}
+
+/** 单个语言的大纲 Provider（Ctrl+Shift+O）。 */
+function registerSymbolProvider(lang: string) {
+  monaco.languages.registerDocumentSymbolProvider(lang, {
+    async provideDocumentSymbols(model) {
+      if (!ctx.projectId) return null;
+      const file = fileOfModel(model);
+      const symbols = await api.documentSymbols(ctx.projectId, file).catch(() => []);
+      return symbols.map(toDocumentSymbol);
+    },
+  });
 }
 
 export { monaco };

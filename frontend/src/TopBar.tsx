@@ -93,7 +93,7 @@ export function TopBar({
               className="text-input"
               autoFocus
               aria-label={t('topbar.openFolder')}
-              placeholder="D:/code/my-project（本机绝对路径）"
+              placeholder={t('welcome.pathPlaceholder')}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -214,37 +214,37 @@ export function TopBar({
           <div className="help-title">{t('topbar.helpTitle')}</div>
           <ul>
             <li>
-              <kbd>F12</kbd> / <kbd>Ctrl</kbd>+<kbd>F12</kbd> 跳到定义（也支持 Ctrl/Cmd+Click、右键菜单）
+              <kbd>F12</kbd> / <kbd>Ctrl</kbd>+<kbd>F12</kbd> {t('topbar.shortcutGotoDef')}
             </li>
             <li>
-              <kbd>Shift</kbd>+<kbd>F12</kbd> 查找引用
+              <kbd>Shift</kbd>+<kbd>F12</kbd> {t('topbar.shortcutFindRefs')}
             </li>
             <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>P</kbd> 文件搜索
+              <kbd>Ctrl/Cmd</kbd>+<kbd>P</kbd> {t('topbar.shortcutFileSearch')}
             </li>
             <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>T</kbd> 符号搜索
+              <kbd>Ctrl/Cmd</kbd>+<kbd>T</kbd> {t('topbar.shortcutSymbolSearch')}
             </li>
             <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 全项目搜索
+              <kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> {t('topbar.shortcutProjectSearch')}
             </li>
             <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> 文件大纲
+              <kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> {t('topbar.shortcutOutline')}
             </li>
             <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>1..9</kbd> 切侧栏面板（按侧栏里的顺序）
+              <kbd>Ctrl/Cmd</kbd>+<kbd>1..9</kbd> {t('topbar.shortcutSidePanels')}
             </li>
             <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>0</kbd> 批注面板
+              <kbd>Ctrl/Cmd</kbd>+<kbd>0</kbd> {t('topbar.shortcutAnnotations')}
             </li>
             <li>
-              <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>Alt</kbd>+<kbd>→</kbd> 后退 / 前进
+              <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>Alt</kbd>+<kbd>→</kbd> {t('topbar.shortcutBackForward')}
             </li>
             <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>G</kbd> 跳到行
+              <kbd>Ctrl/Cmd</kbd>+<kbd>G</kbd> {t('topbar.shortcutGotoLine')}
             </li>
             <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>F</kbd> 当前文件内搜索
+              <kbd>Ctrl/Cmd</kbd>+<kbd>F</kbd> {t('topbar.shortcutFileSearchIn')}
             </li>
           </ul>
           <div className="help-title legend-title">{t('topbar.legendTitle')}</div>

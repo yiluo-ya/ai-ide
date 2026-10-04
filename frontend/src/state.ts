@@ -16,6 +16,7 @@ import type {
 import { api, subscribeEvents } from './api';
 import { setRead as setReadMark } from './marks';
 import { useGuideStore } from './guideState';
+import { translate } from './i18n';
 import { flushSnapshot, scheduleSnapshotWrite } from './readSnapshot';
 import { formatLineRange, formatSnippet, type SnippetInput } from './share';
 
@@ -318,7 +319,7 @@ function isDocLike(file: string): boolean {
 }
 
 function formatBytes(n: number): string {
-  if (n < 1024) return `${n} 字节`;
+  if (n < 1024) return translate('state.bytes', { n });
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
@@ -455,7 +456,9 @@ export const useStore = create<State>((set, get) => ({
     if (previous && previous !== id) void flushSnapshot(previous);
     set({
       projectId: id,
-      project: null,
+      // 顶栏项目下拉绑的是 project.id：这里不能先置 null，否则在「等文件树返回」的窗口里
+      // 下拉会跳回第一项（界面抖动）。列表里已有该项目，直接用它当占位元数据。
+      project: get().projects.find((p) => p.id === id) ?? null,
       status: null,
       tree: null,
       openFile: null,
@@ -564,7 +567,7 @@ export const useStore = create<State>((set, get) => ({
     if (node && node.type === 'file' && isDocLike(file) && (node.size ?? 0) > DOC_PREVIEW_MAX_BYTES) {
       set({
         fileLoading: false,
-        error: `文件太大，不支持预览：${file}（${formatBytes(node.size ?? 0)}；文档类超过 ${formatBytes(DOC_PREVIEW_MAX_BYTES)} 不加载）`,
+        error: translate('state.fileTooLarge', { file, size: formatBytes(node.size ?? 0), limit: formatBytes(DOC_PREVIEW_MAX_BYTES) }),
       });
       return;
     }
@@ -662,7 +665,7 @@ export const useStore = create<State>((set, get) => ({
   copyLocation(file, line, col) {
     const text = `${file}:${line}:${col}`;
     void navigator.clipboard?.writeText(text);
-    showFlash(`已复制 ${text}`);
+    showFlash(translate('state.copied', { text }));
   },
 
   /** S3a：选中的一段代码 → 带出处的片段（出处行 + 围栏代码块）。 */
@@ -671,7 +674,7 @@ export const useStore = create<State>((set, get) => ({
     if (!file) return;
     const text = formatSnippet({ ...input, file, lang: input.lang ?? get().fileLang });
     void navigator.clipboard?.writeText(text);
-    showFlash(`已复制片段 ${formatLineRange(file, input.startLine, input.endLine)}`);
+    showFlash(translate('state.copiedSnippet', { range: formatLineRange(file, input.startLine, input.endLine) }));
   },
 
   async goBack() {

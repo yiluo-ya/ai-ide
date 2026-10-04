@@ -7,6 +7,7 @@
  */
 import { create } from 'zustand';
 import { subscribeEvents } from './api';
+import { translate } from './i18n';
 import { mapApi } from './mapApi';
 import { loadMarks, setRead, setIgnored, subscribeMarks } from './marks';
 import type { HotMetric, ProjectOverview, ProjectTimeline } from './mapApi';
@@ -73,7 +74,7 @@ export const useMapStore = create<MapState>((set, get) => ({
       overview,
       timeline,
       busy: false,
-      error: overview ? null : '项目地图暂时取不到（索引可能还没就绪）',
+      error: overview ? null : translate('map.unavailable'),
     });
   },
 

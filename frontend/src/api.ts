@@ -1,5 +1,6 @@
 /** 后端 API 客户端（与 shared/types.ts 的契约一一对应）。 */
 import type {
+  AgentRuntimeStatus,
   CallDirection,
   CallHierarchyResult,
   CallNode,
@@ -38,8 +39,10 @@ import type {
   TypeHierarchyResult,
   TypeNode,
 } from '../../shared/types';
+import type { LanguagesPayload } from './languages';
 
 export type {
+  AgentRuntimeStatus,
   ProjectInfo,
   IndexStatus,
   SymbolInfo,
@@ -94,12 +97,28 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   manifest: () => request<IntegrationManifest>('/integration/manifest'),
 
+  /** 语言清单（07-languages-plugin）：前端据此建语言映射，不再硬编码（见 languages.ts）。 */
+  languages: () => request<LanguagesPayload>('/languages'),
+
   /** 设置里的自定义忽略规则（存后端 data 目录，对所有项目生效）。 */
   customIgnore: () => request<{ text: string }>('/settings/ignore'),
 
   /** 保存自定义忽略规则；保存后需重建索引才生效。 */
   saveCustomIgnore: (text: string) =>
     request<{ ok: true; text: string }>('/settings/ignore', { method: 'POST', body: JSON.stringify({ text }) }),
+
+  /**
+   * Code Agent 后端的定位状态（FR-0007）：pi 的解析来源 / 版本 / 落点与安装命令。
+   * GET 共享模式下也能读（只读）；保存（POST）只在监听本机时可用。
+   */
+  agentRuntime: () => request<AgentRuntimeStatus>('/settings/agent'),
+
+  /** 保存手填的 pi 路径（文件或目录；空串 = 清掉，回到落点与 PATH），保存后立即重探。 */
+  saveAgentRuntime: (piPath: string) =>
+    request<AgentRuntimeStatus & { ok: true }>('/settings/agent', {
+      method: 'POST',
+      body: JSON.stringify({ piPath }),
+    }),
 
   listProjects: () => request<{ projects: ProjectInfo[] }>('/projects').then((r) => r.projects),
 

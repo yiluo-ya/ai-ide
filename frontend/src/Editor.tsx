@@ -87,7 +87,7 @@ function toAgentLineDecorations(
         isWholeLine: true,
         className: 'wcr-agent-line',
         linesDecorationsClassName: 'wcr-agent-gutter',
-        hoverMessage: { value: '本轮 agent 改动（由宿主上报，非推断）' },
+        hoverMessage: { value: translate('editor.agentHover') },
       },
     });
   }
@@ -296,7 +296,7 @@ export function Editor({
     // 判据 6：把光标处复制成 `path:line:col`（右键菜单 + Ctrl/Cmd+Alt+C）
     editor.addAction({
       id: 'wcr.copyLocation',
-      label: '复制位置（path:line:col）',
+      label: translate('editor.copyLocationLabel'),
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyC],
       contextMenuGroupId: 'navigation',
       contextMenuOrder: 0,
@@ -310,7 +310,7 @@ export function Editor({
     // S3a：选中一段代码 → 带出处的片段（出处行 + 围栏代码块），可直接贴聊天窗
     editor.addAction({
       id: 'wcr.copySnippet',
-      label: '复制选中代码（带出处）',
+      label: translate('editor.copySnippetLabel'),
       precondition: 'editorHasSelection',
       contextMenuGroupId: '9_cutcopypaste',
       contextMenuOrder: 5,
@@ -326,7 +326,7 @@ export function Editor({
     // G3.5：把当前位置加入待读（与文件树共用同一份 wcr:queue:<id>）
     editor.addAction({
       id: 'wcr.addToQueue',
-      label: '把当前位置加入待读',
+      label: translate('editor.addToQueueLabel'),
       contextMenuGroupId: 'navigation',
       contextMenuOrder: 1,
       run: (ed) => {

@@ -2,6 +2,7 @@
 import { useMemo, useState } from 'react';
 import type { FileOrigin } from '../../shared/types';
 import type { FileNode } from './api';
+import { langDotStyle } from './languages';
 import { heatLevel } from './mapState';
 import { translate, useI18n } from './i18n';
 import './filetree.css';
@@ -66,7 +67,7 @@ function dirTitle(node: FileNode, decor?: TreeDecor): string {
   const info = decor?.dirs?.get(node.path);
   if (!info) return base;
   const layer = translate(`layer.${info.layer}`);
-  const duty = info.from ? `${info.duty}（出处 ${info.from}）` : info.duty;
+  const duty = info.from ? translate('filetree.dutyFrom', { duty: info.duty, from: info.from }) : info.duty;
   return `${base}\n${translate('tree.dirDuty', { layer, duty })}`;
 }
 
@@ -83,10 +84,10 @@ function matchesVisible(node: FileNode, visible: Set<string> | undefined): boole
   return (node.children ?? []).some((c) => matchesVisible(c, visible));
 }
 
-const ORIGIN_BADGE: Record<FileOrigin, { mark: string; title: string } | null> = {
+const ORIGIN_BADGE: Record<FileOrigin, { mark: string; titleKey: string } | null> = {
   // 2026-10-03 用户要求去掉「agent 产出」（没啥用）：不再在文件树上标它。
   agent: null,
-  recent: { mark: '◌', title: '最近改动（启发式推断，非「谁写的」）' },
+  recent: { mark: '◌', titleKey: 'filetree.originRecent' },
   project: null,
 };
 
@@ -102,6 +103,7 @@ function sortNodes(nodes: FileNode[]): FileNode[] {
 }
 
 function FileBadges({ file, decor }: { file: string; decor?: TreeDecor }) {
+  const { t } = useI18n();
   const fact = decor?.timeline?.get(file);
   const level = heatLevel(fact?.mtimeMs);
   const origin = fact ? ORIGIN_BADGE[fact.origin] : null;
@@ -109,23 +111,23 @@ function FileBadges({ file, decor }: { file: string; decor?: TreeDecor }) {
   return (
     <>
       {pulsing && (
-        <span className="badge pulse" title="刚被改动（本次会话内实时收到变更事件）">
+        <span className="badge pulse" title={t('filetree.pulseTitle')}>
           ●
         </span>
       )}
       {level >= 0 && (
         <span
           className={`heat heat-${level} ${pulsing ? 'is-pulse' : ''}`}
-          title={fact ? `改动时间：${new Date(fact.mtimeMs).toLocaleString()}` : undefined}
+          title={fact ? t('filetree.mtime', { time: new Date(fact.mtimeMs).toLocaleString() }) : undefined}
         />
       )}
       {origin && (
-        <span className="badge" title={`${origin.title}${fact ? `（置信度 ${fact.confidence}）` : ''}`}>
+        <span className="badge" title={`${t(origin.titleKey)}${fact ? t('filetree.confidence', { n: fact.confidence }) : ''}`}>
           {origin.mark}
         </span>
       )}
-      {decor?.hot?.has(file) && <span className="badge hot" title="热点：被多个文件引用，适合当阅读起点">★</span>}
-      {decor?.orphans?.has(file) && <span className="badge orphan" title="没人引用这个文件">?</span>}
+      {decor?.hot?.has(file) && <span className="badge hot" title={t('filetree.hotTitle')}>★</span>}
+      {decor?.orphans?.has(file) && <span className="badge orphan" title={t('filetree.orphanTitle')}>?</span>}
     </>
   );
 }
@@ -216,7 +218,8 @@ function TreeNode({
       }}
       title={node.path}
     >
-      <span className={`lang-dot lang-${node.lang ?? 'plaintext'}`} />
+      {/* 色点颜色来自后端语言元数据（07-languages-plugin），不再按 lang-* 类名硬编码 */}
+      <span className="lang-dot" style={langDotStyle(node.lang)} />
       <span className="tree-name">
         <Highlight text={node.name} term={filter} />
       </span>
@@ -261,10 +264,10 @@ export function FileTree({
 
   const children = useMemo(() => sortNodes(tree?.children ?? []), [tree]);
 
-  if (!tree) return <div className="panel-empty">尚未打开项目</div>;
-  if (!children.length) return <div className="panel-empty">项目里没有可读文件</div>;
+  if (!tree) return <div className="panel-empty">{t('filetree.noProject')}</div>;
+  if (!children.length) return <div className="panel-empty">{t('filetree.noFiles')}</div>;
   if (decor?.visible && !children.some((c) => matchesVisible(c, decor.visible))) {
-    return <div className="panel-empty">当前过滤条件下没有文件</div>;
+    return <div className="panel-empty">{t('filetree.noFilesFiltered')}</div>;
   }
 
   return (

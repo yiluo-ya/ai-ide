@@ -6,8 +6,10 @@
  */
 import { useEffect, useState } from 'react';
 import { agentApi, type ModelConfigPublic, type ModelProviderPublic } from './agentApi';
+import { useI18n } from './i18n';
 
 export function ModelSettings() {
+  const { t } = useI18n();
   const [config, setConfig] = useState<ModelConfigPublic | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -59,7 +61,7 @@ export function ModelSettings() {
           .filter(Boolean),
       });
       setConfig(res.config);
-      setNote(editing ? '已更新' : '已添加');
+      setNote(editing ? t('model.updated') : t('model.added'));
       reset();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -90,11 +92,11 @@ export function ModelSettings() {
 
   return (
     <section className="model-settings">
-      <h3 className="wcr-section-title">模型（内置 code-agent 用）</h3>
+      <h3 className="wcr-section-title">{t('model.title')}</h3>
       <p className="ag-note">
-        只对阅读器里的 code-agent 生效；pi 有自己的凭证文件，不受这里影响。
-        {config ? ` 保存到 ${config.path}。` : ''}
-        点模型名可设为默认（新会话默认用它）。
+        {t('model.intro')}
+        {config ? t('model.savedTo', { path: config.path }) : ''}
+        {t('model.defaultHint')}
       </p>
 
       {error && <div className="ms-error">{error}</div>}
@@ -108,13 +110,13 @@ export function ModelSettings() {
                 {provider.baseUrl}
               </span>
               <span className={provider.hasKey ? 'ms-ok' : 'ms-bad'}>
-                {provider.hasKey ? `key ${provider.keyHint}` : '缺 key'}
+                {provider.hasKey ? `key ${provider.keyHint}` : t('model.missingKey')}
               </span>
               <button className="btn ghost small" onClick={() => edit(provider)}>
-                编辑
+                {t('guide.note.edit')}
               </button>
               <button className="btn ghost small" onClick={() => void remove(provider.id)}>
-                删除
+                {t('guide.note.delete')}
               </button>
             </div>
             <div className="ms-models">
@@ -124,7 +126,7 @@ export function ModelSettings() {
                   <button
                     key={model}
                     className={`ms-chip${on ? ' on' : ''}`}
-                    title={on ? '取消默认' : '设为默认模型'}
+                    title={on ? t('model.unsetDefault') : t('model.setDefault')}
                     onClick={() => void setDefault(provider.id, model)}
                   >
                     {on ? '✓ ' : ''}
@@ -132,24 +134,29 @@ export function ModelSettings() {
                   </button>
                 );
               })}
-              {provider.models.length === 0 && <span className="ag-dim">没有模型 id</span>}
+              {provider.models.length === 0 && <span className="ag-dim">{t('model.noModels')}</span>}
             </div>
           </li>
         ))}
-        {(config?.providers.length ?? 0) === 0 && <li className="ag-dim">还没有 provider。</li>}
+        {(config?.providers.length ?? 0) === 0 && <li className="ag-dim">{t('model.noProviders')}</li>}
       </ul>
 
       <div className="ms-form">
         <label className="ms-field">
-          <span>名称</span>
-          <input className="text-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 deepseek" />
+          <span>{t('model.name')}</span>
+          <input
+            className="text-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('model.namePlaceholder')}
+          />
         </label>
         <label className="ms-field">
-          <span>Base URL（OpenAI 兼容）</span>
+          <span>{t('model.baseUrl')}</span>
           <input className="text-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
         </label>
         <label className="ms-field">
-          <span>API key{editing ? '（留空不改）' : ''}</span>
+          <span>API key{editing ? t('model.keyKeepHint') : ''}</span>
           <input
             className="text-input"
             type="password"
@@ -159,7 +166,7 @@ export function ModelSettings() {
           />
         </label>
         <label className="ms-field">
-          <span>模型 id（逗号分隔）</span>
+          <span>{t('model.models')}</span>
           <input
             className="text-input"
             value={models}
@@ -171,11 +178,11 @@ export function ModelSettings() {
 
       <div className="ms-actions">
         <button className="btn" disabled={saving || !baseUrl.trim()} onClick={() => void submit()}>
-          {saving ? '保存中…' : editing ? '保存修改' : '添加 provider'}
+          {saving ? t('model.saving') : editing ? t('guide.note.saveEdit') : t('model.addProvider')}
         </button>
         {editing && (
           <button className="btn ghost" onClick={reset}>
-            取消编辑
+            {t('model.cancelEdit')}
           </button>
         )}
         {note && <span className="ms-ok">{note}</span>}

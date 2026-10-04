@@ -8,6 +8,7 @@
  * 取色跟界面一致：底色 / 前景抄 READER_THEME_DARK（monaco-setup.ts），语义三档读 styles.css
  * 的 CSS 变量 —— 界面调色后截图自动跟着变，读不到（非浏览器环境）才退回默认值。
  */
+import { translate } from './i18n';
 import { monaco, monacoLangFor } from './monaco-setup';
 
 const FONT_STACK = "'JetBrains Mono', 'Consolas', monospace";
@@ -175,7 +176,7 @@ export function renderCodeSnapshot(opts: SnapshotOptions): HTMLCanvasElement {
   for (const list of hitsByLine.values()) list.sort((a, b) => a.startCol - b.startCol);
 
   const measure = document.createElement('canvas').getContext('2d');
-  if (!measure) throw new Error('当前环境没有 canvas 2d，无法生成快照');
+  if (!measure) throw new Error(translate('snapshot.noCanvas'));
   measure.font = font;
   const numberWidth = measure.measureText(String(startLine + Math.max(lines.length - 1, 0))).width;
   const gutterWidth = Math.ceil(padding + numberWidth + gutterPad * 2);
@@ -187,7 +188,7 @@ export function renderCodeSnapshot(opts: SnapshotOptions): HTMLCanvasElement {
   const truncatedWidth = width > MAX_WIDTH;
   if (truncatedWidth) width = MAX_WIDTH;
 
-  const barText = [opts.title, truncatedLines || truncatedWidth ? '…（已截断）' : ''].filter(Boolean).join('  ');
+  const barText = [opts.title, truncatedLines || truncatedWidth ? translate('snapshot.truncated') : ''].filter(Boolean).join('  ');
   const hasBar = Boolean(barText || opts.subtitle);
   const barHeight = hasBar ? Math.round(lineHeight * 1.7) : 0;
   const codeTop = padding;
@@ -200,7 +201,7 @@ export function renderCodeSnapshot(opts: SnapshotOptions): HTMLCanvasElement {
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('当前环境没有 canvas 2d，无法生成快照');
+  if (!ctx) throw new Error(translate('snapshot.noCanvas'));
 
   const hl: Record<SnapshotHit['tier'], string> = {
     project: cssVarColor('--hl-project', HL_FALLBACK.project),

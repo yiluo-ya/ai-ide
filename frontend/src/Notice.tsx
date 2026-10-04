@@ -9,6 +9,7 @@
  * no-symbol 不弹条（Q1），改由状态栏一行轻提示承担（避免误按 F12 就被打扰）。
  */
 import { useEffect, useRef } from 'react';
+import { translate, useI18n } from './i18n';
 import type { GotoNotice } from './state';
 
 export interface GotoFailureLike {
@@ -25,24 +26,24 @@ export function gotoFailureMessage(f: GotoFailureLike): string {
   const name = f.symbol?.trim();
   if (f.reason === 'no-symbol') {
     return f.kind === 'definition'
-      ? '这里没有可识别的符号（可能是注释、字符串或纯文本）'
-      : '这里没有可识别的符号，无法查找引用';
+      ? translate('notice.noSymbolDefinition')
+      : translate('notice.noSymbolReferences');
   }
   if (f.reason === 'external') {
     const mod = f.external?.module;
-    const what = name ?? '该符号';
+    const what = name ?? translate('notice.thisSymbol');
     if (mod) {
       return f.kind === 'definition'
-        ? `未跳转：${what} 来自外部依赖 ${mod}，本项目不索引其源码`
-        : `未找到引用：${what} 来自外部依赖 ${mod}，它的使用处不在本项目内`;
+        ? translate('notice.externalDefinition', { what, mod })
+        : translate('notice.externalReferences', { what, mod });
     }
     return f.kind === 'definition'
-      ? `未跳转：${what} 是外部依赖 / 语言内置符号，本项目不索引其源码`
-      : `未找到引用：${what} 是外部依赖 / 语言内置符号，不参与项目内引用`;
+      ? translate('notice.builtinDefinition', { what })
+      : translate('notice.builtinReferences', { what });
   }
   return f.kind === 'definition'
-    ? `未跳转：无法解析 ${name ?? '光标处的符号'}（通常需要类型推断，当前不做）`
-    : `未找到引用：${name ?? '该符号'} 解析不到定义，无法列出引用`;
+    ? translate('notice.unresolvedDefinition', { what: name ?? translate('notice.cursorSymbol') })
+    : translate('notice.unresolvedReferences', { what: name ?? translate('notice.thisSymbol') });
 }
 
 export function GotoNoticeBar({
@@ -56,6 +57,7 @@ export function GotoNoticeBar({
   onSearch: (name: string) => void;
   onJump: (file: string, line: number, col: number) => void;
 }) {
+  const { t } = useI18n();
   const pauseRef = useRef(false);
   const timerRef = useRef<number | null>(null);
 
@@ -95,38 +97,38 @@ export function GotoNoticeBar({
         {importLoc && (
           <button
             className="btn ghost small"
-            title={`跳到 import 行 ${importLoc.file}:${importLoc.range.start.line}`}
+            title={t('notice.jumpToImportTitle', { file: importLoc.file, line: importLoc.range.start.line })}
             onClick={() => {
               onJump(importLoc.file, importLoc.range.start.line, importLoc.range.start.col);
               onDismiss();
             }}
           >
-            跳到 import 行
+            {t('notice.jumpToImport')}
           </button>
         )}
         {name && notice.reason === 'unresolved' && (
           <button
             className="btn ghost small"
-            title={`在项目里全文搜索 ${name}`}
+            title={t('notice.searchInProjectTitle', { name })}
             onClick={() => {
               onSearch(name);
               onDismiss();
             }}
           >
-            搜 {name}
+            {t('notice.searchName', { name })}
           </button>
         )}
         {name && (
           <button
             className="btn ghost small"
-            title="把符号名复制到剪贴板"
+            title={t('notice.copySymbolTitle')}
             onClick={() => void navigator.clipboard?.writeText(name)}
           >
-            复制符号名
+            {t('notice.copySymbol')}
           </button>
         )}
         <button className="btn ghost small" onClick={onDismiss}>
-          知道就好
+          {t('notice.dismiss')}
         </button>
       </span>
     </div>

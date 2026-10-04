@@ -12,7 +12,7 @@
   min-height: 0;
   background: var(--bg-2);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
@@ -36,7 +36,7 @@
 .gv-levels {
   display: inline-flex;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   overflow: hidden;
 }
 
@@ -48,7 +48,7 @@
 .gv-btn {
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   color: var(--fg);
   padding: 3px 8px;
   font: inherit;
@@ -131,7 +131,7 @@
   transform: translateX(-50%);
   padding: 4px 12px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: var(--bg-3);
   color: var(--fg-dim);
   pointer-events: none;
@@ -158,7 +158,7 @@
 
 .gv-label {
   fill: var(--fg);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   /* 深色描边保证标签压在边/节点上也读得清 */
   paint-order: stroke;
   stroke: var(--bg);
@@ -207,7 +207,7 @@
 
 .gv-lane-label {
   fill: var(--fg-dim);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 3px;
   user-select: none;
 }
@@ -294,7 +294,7 @@
 
 .gv-sec-title {
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--fg);
 }
@@ -303,7 +303,7 @@
 .gv-sec-tests {
   padding: 6px 8px;
   border: 1px solid var(--danger-border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: var(--danger-bg);
 }
 
@@ -318,7 +318,7 @@
   width: 100%;
   padding: 3px 4px;
   border: none;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -341,13 +341,13 @@
 .gv-row-meta {
   flex: none;
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .gv-badge {
   flex: none;
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   background: var(--danger-bg-strong);
   color: var(--danger);
   font-size: 10px;
@@ -356,7 +356,7 @@
 .gv-note {
   margin: 4px 0;
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 /* 分层依据是这一节的「可信度来源」，单独给一点对比度 */
@@ -383,7 +383,7 @@
   flex: none;
   padding: 0 5px;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   color: var(--fg-dim);
   font-size: 10px;
 }

@@ -8,7 +8,7 @@
  * 模型配置**不在这里**：2026-10-03 用户要求把它提出来，与设置在顶栏平级（见 ModelDialog）。
  */
 import { useEffect, useId, useState } from 'react';
-import { api } from './api';
+import { api, type AgentRuntimeStatus } from './api';
 import { Dialog } from './Dialog';
 import { useI18n } from './i18n';
 import {
@@ -30,20 +30,28 @@ const THEME_KEY: Record<ThemeMode, string> = {
   system: 'settings.themeSystem',
 };
 
+/** pi 的解析来源 → 文案（来源由后端给枚举，文案在前端，免得英文界面里混中文）。 */
+const AGENT_SOURCE_KEY: Record<AgentRuntimeStatus['pi']['source'], string> = {
+  env: 'settings.agentSourceEnv',
+  config: 'settings.agentSourceConfig',
+  agents: 'settings.agentSourceAgents',
+  path: 'settings.agentSourcePath',
+};
+
 /** 键位说明表（与顶栏「?」同一份口径，改这里时两处一起改）。 */
 const SHORTCUTS: Array<{ keys: string; label: string }> = [
-  { keys: 'F12 / Ctrl+F12', label: '跳到定义（也支持 Ctrl/Cmd+Click、右键菜单）' },
-  { keys: 'Shift+F12', label: '查找引用' },
-  { keys: 'Ctrl/Cmd+P', label: '文件搜索' },
-  { keys: 'Ctrl/Cmd+T', label: '符号搜索' },
-  { keys: 'Ctrl/Cmd+Shift+F', label: '全项目搜索' },
-  { keys: 'Ctrl/Cmd+Shift+O', label: '文件大纲' },
-  { keys: 'Ctrl/Cmd+1..9', label: '切侧栏面板（按侧栏里的顺序）' },
-  { keys: 'Ctrl/Cmd+0', label: '批注面板' },
-  { keys: 'Alt+← / Alt+→', label: '后退 / 前进' },
-  { keys: 'Ctrl/Cmd+G', label: '跳到行' },
-  { keys: 'Ctrl/Cmd+F', label: '当前文件内搜索' },
-  { keys: 'Ctrl/Cmd+,', label: '打开设置' },
+  { keys: 'F12 / Ctrl+F12', label: 'topbar.shortcutGotoDef' },
+  { keys: 'Shift+F12', label: 'topbar.shortcutFindRefs' },
+  { keys: 'Ctrl/Cmd+P', label: 'topbar.shortcutFileSearch' },
+  { keys: 'Ctrl/Cmd+T', label: 'topbar.shortcutSymbolSearch' },
+  { keys: 'Ctrl/Cmd+Shift+F', label: 'topbar.shortcutProjectSearch' },
+  { keys: 'Ctrl/Cmd+Shift+O', label: 'topbar.shortcutOutline' },
+  { keys: 'Ctrl/Cmd+1..9', label: 'topbar.shortcutSidePanels' },
+  { keys: 'Ctrl/Cmd+0', label: 'topbar.shortcutAnnotations' },
+  { keys: 'Alt+← / Alt+→', label: 'topbar.shortcutBackForward' },
+  { keys: 'Ctrl/Cmd+G', label: 'topbar.shortcutGotoLine' },
+  { keys: 'Ctrl/Cmd+F', label: 'topbar.shortcutFileSearchIn' },
+  { keys: 'Ctrl/Cmd+,', label: 'topbar.shortcutSettings' },
 ];
 
 /** 原生 checkbox 开关（label 包住，点文字也能切）。 */
@@ -80,6 +88,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const whitespaceId = useId();
   const motionId = useId();
   const changesId = useId();
+  const agentPathId = useId();
 
   /** 服务自述里的版本号（拿不到就不显示这一行）。 */
   const [version, setVersion] = useState<string | null>(null);
@@ -125,6 +134,42 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       setIgnoreNote(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingIgnore(false);
+    }
+  };
+
+  /** Code Agent 后端（FR-0007）：手填 pi 路径 → 落点目录 → PATH，保存后立即重探。 */
+  const [agentStatus, setAgentStatus] = useState<AgentRuntimeStatus | null>(null);
+  const [piPath, setPiPath] = useState('');
+  const [agentNote, setAgentNote] = useState<string | null>(null);
+  const [savingAgent, setSavingAgent] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .agentRuntime()
+      .then((r) => {
+        if (cancelled) return;
+        setAgentStatus(r);
+        setPiPath(r.piPath);
+      })
+      .catch(() => {
+        /* 旧后端没有这个端点：不显示这一块，不影响其它设置 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveAgent = async () => {
+    setSavingAgent(true);
+    setAgentNote(null);
+    try {
+      const r = await api.saveAgentRuntime(piPath);
+      setAgentStatus(r);
+      setAgentNote(t('settings.agentSaved'));
+    } catch (e) {
+      setAgentNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingAgent(false);
     }
   };
 
@@ -269,6 +314,52 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         {ignoreNote && <span className="settings-note">{ignoreNote}</span>}
       </div>
 
+      <h3 className="wcr-section-title">{t('settings.agentSection')}</h3>
+      <p className="wcr-note">{t('settings.agentHint')}</p>
+      <div className="settings-row">
+        <label className="settings-label" htmlFor={agentPathId}>
+          {t('settings.agentPath')}
+        </label>
+        <input
+          id={agentPathId}
+          className="text-input settings-agent-input"
+          type="text"
+          spellCheck={false}
+          placeholder={t('settings.agentPathEmpty')}
+          value={piPath}
+          onChange={(e) => setPiPath(e.target.value)}
+        />
+      </div>
+      <div className="settings-actions">
+        <button className="btn" disabled={savingAgent} onClick={() => void saveAgent()}>
+          {t('settings.agentSave')}
+        </button>
+        {agentNote && <span className="settings-note">{agentNote}</span>}
+      </div>
+
+      {agentStatus && (
+        <>
+          <div className="settings-row">
+            <span className="settings-label">{t('settings.agentStatus')}</span>
+            <span className="settings-value">
+              {agentStatus.pi.available ? t('settings.agentAvailable') : t('settings.agentUnavailable')}
+              {agentStatus.pi.version ? ` · ${agentStatus.pi.version}` : ''}
+            </span>
+          </div>
+          <div className="settings-row">
+            <span className="settings-label">{t('settings.agentSource')}</span>
+            <span className="settings-value settings-wrap">
+              {`${t(AGENT_SOURCE_KEY[agentStatus.pi.source])} · ${agentStatus.pi.label}`}
+            </span>
+          </div>
+          {agentStatus.pi.error && <p className="wcr-note">{agentStatus.pi.error}</p>}
+          <p className="wcr-note">{t('settings.agentInstallHint', { dir: agentStatus.hint.dir })}</p>
+          <code className="settings-cmd">{agentStatus.hint.globalCommand}</code>
+          <code className="settings-cmd">{agentStatus.hint.prefixCommand}</code>
+          <p className="wcr-note">{t('settings.agentOpenhands', { dir: agentStatus.openhands.dir })}</p>
+        </>
+      )}
+
       <h3 className="wcr-section-title">{t('settings.about')}</h3>
       <div className="settings-row">
         <span className="settings-label">{t('settings.version')}</span>
@@ -280,7 +371,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           {SHORTCUTS.map((s) => (
             <li key={s.keys}>
               <span className="settings-keys">{s.keys}</span>
-              {s.label}
+              {t(s.label)}
             </li>
           ))}
         </ul>

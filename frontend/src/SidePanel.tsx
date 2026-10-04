@@ -7,10 +7,10 @@ import { useI18n } from './i18n';
 
 /** 继承关系的中文说法（与层级面板同一套口径）。 */
 const RELATION_TEXT: Record<TypeNode['relation'], string> = {
-  extends: '继承',
-  implements: '实现',
-  embeds: '嵌入',
-  overrides: '重写',
+  extends: 'side.relExtends',
+  implements: 'side.relImplements',
+  embeds: 'side.relEmbeds',
+  overrides: 'side.relOverrides',
 };
 
 /**
@@ -94,6 +94,7 @@ function OutlineNode({
   cursorPath: Set<string>;
   onToggle: (key: string, open: boolean) => void;
 }) {
+  const { t } = useI18n();
   const line = symbol.location.range.start.line;
   const key = outlineKey(symbol);
   const kids = symbol.children ?? [];
@@ -105,12 +106,12 @@ function OutlineNode({
         className={`outline-row ${activeLine === line ? 'active' : ''}`}
         style={{ paddingLeft: depth * 12 + 6 }}
         onClick={() => onJump(symbol)}
-        title={`${symbol.name} — 第 ${line} 行`}
+        title={t('side.outlineRowTitle', { name: symbol.name, line })}
       >
         {kids.length > 0 ? (
           <button
             className={`outline-toggle ${open ? 'open' : ''}`}
-            title={open ? '折叠' : '展开'}
+            title={open ? t('side.collapse') : t('side.expand')}
             onClick={(e) => {
               e.stopPropagation();
               onToggle(key, !open);
@@ -153,12 +154,13 @@ export function OutlinePanel({
   cursorLine: number;
   onJump: (symbol: SymbolInfo) => void;
 }) {
+  const { t } = useI18n();
   /** 手动展开 / 折叠的覆盖；缺省时按「顶层一级 + 光标链」展开。 */
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
-  if (!fileName) return <div className="panel-empty">未打开文件</div>;
+  if (!fileName) return <div className="panel-empty">{t('side.noFile')}</div>;
   // 只留方法与类（含内部类）：变量/字段/导入不进大纲
   const shown = filterOutline(symbols);
-  if (!shown.length) return <div className="panel-empty">该文件没有可识别的符号</div>;
+  if (!shown.length) return <div className="panel-empty">{t('side.noSymbols')}</div>;
   const cursorPath = new Set(symbolPathAt(shown, cursorLine).map(outlineKey));
   const allKeys: string[] = [];
   const collect = (list: SymbolInfo[]) => {
@@ -173,10 +175,10 @@ export function OutlinePanel({
     <div className="outline">
       <div className="outline-tools">
         <button className="btn ghost small" onClick={() => setAll(true)}>
-          展开全部
+          {t('side.expandAll')}
         </button>
         <button className="btn ghost small" onClick={() => setAll(false)}>
-          折叠全部
+          {t('side.collapseAll')}
         </button>
       </div>
       {shown.map((s) => (
@@ -242,6 +244,7 @@ export function RefsPanel({
   /** 判据 6：复制这一行为 `path:line:col`。 */
   onCopy: (file: string, line: number, col: number) => void;
 }) {
+  const { t } = useI18n();
   const [hideTests, setHideTests] = useState(false);
   const [active, setActive] = useState(0);
 
@@ -273,7 +276,7 @@ export function RefsPanel({
     return (
       <div className="refs-panel">
         <div className="panel-empty">
-          {busy ? '查询中…' : '把光标放在一个符号上，这里显示它的引用'}
+          {busy ? t('side.querying') : t('side.refsHint')}
         </div>
       </div>
     );
@@ -281,10 +284,10 @@ export function RefsPanel({
   if (data.reason !== 'resolved') {
     const text =
       data.reason === 'external'
-        ? `${data.symbol ?? '该符号'} 是外部依赖，引用不在本项目内`
+        ? t('side.externalRefs', { name: data.symbol ?? t('side.thisSymbol') })
         : data.reason === 'no-symbol'
-          ? '光标处没有可识别的符号'
-          : `${data.symbol ?? '该符号'} 解析不到定义，无法列出引用`;
+          ? t('side.noSymbolAtCursor')
+          : t('side.unresolvedRefs', { name: data.symbol ?? t('side.thisSymbol') });
     return (
       <div className="refs-panel">
         <div className="panel-empty">{text}</div>
@@ -332,13 +335,13 @@ export function RefsPanel({
           {data.symbol ?? '—'}
         </div>
         <div className="refs-summary">
-          {rows.filter((r) => !r.isDeclaration).length} 处引用
-          {declCount > 0 && ` · ${declCount} 处声明`}
-          {testFiles.size > 0 && ` · ${testFiles.size} 个测试文件`}
+          {t('side.refCount', { n: rows.filter((r) => !r.isDeclaration).length })}
+          {declCount > 0 && t('side.declCount', { n: declCount })}
+          {testFiles.size > 0 && t('side.testFileCount', { n: testFiles.size })}
         </div>
         <label className="refs-filter">
           <input type="checkbox" checked={hideTests} onChange={(e) => setHideTests(e.target.checked)} />
-          只看项目代码
+          {t('side.onlyProject')}
         </label>
       </div>
       {/* 家族：引用列表只说「谁提到它」，这里补「它在继承体系里的位置」 */}
@@ -352,7 +355,7 @@ export function RefsPanel({
             key={`${node.relation}:${node.file}:${node.location.range.start.line}`}
             className="refs-family-link"
             onClick={() => onJump(node.file, node.location.range.start.line, node.location.range.start.col)}
-            title={`${RELATION_TEXT[node.relation]} ${node.name} — ${node.file}:${node.location.range.start.line}`}
+            title={`${t(RELATION_TEXT[node.relation])} ${node.name} — ${node.file}:${node.location.range.start.line}`}
           >
             {node.name}
           </button>
@@ -360,24 +363,24 @@ export function RefsPanel({
         return (
           <div className="refs-family">
             <div className="refs-family-title">
-              家族
+              {t('side.family')}
               {family.kind && <span className="refs-family-kind">{family.kind}</span>}
             </div>
             {family.bases.length > 0 && (
               <div className="refs-family-row">
-                <span className="refs-family-label">继承 / 实现</span>
+                <span className="refs-family-label">{t('side.basesLabel')}</span>
                 {family.bases.map(link)}
               </div>
             )}
             {family.derived.length > 0 && (
               <div className="refs-family-row">
-                <span className="refs-family-label">被继承 / 实现（{family.derived.length}）</span>
+                <span className="refs-family-label">{t('side.derivedLabel', { n: family.derived.length })}</span>
                 {family.derived.slice(0, 6).map(link)}
-                {family.derived.length > 6 && <span className="refs-note">等 {family.derived.length} 个</span>}
+                {family.derived.length > 6 && <span className="refs-note">{t('side.moreCount', { n: family.derived.length })}</span>}
               </div>
             )}
             {family.unresolvedBases.length > 0 && (
-              <div className="refs-note">项目内找不到：{family.unresolvedBases.join('、')}</div>
+              <div className="refs-note">{t('side.unresolvedBases', { list: family.unresolvedBases.join('、') })}</div>
             )}
           </div>
         );
@@ -386,7 +389,7 @@ export function RefsPanel({
         {groups.map((g) => (
           <div key={g.file} className="refs-group">
             <div className="refs-file" title={g.file}>
-              {testFiles.has(g.file) && <span className="refs-badge">测试</span>}
+              {testFiles.has(g.file) && <span className="refs-badge">{t('explain.tagTest')}</span>}
               {g.file} <span className="muted">({g.items.length})</span>
             </div>
             {g.items.map((row) => {
@@ -401,11 +404,11 @@ export function RefsPanel({
                   title={`${row.file}:${row.line}:${row.col}`}
                 >
                   <span className="line-num">{row.line}</span>
-                  {row.isDeclaration && <span className="refs-badge decl">声明</span>}
-                  {row.isOrigin && <span className="refs-origin">← 光标</span>}
+                  {row.isDeclaration && <span className="refs-badge decl">{t('side.badgeDecl')}</span>}
+                  {row.isOrigin && <span className="refs-origin">{t('side.originMarker')}</span>}
                   <button
                     className="copy-btn"
-                    title="复制位置 path:line:col"
+                    title={t('side.copyLocationTitle')}
                     onClick={(e) => {
                       e.stopPropagation();
                       onCopy(row.file, row.line, row.col);
@@ -418,9 +421,9 @@ export function RefsPanel({
             })}
           </div>
         ))}
-        {!visible.length && <div className="panel-empty">没有可显示的引用</div>}
+        {!visible.length && <div className="panel-empty">{t('side.noVisibleRefs')}</div>}
       </div>
-      <div className="refs-foot">↑/↓ 移动 · Enter 跳过去 · Esc 回到原点 · T 只看测试</div>
+      <div className="refs-foot">{t('side.refsFoot')}</div>
     </div>
   );
 }
@@ -523,7 +526,7 @@ export function SearchPanel({
         <div className="search-input-row">
           <input
             className="text-input"
-            placeholder="搜索（Ctrl/Cmd+Shift+F 聚焦）"
+            placeholder={t('side.searchPlaceholder')}
             value={text}
             autoFocus
             onChange={(e) => setText(e.target.value)}
@@ -535,28 +538,28 @@ export function SearchPanel({
             }}
           />
           {busy ? (
-            <button className="btn small" onClick={() => onCancel?.()} title="停止这次搜索（N12）">
-              停止
+            <button className="btn small" onClick={() => onCancel?.()} title={t('side.stopSearchTitle')}>
+              {t('side.stop')}
             </button>
           ) : (
             <button className="btn ghost small" onClick={submit}>
-              搜索
+              {t('app.tab.search')}
             </button>
           )}
           {onToggleFullscreen && (
             <button
               className="btn ghost small"
               onClick={onToggleFullscreen}
-              title={fullscreen ? '回到侧栏' : '在大屏里摊开看（N11）'}
+              title={fullscreen ? t('side.backToSidebar') : t('side.fullscreenTitle')}
             >
-              {fullscreen ? '收起' : '全屏'}
+              {fullscreen ? t('side.exitFullscreen') : t('side.fullscreen')}
             </button>
           )}
         </div>
         <div className="search-input-row">
           <input
             className="text-input small"
-            placeholder="文件名 glob，如 *.py"
+            placeholder={t('side.filePatternPlaceholder')}
             value={filePattern}
             onChange={(e) => setFilePattern(e.target.value)}
           />
@@ -587,50 +590,50 @@ export function SearchPanel({
       </div>
       {dirs.length > 0 && (
         <div className="search-scopes">
-          <span className="muted">范围</span>
+          <span className="muted">{t('explain.scopeTitle')}</span>
           {dirs.slice(0, 12).map((d) => (
             <button
               key={d}
               className={`scope-pill ${selectedDirs.includes(d) ? 'active' : ''}`}
               onClick={() => toggleDir(d)}
-              title={selectedDirs.includes(d) ? '取消限定' : `只在 ${d}/ 内搜索`}
+              title={selectedDirs.includes(d) ? t('side.unlimit') : t('side.searchInDir', { dir: d })}
             >
               {d}/
             </button>
           ))}
           {selectedDirs.length > 0 && (
             <button className="scope-pill clear" onClick={() => onDirsChange?.([])}>
-              清除
+              {t('side.clear')}
             </button>
           )}
         </div>
       )}
       <div className="search-toggles">
         <label>
-          <input type="checkbox" checked={regex} onChange={(e) => setRegex(e.target.checked)} /> 正则
+          <input type="checkbox" checked={regex} onChange={(e) => setRegex(e.target.checked)} /> {t('side.regex')}
         </label>
         <label>
-          <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.target.checked)} /> 区分大小写
+          <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.target.checked)} /> {t('side.caseSensitive')}
         </label>
         <label>
-          <input type="checkbox" checked={wholeWord} onChange={(e) => setWholeWord(e.target.checked)} /> 整词
+          <input type="checkbox" checked={wholeWord} onChange={(e) => setWholeWord(e.target.checked)} /> {t('side.wholeWord')}
         </label>
         <label>
-          <input type="checkbox" checked={hideTests} onChange={(e) => setHideTests(e.target.checked)} /> 排除测试
+          <input type="checkbox" checked={hideTests} onChange={(e) => setHideTests(e.target.checked)} /> {t('side.excludeTests')}
         </label>
       </div>
       <div className="search-summary">
         {busy
-          ? '搜索中…（可随时停止）'
+          ? t('side.searching')
           : hits.length
-            ? `${total} 处命中，分布在 ${hits.length} 个文件${hideTests ? `（显示 ${shown.length} 个）` : ''}`
+            ? `${t('side.hitsSummary', { total, files: hits.length })}${hideTests ? t('side.hitsShown', { n: shown.length }) : ''}`
             : text.trim() && text.trim() !== query.trim()
               ? // 输入了但还没提交：别说「无命中」——那会让人以为搜过了
-                '按 Enter 或点「搜索」开始'
+                t('side.startHint')
               : text
-                ? '无命中'
+                ? t('side.noHits')
                 : ''}
-        {truncated && <span className="warn">（已截断，请缩小范围）</span>}
+        {truncated && <span className="warn">{t('side.truncated')}</span>}
       </div>
       <div className="search-results">
         {byDir.map((dir) => (
@@ -646,7 +649,7 @@ export function SearchPanel({
                     key={`${m.line}:${m.col}:${i}`}
                     className="search-hit"
                     onClick={() => onOpen(group.file, m.line, m.col)}
-                    title={`第 ${m.line} 行`}
+                    title={t('side.lineTitle', { line: m.line })}
                   >
                     <span className="line-num">{m.line}</span>
                     <span className="preview">

@@ -7,6 +7,7 @@
  * 3) 只陈列索引与文件系统里能确认的事实（不生成式摘要、不做优劣裁决）。
  */
 import { useMemo, useState } from 'react';
+import { langLabel, langSegStyle } from './languages';
 import type {
   DirDuty,
   FileFact,
@@ -40,21 +41,21 @@ function fmtBytes(n: number): string {
 
 /** M3.2 六档口径的中文说明。 */
 const HOT_LABEL: Record<HotMetric, string> = {
-  files: '被引用文件数',
-  refs: '被引用条目数',
-  symbols: '符号被引用数',
-  defined: '定义数',
-  unique: '独有依赖',
-  recent: '新近度',
+  files: 'overview.hotFiles',
+  refs: 'overview.hotRefs',
+  symbols: 'overview.hotSymbols',
+  defined: 'overview.hotDefined',
+  unique: 'overview.hotUnique',
+  recent: 'overview.hotRecent',
 };
 
 /** 分层名字（M4.2）。 */
 const LAYER_LABEL: Record<GraphLayer, string> = {
-  entry: '入口层',
-  domain: '领域层',
-  infra: '基础设施层',
-  utility: '工具层',
-  isolated: '孤立 / 测试',
+  entry: 'layer.entry',
+  domain: 'layer.domain',
+  infra: 'layer.infra',
+  utility: 'layer.utility',
+  isolated: 'layer.isolated',
 };
 
 /** 「点数字列出构成」的抽屉内容。 */
@@ -79,6 +80,7 @@ function FileRow({
   onOpen: (file: string) => void;
   onIgnore?: (file: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="ov-row">
       <button className="ov-row-main" onClick={() => onOpen(file)} title={file}>
@@ -87,8 +89,8 @@ function FileRow({
       </button>
       {extra && <span className="ov-extra">{extra}</span>}
       {onIgnore && (
-        <button className="ov-row-act" onClick={() => onIgnore(file)} title="不再出现在孤立清单里">
-          标记忽略
+        <button className="ov-row-act" onClick={() => onIgnore(file)} title={t('overview.ignoreTitle')}>
+          {t('guide.nav.ignore')}
         </button>
       )}
     </div>
@@ -104,14 +106,15 @@ function EntryRow({
   rank: number;
   onOpen: (file: string, line?: number) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="ov-entry">
       <span className={`ov-rank ${item.kind}`}>{rank}</span>
       <button className="ov-row-main" onClick={() => onOpen(item.file)} title={item.file}>
         <span className="ov-file">{item.file}</span>
       </button>
-      {item.kind === 'entry' && <span className="ov-badge entry">入口</span>}
-      <span className="ov-extra">{item.lines} 行</span>
+      {item.kind === 'entry' && <span className="ov-badge entry">{t('flow.badgeEntry')}</span>}
+      <span className="ov-extra">{t('overview.linesCount', { n: item.lines })}</span>
       {/* 理由换行另起一行：半宽卡片里挤在同一行只会被省略号吃掉（2026-10-03 布局） */}
       <span className="ov-note ov-entry-why">{item.reasons.join(' · ') || '—'}</span>
     </div>
@@ -245,7 +248,9 @@ function ChangesHint({
         {result?.isRepo && (
           <div className="guide-start-row">
             <b>{entries.length > 0 ? t('changes.startChanged', { n: entries.length }) : t('changes.empty')}</b>
-            <span className="guide-muted">分支 {result.branch ?? '（无提交）'}</span>
+            <span className="guide-muted">
+              {t('overview.branch', { name: result.branch ?? t('overview.noCommit') })}
+            </span>
             {(added > 0 || removed > 0) && (
               <span className="guide-muted">{t('changes.lines', { added, removed })}</span>
             )}
@@ -257,7 +262,7 @@ function ChangesHint({
         )}
         {!result && (
           <div className="guide-start-row">
-            <span className="guide-muted">{busy ? '读取中…' : t('changes.noGit')}</span>
+            <span className="guide-muted">{busy ? t('overview.reading') : t('changes.noGit')}</span>
             <span className="spacer" />
             <button className="btn ghost small" onClick={() => void refresh()} disabled={busy}>
               {t('changes.refresh')}
@@ -267,10 +272,12 @@ function ChangesHint({
         {agentMarks.length > 0 && (
           <div className="ov-agent-marks">
             <div className="ov-note">
-              本轮 agent 产出（宿主上报 {agentMarks.length} 个文件：
-              {agentMarks.filter((m) => m.lines.length > 0).length} 个带行范围）
+              {t('overview.agentRound', {
+                files: agentMarks.length,
+                ranged: agentMarks.filter((m) => m.lines.length > 0).length,
+              })}
               <button className="ov-row-act" onClick={() => markReadMany(agentMarks.map((m) => m.file))}>
-                全部标记已读
+                {t('overview.markAllRead')}
               </button>
             </div>
             <div className="ov-chips">
@@ -278,13 +285,17 @@ function ChangesHint({
                 <button
                   key={m.file}
                   className="ov-chip is-agent"
-                  title={m.lines.length ? `变更行：${m.lines.map(([a, b]) => (a === b ? a : `${a}-${b}`)).join(', ')}` : '只标到文件级'}
+                  title={m.lines.length
+                    ? t('overview.changedLines', { list: m.lines.map(([a, b]) => (a === b ? a : `${a}-${b}`)).join(', ') })
+                    : t('overview.fileLevelOnly')}
                   onClick={() => onOpen(m.file, m.lines[0]?.[0] ?? 1)}
                 >
                   ▣ {m.file}
                 </button>
               ))}
-              {agentMarks.length > 16 && <span className="ov-note">…等 {agentMarks.length} 个</span>}
+              {agentMarks.length > 16 && (
+                <span className="ov-note">{t('overview.moreItems', { n: agentMarks.length })}</span>
+              )}
             </div>
           </div>
         )}
@@ -358,6 +369,7 @@ function Stat({
 }
 
 export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
+  const { t } = useI18n();
   const overview = useMapStore((s) => s.overview);
   const busy = useMapStore((s) => s.busy);
   const options = useMapStore((s) => s.options);
@@ -395,7 +407,7 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
     if (busy) {
       return (
         <div className="overview">
-          <div className="ov-empty">正在生成项目地图…</div>
+          <div className="ov-empty">{t('overview.generatingMap')}</div>
         </div>
       );
     }
@@ -417,24 +429,22 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
     return (
       <div className="overview">
         <div className="ov-partial">
-          <b>正在建立项目地图…</b>
+          <b>{t('overview.buildingMap')}</b>
           <span>
-            已索引 {partial.filesIndexed}/{partial.filesTotal || '?'} 个文件
-            {partial.filesTotal > 0 ? `（${Math.round((partial.progress ?? 0) * 100)}%）` : ''}
+            {t('overview.indexedFiles', { indexed: partial.filesIndexed, total: partial.filesTotal || '?' })}
+            {partial.filesTotal > 0 ? t('overview.percentParen', { n: Math.round((partial.progress ?? 0) * 100) }) : ''}
           </span>
-          <span className="ov-note">
-            这一步只是把文件读进索引；跑完语言分布、热点榜、孤立文件与环检测会同时出现。
-          </span>
+          <span className="ov-note">{t('overview.buildingMapNote')}</span>
         </div>
         <div className="ov-grid">
           <section className="ov-card">
-            <h3>它是什么</h3>
+            <h3>{t('explain.target')}</h3>
             <div className="ov-stats">
-              <Metric value={identity.files} label="个文件（含测试）" note={notes.files?.label} />
-              <Metric value={identity.dirs} label="个目录" note={notes.dirs?.label} />
-              <Metric value={fmtBytes(identity.bytes)} label="字节" note={notes.bytes?.label} />
+              <Metric value={identity.files} label={t('overview.filesWithTests')} note={notes.files?.label} />
+              <Metric value={identity.dirs} label={t('overview.dirCountLabel')} note={notes.dirs?.label} />
+              <Metric value={fmtBytes(identity.bytes)} label={t('overview.bytesLabel')} note={notes.bytes?.label} />
             </div>
-            <div className="ov-note">规模与目录树来自扫描结果，此刻已可信；其余指标等索引完成。</div>
+            <div className="ov-note">{t('overview.scaleNote')}</div>
           </section>
         </div>
       </div>
@@ -468,26 +478,30 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
     <div className="overview">
       <header className="ov-head">
         <h2>
-          项目地图 · <span className="ov-project">{overview.project.name}</span>
+          {t('app.projectMap')} · <span className="ov-project">{overview.project.name}</span>
         </h2>
         <div className="ov-head-actions">
           {indexing && (
             <span className="ov-indexing" title={partial.notes.join('；')}>
-              索引中 {Math.round((partial.progress ?? 0) * 100)}%（{partial.filesIndexed}/{partial.filesTotal}）
+              {t('topbar.indexing', {
+                percent: Math.round((partial.progress ?? 0) * 100),
+                indexed: partial.filesIndexed,
+                total: partial.filesTotal,
+              })}
             </span>
           )}
-          <span className="ov-note" title="所有数字的口径见各自的悬浮说明；点数字可列出构成">
-            口径可点
+          <span className="ov-note" title={t('overview.metricsNoteTitle')}>
+            {t('overview.metricsClickable')}
           </span>
           <button className="btn ghost" onClick={onOpenGraph}>
-            看依赖图 →
+            {t('overview.seeGraph')}
           </button>
         </div>
       </header>
 
       {indexing && (
         <div className="ov-partial">
-          <b>还在索引：这是部分地图</b>
+          <b>{t('overview.partialMap')}</b>
           {partial.notes.map((n) => (
             <span key={n} className="ov-note">
               {n}
@@ -500,39 +514,39 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
       <section className="ov-metrics">
         <Stat
           value={identity.files}
-          label="文件"
+          label={t('overview.statFiles')}
           note={notes.files?.label}
-          onClick={() => void openDrawer({ kind: 'facts', title: `全部 ${identity.files} 个文件`, note: notes.files?.label, pick: () => true, sort: bySize })}
+          onClick={() => void openDrawer({ kind: 'facts', title: t('overview.allFilesTitle', { n: identity.files }), note: notes.files?.label, pick: () => true, sort: bySize })}
         />
         <Stat
           value={identity.dirs}
-          label="目录"
+          label={t('overview.statDirs')}
           note={notes.dirs?.label}
-          onClick={() => void openDrawer({ kind: 'facts', title: `出现的目录（${dirs.length} 个）`, note: notes.dirs?.label, pick: () => false })}
+          onClick={() => void openDrawer({ kind: 'facts', title: t('overview.dirsTitle', { n: dirs.length }), note: notes.dirs?.label, pick: () => false })}
         />
         <Stat
           value={identity.lines.toLocaleString()}
-          label="行"
+          label={t('overview.statLines')}
           note={notes.lines?.label}
-          onClick={() => void openDrawer({ kind: 'facts', title: '已索引源码按行数降序', note: notes.lines?.label, pick: (f) => f.indexed, sort: byLines })}
+          onClick={() => void openDrawer({ kind: 'facts', title: t('overview.indexedByLines'), note: notes.lines?.label, pick: (f) => f.indexed, sort: byLines })}
         />
         <Stat
           value={fmtBytes(identity.bytes)}
-          label="大小"
+          label={t('overview.statSize')}
           note={notes.bytes?.label}
-          onClick={() => void openDrawer({ kind: 'facts', title: '全部文件按大小降序', note: notes.bytes?.label, pick: () => true, sort: bySize })}
+          onClick={() => void openDrawer({ kind: 'facts', title: t('overview.allBySize'), note: notes.bytes?.label, pick: () => true, sort: bySize })}
         />
         <Stat
           value={identity.indexedFiles}
-          label="符号索引"
+          label={t('overview.statSymbolIndex')}
           note={notes.indexedFiles?.label}
-          onClick={() => void openDrawer({ kind: 'facts', title: `已进符号索引的 ${identity.indexedFiles} 个文件`, note: notes.indexedFiles?.label, pick: (f) => f.indexed, sort: byLines })}
+          onClick={() => void openDrawer({ kind: 'facts', title: t('overview.indexedFilesTitle', { n: identity.indexedFiles }), note: notes.indexedFiles?.label, pick: (f) => f.indexed, sort: byLines })}
         />
         <Stat
           value={identity.testFiles}
-          label="测试 / 示例"
-          note="按目录名与文件名判定（tests / spec / __tests__ / examples …）"
-          onClick={() => void openDrawer({ kind: 'facts', title: `测试 / 示例文件（${identity.testFiles} 个）`, note: '这批文件在热点榜里默认被降噪', pick: (f) => f.test, sort: bySize })}
+          label={t('overview.statTests')}
+          note={t('overview.testsNote')}
+          onClick={() => void openDrawer({ kind: 'facts', title: t('overview.testFilesTitle', { n: identity.testFiles }), note: t('overview.testFilesNote'), pick: (f) => f.test, sort: bySize })}
         />
       </section>
 
@@ -546,52 +560,52 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
         {/* ---------------------------------------------------- 它是什么 */}
         <section className="ov-card tone-identity">
           <h3>
-            它是什么
-            <span className="ov-h3-note">{identity.langs.length} 种语言</span>
+            {t('explain.target')}
+            <span className="ov-h3-note">{t('overview.langCount', { n: identity.langs.length })}</span>
           </h3>
           <div className="ov-langs">
             {identity.langs.map((l) => (
               <div className="ov-lang" key={l.lang}>
-                <span className="ov-lang-name">{l.lang}</span>
+                <span className="ov-lang-name">{langLabel(l.lang)}</span>
                 <span className="ov-lang-bar">
                   <span
                     className="ov-lang-seg"
                     data-lang={l.lang}
-                    style={{ width: `${(l.files / totalLangFiles) * 100}%` }}
+                    style={{ width: `${(l.files / totalLangFiles) * 100}%`, ...langSegStyle(l.lang) }}
                   />
                 </span>
                 <button
                   className="ov-lang-num ov-metric-btn"
-                  title={`点开列出 ${l.lang} 的 ${l.files} 个文件（其中测试 ${l.tests} 个）`}
+                  title={t('overview.langFilesTitle', { lang: langLabel(l.lang), files: l.files, tests: l.tests })}
                   onClick={() =>
                     void openDrawer({
                       kind: 'facts',
-                      title: `${l.lang} 的文件（${l.files} 个，含测试 ${l.tests} 个）`,
-                      note: '按字节降序；这个数来自文件扩展名归类',
+                      title: t('overview.langFilesDrawer', { lang: langLabel(l.lang), files: l.files, tests: l.tests }),
+                      note: t('overview.langFilesNote'),
                       pick: (f) => f.lang === l.lang,
                       sort: bySize,
                     })
                   }
                 >
-                  {l.files} 文件 · {Math.round((l.files / totalLangFiles) * 100)}%
+                  {t('overview.langStat', { files: l.files, percent: Math.round((l.files / totalLangFiles) * 100) })}
                 </button>
               </div>
             ))}
-            {!identity.langs.length && <div className="ov-note">没有已索引的源码文件。</div>}
+            {!identity.langs.length && <div className="ov-note">{t('overview.noIndexedSources')}</div>}
           </div>
           <div className="ov-meta">
-            <span>包类型：{meta.kind}</span>
-            {meta.name && <span>包名：{meta.name}</span>}
+            <span>{t('overview.pkgKind', { kind: meta.kind })}</span>
+            {meta.name && <span>{t('overview.pkgName', { name: meta.name })}</span>}
             {meta.modulePath && <span>module：{meta.modulePath}</span>}
-            {meta.scripts.length > 0 && <span>脚本：{meta.scripts.slice(0, 6).join(' / ')}</span>}
+            {meta.scripts.length > 0 && <span>{t('overview.pkgScripts', { list: meta.scripts.slice(0, 6).join(' / ') })}</span>}
           </div>
           {readme && (
             <div className="ov-readme">
               <button className="ov-linklike" onClick={() => setShowReadme((v) => !v)}>
-                {showReadme ? '收起' : '展开'} README（{readme.path}）
+                {t(showReadme ? 'overview.readmeCollapse' : 'overview.readmeExpand', { path: readme.path })}
               </button>
               <button className="ov-row-act" onClick={() => onOpenFile(readme.path, 1)}>
-                打开全文
+                {t('overview.openFullText')}
               </button>
               {showReadme && <pre className="ov-readme-body">{readme.excerpt}</pre>}
             </div>
@@ -601,17 +615,17 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
         {/* ---------------------------------------------------- 从哪看起 */}
         <section className="ov-card ov-wide tone-entry">
           <h3>
-            从哪看起
+            {t('overview.whereToStart')}
             <span className="ov-h3-actions">
               <select
                 className="ov-select"
                 value={options.hot}
                 onChange={(e) => setOptions({ hot: e.target.value as HotMetric })}
-                title="热点排序口径（M3.2）：换了口径，榜单会跟着换"
+                title={t('overview.hotSortTitle')}
               >
                 {(Object.keys(HOT_LABEL) as HotMetric[]).map((key) => (
                   <option key={key} value={key}>
-                    {HOT_LABEL[key]}
+                    {t(HOT_LABEL[key])}
                   </option>
                 ))}
               </select>
@@ -621,33 +635,34 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
                   checked={options.denoise}
                   onChange={(e) => setOptions({ denoise: e.target.checked })}
                 />
-                测试/示例降噪
+                {t('overview.denoise')}
               </label>
             </span>
           </h3>
           {entries.length ? (
             entries.map((e, i) => <EntryRow key={e.file} item={e} rank={i + 1} onOpen={open} />)
           ) : (
-            <div className="ov-note">还没算出可读的起点（索引可能没跑完）。</div>
+            <div className="ov-note">{t('overview.noEntries')}</div>
           )}
           {hot.length > 0 && (
             <details className="ov-details">
               <summary>
-                热点榜（{HOT_LABEL[options.hot]}，Top {hot.length}）
+                {t('overview.hotTitle', { label: t(HOT_LABEL[options.hot]), n: hot.length })}
               </summary>
               {hot.map((h) => (
                 <FileRow
                   key={h.file}
                   file={h.file}
-                  note={`入度 ${h.inDegree} 文件 · 出度 ${h.outDegree} 文件 · 独有依赖 ${h.uniqueUpstream}`}
-                  extra={`${h.lines} 行 · ${h.exports} 个导出 · ${h.longestFunction} 行最长函数`}
+                  note={t('overview.hotRowNote', { inDegree: h.inDegree, outDegree: h.outDegree, unique: h.uniqueUpstream })}
+                  extra={t('overview.hotRowExtra', { lines: h.lines, exports: h.exports, longest: h.longestFunction })}
                   onOpen={open}
                 />
               ))}
               <div className="ov-note">
-                口径：{HOT_LABEL[options.hot]}
-                {options.denoise ? '（已排除测试 / 示例文件及其引用）' : '（含测试 / 示例）'}。
-                「独有依赖」= 只有这个文件提供了某个符号，且有多少个文件在用它。
+                {t('overview.hotNote', {
+                  label: t(HOT_LABEL[options.hot]),
+                  scope: t(options.denoise ? 'overview.denoiseOn' : 'overview.denoiseOff'),
+                })}
               </div>
             </details>
           )}
@@ -656,36 +671,36 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
         {/* ------------------------------------------- 结构与目录职责 */}
         <section className="ov-card ov-wide tone-structure">
           <h3>
-            结构
-            {cycles.length > 0 && <span className="ov-warn">{cycles.length} 处循环依赖</span>}
+            {t('overview.structure')}
+            {cycles.length > 0 && <span className="ov-warn">{t('overview.cycleWarn', { n: cycles.length })}</span>}
           </h3>
           <div className="ov-stats">
             <Metric
               value={cycles.length}
-              label="处循环依赖"
-              note="Tarjan 强连通分量，文件级；只报事实，不给「该重构了」的结论"
-              onClick={() => void openDrawer({ kind: 'files', title: '环上的文件', note: '同一个环里的文件互相引用', files: cycles.flat() })}
+              label={t('overview.cycleLabel')}
+              note={t('overview.cycleNote')}
+              onClick={() => void openDrawer({ kind: 'files', title: t('overview.filesInCycle'), note: t('overview.cycleFilesNote'), files: cycles.flat() })}
               tone={cycles.length ? 'warn' : undefined}
             />
             <Metric
               value={orphanVisible.length}
-              label="个孤立文件"
-              note="入度为 0，且不是入口 / 文档 / 测试 —— 通常可以先跳过"
+              label={t('overview.orphanLabel')}
+              note={t('overview.orphanNote')}
             />
             <Metric
               value={dirs.length}
-              label="个目录"
-              note="含根目录；点开看每个目录的职责与依赖面"
+              label={t('overview.dirCountLabel')}
+              note={t('overview.dirMetricNote')}
             />
           </div>
 
           {cycles.length > 0 && (
             <details className="ov-details" open>
-              <summary>循环依赖（{cycles.length}）</summary>
+              <summary>{t('overview.cyclesTitle', { n: cycles.length })}</summary>
               {cycles.map((group, i) => (
                 <div className="ov-cycle" key={group.join('|')}>
                   <span className="ov-note">
-                    环 {i + 1}（{group.length} 个文件）
+                    {t('overview.cycleN', { n: i + 1, files: group.length })}
                   </span>
                   {group.map((f) => (
                     <button key={f} className="ov-chip" onClick={() => open(f)}>
@@ -699,12 +714,12 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
 
           {orphanVisible.length > 0 && (
             <details className="ov-details">
-              <summary>孤立文件（{orphanVisible.length}）：没人引用，通常可以先跳过</summary>
+              <summary>{t('overview.orphansTitle', { n: orphanVisible.length })}</summary>
               {orphanVisible.map((o: OverviewFile) => (
                 <FileRow
                   key={o.file}
                   file={o.file}
-                  note={`${o.lines} 行 · ${o.defs} 个定义`}
+                  note={t('overview.orphanRowNote', { lines: o.lines, defs: o.defs })}
                   extra={fmtBytes(o.size)}
                   onOpen={open}
                   onIgnore={(f) => toggleIgnored(f)}
@@ -715,39 +730,37 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
 
           <details className="ov-details">
             <summary>
-              目录职责与分层（{dirs.length}）
+              {t('overview.dirDutyTitle', { n: dirs.length })}
               <select
                 className="ov-select"
                 value={dirSort}
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => setDirSort(e.target.value as typeof dirSort)}
               >
-                <option value="files">按文件数</option>
-                <option value="deps">按依赖面</option>
-                <option value="name">按名字</option>
+                <option value="files">{t('overview.sortByFiles')}</option>
+                <option value="deps">{t('overview.sortByDeps')}</option>
+                <option value="name">{t('overview.sortByName')}</option>
               </select>
             </summary>
-            <div className="ov-note">
-              分层是按「依赖方向 + 目录名惯例」判的（每条都给了依据），不是架构真值；职责一句话只截取原文，拿不到原文就写事实句。
-            </div>
+            <div className="ov-note">{t('overview.dirDutyNote')}</div>
             {sortedDirs.map((d: DirDuty) => (
               <div className="ov-dir" key={d.dir || '.'}>
                 <div className="ov-dir-head">
-                  <span className={`ov-layer layer-${d.layer}`}>{LAYER_LABEL[d.layer]}</span>
+                  <span className={`ov-layer layer-${d.layer}`}>{t(LAYER_LABEL[d.layer])}</span>
                   <span className="ov-file">{d.dir ? `${d.dir}/` : './'}</span>
-                  <span className="ov-note">{d.files} 文件 · {fmtBytes(d.bytes)}</span>
+                  <span className="ov-note">{t('overview.dirStat', { files: d.files, bytes: fmtBytes(d.bytes) })}</span>
                   <span className="ov-extra" title={d.layerReason}>
-                    被 {d.inboundDirs.length} 目录依赖 · 依赖 {d.outboundDirs.length} 目录
+                    {t('overview.dirDeps', { inbound: d.inboundDirs.length, outbound: d.outboundDirs.length })}
                   </span>
                 </div>
                 <div className="ov-dir-duty">
                   {d.duty}
                   {d.dutyFrom ? (
                     <button className="ov-linklike" onClick={() => open(d.dutyFrom!)}>
-                      （据 {d.dutyFrom}）
+                      {t('overview.dutyFrom', { from: d.dutyFrom })}
                     </button>
                   ) : (
-                    <span className="ov-note">（事实句）</span>
+                    <span className="ov-note">{t('overview.dutyFact')}</span>
                   )}
                 </div>
                 {(d.keyFiles.length > 0 || d.inboundDirs.length > 0) && (
@@ -758,7 +771,7 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
                       </button>
                     ))}
                     {d.inboundDirs.length > 0 && (
-                      <span className="ov-note">← 依赖它：{d.inboundDirs.join(' ')}</span>
+                      <span className="ov-note">{t('overview.inboundDirs', { dirs: d.inboundDirs.join(' ') })}</span>
                     )}
                   </div>
                 )}
@@ -767,12 +780,12 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
           </details>
 
           <details className="ov-details">
-            <summary>最大文件 Top {largestFiles.length}</summary>
+            <summary>{t('overview.largestFilesTitle', { n: largestFiles.length })}</summary>
             {largestFiles.map((f) => (
               <FileRow
                 key={f.file}
                 file={f.file}
-                note={`${f.lines} 行 · ${f.lang}`}
+                note={t('overview.fileRowNote', { lines: f.lines, lang: f.lang })}
                 extra={fmtBytes(f.size)}
                 onOpen={open}
               />
@@ -780,12 +793,12 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
           </details>
 
           <details className="ov-details">
-            <summary>目录规模 / 依赖面 Top {largestDirs.length}</summary>
+            <summary>{t('overview.largestDirsTitle', { n: largestDirs.length })}</summary>
             {largestDirs.map((d) => (
               <div className="ov-row" key={d.dir || '.'}>
                 <span className="ov-file">{d.dir ? `${d.dir}/` : './'}</span>
                 <span className="ov-note">
-                  {d.files} 文件 · {fmtBytes(d.bytes)} · 被 {d.inbound} 个目录依赖 · 依赖 {d.outbound} 个目录
+                  {t('overview.dirRowNote', { files: d.files, bytes: fmtBytes(d.bytes), inbound: d.inbound, outbound: d.outbound })}
                 </span>
               </div>
             ))}
@@ -793,31 +806,29 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
 
           <details className="ov-details">
             <summary>
-              复杂度 Top {sortedComplex.length}
+              {t('overview.complexTitle', { n: sortedComplex.length })}
               <select
                 className="ov-select"
                 value={complexSort}
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => setComplexSort(e.target.value as typeof complexSort)}
               >
-                <option value="branches">按分支数</option>
-                <option value="nesting">按嵌套深度</option>
-                <option value="longestFunction">按最长函数</option>
-                <option value="exports">按导出数</option>
+                <option value="branches">{t('overview.sortByBranches')}</option>
+                <option value="nesting">{t('overview.sortByNesting')}</option>
+                <option value="longestFunction">{t('overview.sortByLongest')}</option>
+                <option value="exports">{t('overview.sortByExports')}</option>
               </select>
             </summary>
             {sortedComplex.map((c) => (
               <FileRow
                 key={c.file}
                 file={c.file}
-                note={`分支 ${c.branches} · 嵌套 ${c.nesting} · 最长函数 ${c.longestFunction} 行 · 平均 ${c.avgFunction} 行`}
-                extra={`${c.exports} 导出 · ${c.lines} 行`}
+                note={t('overview.complexRowNote', { branches: c.branches, nesting: c.nesting, longest: c.longestFunction, avg: c.avgFunction })}
+                extra={t('overview.complexRowExtra', { exports: c.exports, lines: c.lines })}
                 onOpen={open}
               />
             ))}
-            <div className="ov-note">
-              分支数是 AST 分支节点的近似圈复杂度，函数长度按定义的行范围算；只给客观计数，不做「该重构了」的裁决。
-            </div>
+            <div className="ov-note">{t('overview.complexNote')}</div>
           </details>
         </section>
 
@@ -829,16 +840,16 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
           <div className="ov-drawer-head">
             <b>{drawer.title}</b>
             <button className="ov-row-act" onClick={() => setDrawer(null)}>
-              关闭
+              {t('common.close')}
             </button>
           </div>
-          {drawer.note && <div className="ov-note">口径：{drawer.note}</div>}
-          {!facts && <div className="ov-note">正在取文件清单…</div>}
+          {drawer.note && <div className="ov-note">{t('overview.drawerNote', { note: drawer.note })}</div>}
+          {!facts && <div className="ov-note">{t('overview.loadingFacts')}</div>}
           <div className="ov-drawer-body">
             {drawer.kind === 'files' &&
               (drawer.files.length
                 ? [...new Set(drawer.files)].map((f) => <FileRow key={f} file={f} onOpen={open} />)
-                : <div className="ov-note">没有内容。</div>)}
+                : <div className="ov-note">{t('overview.noContent')}</div>)}
             {drawer.kind === 'facts' &&
               (() => {
                 const list = factsFor(drawer.pick, drawer.sort);
@@ -848,13 +859,13 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
                     <FileRow
                       key={f.file}
                       file={f.file}
-                      note={`${f.lines} 行 · 入度 ${f.inDegree} · 出度 ${f.outDegree}${f.test ? ' · 测试' : ''}`}
+                      note={`${t('overview.factRowNote', { lines: f.lines, inDegree: f.inDegree, outDegree: f.outDegree })}${f.test ? t('overview.testSuffix') : ''}`}
                       extra={fmtBytes(f.size)}
                       onOpen={open}
                     />
                   ))
                 ) : (
-                  <div className="ov-note">没有符合条件的文件。</div>
+                  <div className="ov-note">{t('overview.noMatchingFiles')}</div>
                 );
               })()}
           </div>
@@ -878,6 +889,7 @@ export function OverviewPanel({
   onOpenMap: () => void;
   onOpenGraph: () => void;
 }) {
+  const { t } = useI18n();
   const overview = useMapStore((s) => s.overview);
   const ignored = useMapStore((s) => s.ignored);
   const toggleIgnored = useMapStore((s) => s.toggleIgnored);
@@ -887,7 +899,7 @@ export function OverviewPanel({
   const [openSection, setOpenSection] = useState<'cycles' | 'orphans' | null>(null);
 
   if (!overview) {
-    return <div className="panel-empty">项目地图正在生成…</div>;
+    return <div className="panel-empty">{t('overview.mapGenerating')}</div>;
   }
   const { identity, entries, orphans, largestFiles, cycles, meta, agentMarks, partial } = overview;
   const orphanVisible = orphans.filter((o) => !ignored[o.file]);
@@ -900,11 +912,11 @@ export function OverviewPanel({
         <span className="ov-note">{meta.kind}</span>
       </div>
       {partial.indexing && (
-        <div className="ov-note">索引中 {Math.round((partial.progress ?? 0) * 100)}% · 这是部分地图</div>
+        <div className="ov-note">{t('overview.indexingPartial', { percent: Math.round((partial.progress ?? 0) * 100) })}</div>
       )}
       <div className="ov-panel-stats">
-        <span>文件 {identity.files}</span>
-        <span>目录 {identity.dirs}</span>
+        <span>{t('overview.panelFiles', { n: identity.files })}</span>
+        <span>{t('overview.panelDirs', { n: identity.dirs })}</span>
         <span>{fmtBytes(identity.bytes)}</span>
       </div>
       <div className="ov-panel-langs">
@@ -919,10 +931,10 @@ export function OverviewPanel({
       {agentMarks.length > 0 && (
         <>
           <div className="ov-panel-title">
-            本轮产出（宿主上报 {agentMarks.length}）
+            {t('overview.panelAgentTitle', { n: agentMarks.length })}
             {unreadMarks.length > 0 && (
               <button className="ov-row-act" onClick={() => markReadMany(unreadMarks.map((m) => m.file))}>
-                全标已读
+                {t('overview.markAllReadShort')}
               </button>
             )}
           </div>
@@ -931,13 +943,13 @@ export function OverviewPanel({
               <button className="ov-row-main" onClick={() => onOpenFile(m.file, m.lines[0]?.[0] ?? 1)} title={m.file}>
                 <span className="ov-file">{read[m.file] ? '✓ ' : ''}{m.file}</span>
               </button>
-              {m.lines.length > 0 && <span className="ov-note">{m.lines.length} 段变更行</span>}
+              {m.lines.length > 0 && <span className="ov-note">{t('overview.changedLineSegments', { n: m.lines.length })}</span>}
             </div>
           ))}
         </>
       )}
 
-      <div className="ov-panel-title">从哪看起</div>
+      <div className="ov-panel-title">{t('overview.whereToStart')}</div>
       {entries.slice(0, 6).map((e, i) => (
         <div className="ov-entry" key={e.file}>
           <span className={`ov-rank ${e.kind}`}>{i + 1}</span>
@@ -947,29 +959,29 @@ export function OverviewPanel({
         </div>
       ))}
 
-      <div className="ov-panel-title">结构</div>
+      <div className="ov-panel-title">{t('overview.structure')}</div>
       <div className="ov-panel-stats">
         <button
           className={`ov-stat${cycles.length ? ' ov-stat-warn' : ''}`}
           onClick={() => setOpenSection((s) => (s === 'cycles' ? null : 'cycles'))}
-          title={cycles.length ? '点开看是哪些文件构成了环' : '没有循环依赖'}
+          title={cycles.length ? t('overview.cyclesOpenTitle') : t('overview.noCycles')}
         >
-          环 {cycles.length}
+          {t('overview.cyclesCount', { n: cycles.length })}
         </button>
         <button
           className="ov-stat"
           onClick={() => setOpenSection((s) => (s === 'orphans' ? null : 'orphans'))}
-          title={`点开看全部 ${orphanVisible.length} 个孤立文件`}
+          title={t('overview.orphansOpenTitle', { n: orphanVisible.length })}
         >
-          孤立 {orphanVisible.length}
+          {t('overview.orphansCount', { n: orphanVisible.length })}
         </button>
         {largestFiles[0] && (
           <button
             className="ov-stat"
             onClick={() => onOpenFile(largestFiles[0].file, 1)}
-            title={`打开 ${largestFiles[0].file}`}
+            title={t('overview.openFileTitle', { file: largestFiles[0].file })}
           >
-            最大 {largestFiles[0].lines} 行
+            {t('overview.largestCount', { n: largestFiles[0].lines })}
           </button>
         )}
       </div>
@@ -979,7 +991,7 @@ export function OverviewPanel({
             {cycles.map((cycle, i) => (
               <div className="ov-sub-row" key={`${i}-${cycle.join('>')}`}>
                 <div className="ov-note">
-                  环 {i + 1} · {cycle.length} 个文件
+                  {t('overview.cycleRow', { n: i + 1, files: cycle.length })}
                 </div>
                 {cycle.map((f) => (
                   <button className="ov-row-main" key={f} onClick={() => onOpenFile(f, 1)} title={f}>
@@ -990,7 +1002,7 @@ export function OverviewPanel({
             ))}
           </div>
         ) : (
-          <div className="ov-note">没有循环依赖。</div>
+          <div className="ov-note">{t('overview.noCyclesDot')}</div>
         ))}
       {(openSection === 'orphans' ? orphanVisible : orphanVisible.slice(0, 3)).map((o) => (
         <div className="ov-row" key={o.file}>
@@ -998,17 +1010,17 @@ export function OverviewPanel({
             <span className="ov-file">{o.file}</span>
           </button>
           <button className="ov-row-act" onClick={() => toggleIgnored(o.file)}>
-            忽略
+            {t('overview.ignore')}
           </button>
         </div>
       ))}
 
       <div className="ov-panel-actions">
         <button className="btn ghost" onClick={onOpenMap}>
-          完整地图
+          {t('overview.fullMap')}
         </button>
         <button className="btn ghost" onClick={onOpenGraph}>
-          依赖图
+          {t('overview.depGraph')}
         </button>
       </div>
     </div>

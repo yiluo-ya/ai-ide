@@ -27,6 +27,7 @@ import { mapApi } from './mapApi';
 import type { DependencyGraph, DependentsResult, DirDependentsResult } from './mapApi';
 // GraphNode / GraphEdge / SymbolInfo 只有 shared/types 里才是真定义（mapApi 只再导出了其中一部分）
 import type { GraphEdge, GraphLayer, GraphNode, SymbolInfo } from '../../shared/types';
+import { translate, useI18n } from './i18n';
 import './graph.css';
 
 /** 与后端 `dirIdOf('')` 一致：根目录节点 id。前端靠它把根目录下的文件认到 ./ 名下。 */
@@ -95,23 +96,23 @@ const LAYER_COLOR: Record<string, string> = {
 
 /** 后端没给 lanes 时的兜底层名（正常情况下用 lanes[i].label）。 */
 const LAYER_LABEL: Record<GraphLayer, string> = {
-  entry: '入口层',
-  domain: '领域层',
-  infra: '基础设施层',
-  utility: '工具层',
-  isolated: '孤立 / 测试',
+  entry: 'layer.entry',
+  domain: 'layer.domain',
+  infra: 'layer.infra',
+  utility: 'layer.utility',
+  isolated: 'layer.isolated',
 };
 
 const SYMBOL_KIND_CN: Record<string, string> = {
-  function: '函数',
-  class: '类',
-  method: '方法',
-  interface: '接口',
-  enum: '枚举',
-  constant: '常量',
-  variable: '变量',
-  constructor: '构造器',
-  property: '属性',
+  function: 'kind.function',
+  class: 'kind.class',
+  method: 'kind.method',
+  interface: 'kind.interface',
+  enum: 'kind.enum',
+  constant: 'kind.constant',
+  variable: 'kind.variable',
+  constructor: 'kind.constructor',
+  property: 'kind.property',
 };
 
 /** 泳道带的几何常量：间距 = 相邻泳道中心线距离。 */
@@ -146,14 +147,33 @@ export function nodeFill(n: GraphNode): string {
 
 export function nodeTitle(n: GraphNode): string {
   if (n.kind === 'external') {
-    return `外部依赖 ${n.label}：被 ${n.inbound} 处引用、${n.files} 个文件使用（外部包不跳转）`;
+    return translate('graph.nodeTitleExternal', {
+      name: n.label,
+      inbound: n.inbound,
+      files: n.files,
+    });
   }
   if (n.kind === 'dir') {
-    const layer = n.layer ? `；层级 ${LAYER_LABEL[n.layer]}` : '';
-    return `目录 ${n.label}：${n.files} 个文件，入边 ${n.inbound} / 出边 ${n.outbound}${layer}；单击展开或收起`;
+    const layer = n.layer
+      ? translate('graph.nodeTitleDirLayer', { layer: translate(LAYER_LABEL[n.layer]) })
+      : '';
+    return translate('graph.nodeTitleDir', {
+      name: n.label,
+      files: n.files,
+      inbound: n.inbound,
+      outbound: n.outbound,
+      layer,
+    });
   }
-  const tags = [n.entry ? '入口' : '', n.test ? '测试' : ''].filter(Boolean).join(' · ');
-  return `${n.id}${tags ? `（${tags}）` : ''}：被 ${n.inbound} 处引用，依赖 ${n.outbound} 个模块；双击打开`;
+  const tags = [n.entry ? translate('flow.badgeEntry') : '', n.test ? translate('flow.badgeTest') : '']
+    .filter(Boolean)
+    .join(' · ');
+  return translate('graph.nodeTitleFile', {
+    id: n.id,
+    tags: tags ? translate('graph.nodeTitleTags', { tags }) : '',
+    inbound: n.inbound,
+    outbound: n.outbound,
+  });
 }
 
 /** 标签是噪声的主要来源，这里只在「有信息量」的节点上显示。 */
@@ -316,7 +336,8 @@ function errText(e: unknown): string {
 }
 
 function kindLabel(kind: string): string {
-  return SYMBOL_KIND_CN[kind] ?? kind;
+  const key = SYMBOL_KIND_CN[kind];
+  return key ? translate(key) : kind;
 }
 
 /** 把 [{x, depth}] 这类列表按跳数分组，供「传递上游」逐层展示。 */
@@ -331,6 +352,7 @@ export function groupByDepth<T extends { depth: number }>(items: T[] | undefined
 }
 
 export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial, onViewChange }: Props) {
+  const { t, locale } = useI18n();
   const [level, setLevel] = useState<'dir' | 'file'>(initial?.level ?? 'dir');
   const [expand, setExpand] = useState<string[]>(initial?.expand ?? []);
   const [withExternal, setWithExternal] = useState(initial?.external ?? false);
@@ -551,14 +573,14 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
     const layer = node?.layer ?? null;
     const laneLabel =
       graph?.lanes.find((lane) => lane.nodes.includes(selectedDir))?.label ??
-      (layer ? LAYER_LABEL[layer] : '未分层');
+      translate(layer ? LAYER_LABEL[layer] : 'graph.noLayer', undefined, locale);
     return {
       duty: duty?.duty ?? node?.duty ?? '',
       from: duty?.from ?? node?.dutyFrom ?? null,
-      layerReason: duty?.layerReason ?? '当前视图没有这个目录的分层依据。',
+      layerReason: duty?.layerReason ?? translate('graph.noLayerReason', undefined, locale),
       laneLabel,
     };
-  }, [selectedDir, graph, nodeById]);
+  }, [selectedDir, graph, nodeById, locale]);
 
   const visibleSymbols = symbols
     ? symbolsExpanded
@@ -663,41 +685,39 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
   return (
     <div className="graph-view">
       <header className="gv-head">
-        <span className="gv-title">依赖图</span>
+        <span className="gv-title">{t('graph.title')}</span>
         <div className="gv-levels">
           <button
             className={`gv-btn${level === 'dir' ? ' is-on' : ''}`}
             onClick={() => switchLevel('dir')}
           >
-            目录
+            {t('graph.levelDir')}
           </button>
           <button
             className={`gv-btn${level === 'file' ? ' is-on' : ''}`}
             onClick={() => switchLevel('file')}
           >
-            文件
+            {t('graph.levelFile')}
           </button>
         </div>
-        <span className="gv-axis-label">布局</span>
+        <span className="gv-axis-label">{t('graph.layout')}</span>
         <div className="gv-levels">
           <button
             className={`gv-btn${layoutMode === 'lanes' && laneAvailable ? ' is-on' : ''}`}
             onClick={() => setLayoutMode('lanes')}
             disabled={!laneAvailable}
             title={
-              laneAvailable
-                ? '按职责分层排成泳道（层内按文件数从左到右）'
-                : '泳道只对目录级有意义（切到目录级再试）'
+              laneAvailable ? t('graph.lanesTitle') : t('graph.lanesDisabledTitle')
             }
           >
-            泳道
+            {t('graph.lanes')}
           </button>
           <button
             className={`gv-btn${layoutMode === 'free' ? ' is-on' : ''}`}
             onClick={() => setLayoutMode('free')}
-            title="不按层分组，只按依赖关系用力导向摆放"
+            title={t('graph.freeTitle')}
           >
-            自由力导向
+            {t('graph.free')}
           </button>
         </div>
         <label className="gv-toggle">
@@ -706,19 +726,21 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
             checked={withExternal}
             onChange={(e) => setWithExternal(e.target.checked)}
           />
-          外部依赖
+          {t('flow.external')}
         </label>
         <button className="gv-btn" onClick={resetView} disabled={!layout}>
-          重置视图
+          {t('flow.reset')}
         </button>
         <span className="gv-stat">
-          {graph ? `${graph.nodes.length} 节点 / ${graph.edges.length} 边` : '—'}
+          {graph
+            ? t('flow.stat', { nodes: graph.nodes.length, edges: graph.edges.length })
+            : '—'}
         </span>
         {graph && graph.truncated > 0 && (
-          <span className="gv-warn">已按规模省略 {graph.truncated} 个节点</span>
+          <span className="gv-warn">{t('graph.truncated', { n: graph.truncated })}</span>
         )}
-        <button className="gv-btn gv-close" onClick={onClose} title="关闭（Esc）">
-          关闭
+        <button className="gv-btn gv-close" onClick={onClose} title={t('flow.closeTitle')}>
+          {t('common.close')}
         </button>
       </header>
 
@@ -850,9 +872,9 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
               })}
             </svg>
           )}
-          {loading && <div className="gv-status">正在算依赖图…</div>}
+          {loading && <div className="gv-status">{t('graph.loading')}</div>}
           {error && <div className="gv-status gv-status-err">{error}</div>}
-          {!loading && !error && !layout && <div className="gv-status">没有可画的依赖边</div>}
+          {!loading && !error && !layout && <div className="gv-status">{t('graph.empty')}</div>}
         </div>
 
         {selected && (
@@ -864,11 +886,11 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
               <div className="gv-side-actions">
                 {selectedFile && (
                   <button className="gv-btn" onClick={() => onOpenFile(selectedFile, 1)}>
-                    打开文件
+                    {t('flow.openFile')}
                   </button>
                 )}
                 <button className="gv-btn" onClick={() => setSelected(null)}>
-                  关闭
+                  {t('common.close')}
                 </button>
               </div>
             </div>
@@ -876,15 +898,18 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
               {selectedDir && dirInfo && (
                 <>
                   <p className="gv-note gv-note-layer">
-                    {dirInfo.laneLabel} · 分层依据：{dirInfo.layerReason}
+                    {t('graph.layerNote', {
+                      lane: dirInfo.laneLabel,
+                      reason: dirInfo.layerReason,
+                    })}
                   </p>
 
                   <section className="gv-sec">
-                    <h4 className="gv-sec-title">职责（M4.3）</h4>
+                    <h4 className="gv-sec-title">{t('graph.dutyTitle')}</h4>
                     {dirInfo.duty ? (
                       <p className="gv-side-text">{dirInfo.duty}</p>
                     ) : (
-                      <p className="gv-note">这个目录没有可展示的职责句。</p>
+                      <p className="gv-note">{t('graph.noDuty')}</p>
                     )}
                     {dirInfo.from ? (
                       <button
@@ -895,68 +920,72 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
                           if (src) onOpenFile(src, 1);
                         }}
                       >
-                        <span className="gv-row-file">出处：{dirInfo.from}</span>
-                        <span className="gv-row-meta">打开</span>
+                        <span className="gv-row-file">{t('graph.fromLabel', { from: dirInfo.from })}</span>
+                        <span className="gv-row-meta">{t('welcome.open')}</span>
                       </button>
                     ) : (
-                      <p className="gv-note">
-                        事实句（该目录没有可截取的 README / 文件头注释），不是原文摘录。
-                      </p>
+                      <p className="gv-note">{t('graph.factNote')}</p>
                     )}
                   </section>
 
-                  {dirDepsLoading && <p className="gv-note">正在查目录依赖…</p>}
+                  {dirDepsLoading && <p className="gv-note">{t('graph.dirDepsLoading')}</p>}
                   {dirDepsError && <p className="gv-note gv-note-err">{dirDepsError}</p>}
                   {selectedDir === './' && (
-                    <p className="gv-note">
-                      根目录（./）自身的文件不参与这一节的统计，看下面的子目录条目更有信息。
-                    </p>
+                    <p className="gv-note">{t('graph.rootNote')}</p>
                   )}
                   {dirDeps && !dirDepsLoading && (
                     <>
                       <section className="gv-sec">
                         <h4 className="gv-sec-title">
-                          谁依赖它（{dirDeps.direct.length} 个目录）
+                          {t('graph.dirDependentsTitle', { n: dirDeps.direct.length })}
                         </h4>
                         {dirDeps.direct.length === 0 && (
-                          <p className="gv-note">没有统计到引用它的目录。</p>
+                          <p className="gv-note">{t('graph.noDirDependents')}</p>
                         )}
                         {dirDeps.direct.map((d) => (
                           <button
                             key={d.dir}
                             className={d.tests > 0 ? 'gv-row gv-row-tests' : 'gv-row'}
-                            title={`${d.dir} 里有 ${d.files} 个文件引用它`}
+                            title={t('graph.dirRowTitle', { dir: d.dir, files: d.files })}
                             onClick={() => setSelected(d.dir)}
                           >
                             <span className="gv-row-file">{d.dir}</span>
                             <span className="gv-row-meta">
-                              {d.files} 文件 · {d.imports} import · {d.refs} ref
+                              {t('graph.rowMeta', {
+                                files: d.files,
+                                imports: d.imports,
+                                refs: d.refs,
+                              })}
                             </span>
-                            {d.tests > 0 && <span className="gv-badge">测试</span>}
+                            {d.tests > 0 && <span className="gv-badge">{t('flow.badgeTest')}</span>}
                           </button>
                         ))}
                         {testedDirs > 0 && (
-                          <p className="gv-note gv-note-err">
-                            标「测试」的目录里的测试直接引用它：改坏了这些测试会红。
-                          </p>
+                          <p className="gv-note gv-note-err">{t('graph.dirTestsNote')}</p>
                         )}
                       </section>
 
                       <section className="gv-sec">
-                        <h4 className="gv-sec-title">它依赖谁（{dirDeps.outbound.length} 个目录）</h4>
+                        <h4 className="gv-sec-title">
+                          {t('graph.dirOutboundTitle', { n: dirDeps.outbound.length })}
+                        </h4>
                         {dirDeps.outbound.length === 0 && (
-                          <p className="gv-note">没有统计到它引用的目录。</p>
+                          <p className="gv-note">{t('graph.noDirOutbound')}</p>
                         )}
                         {dirDeps.outbound.map((o) => (
                           <button
                             key={o.dir}
                             className="gv-row"
-                            title={`${o.dir} 里有 ${o.files} 个文件被引用`}
+                            title={t('graph.dirOutboundRowTitle', { dir: o.dir, files: o.files })}
                             onClick={() => setSelected(o.dir)}
                           >
                             <span className="gv-row-file">{o.dir}</span>
                             <span className="gv-row-meta">
-                              {o.files} 文件 · {o.imports} import · {o.refs} ref
+                              {t('graph.rowMeta', {
+                                files: o.files,
+                                imports: o.imports,
+                                refs: o.refs,
+                              })}
                             </span>
                           </button>
                         ))}
@@ -965,7 +994,7 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
                       {dirTransitiveGroups.map(([depth, list]) => (
                         <section className="gv-sec" key={`d${depth}`}>
                           <h4 className="gv-sec-title">
-                            上游再上 {depth} 跳（{list.length} 个目录）
+                            {t('graph.dirTransitiveTitle', { depth, n: list.length })}
                           </h4>
                           {list.map((t) => (
                             <button
@@ -982,10 +1011,10 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
 
                       <section className="gv-sec">
                         <h4 className="gv-sec-title">
-                          目录内关键文件（{dirDeps.files} 个文件，按被引用次数）
+                          {t('graph.keyFilesTitle', { n: dirDeps.files })}
                         </h4>
                         {dirDeps.keyFiles.length === 0 && (
-                          <p className="gv-note">没有统计到这一层的文件。</p>
+                          <p className="gv-note">{t('graph.noKeyFiles')}</p>
                         )}
                         {dirDeps.keyFiles.map((f) => (
                           <button
@@ -995,7 +1024,7 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
                             onClick={() => onOpenFile(f.file, 1)}
                           >
                             <span className="gv-row-file">{f.file}</span>
-                            <span className="gv-row-meta">被 {f.inbound} 处引用</span>
+                            <span className="gv-row-meta">{t('graph.refCount', { n: f.inbound })}</span>
                           </button>
                         ))}
                       </section>
@@ -1008,23 +1037,28 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
                 <>
                   <section className="gv-sec">
                     <h4 className="gv-sec-title">
-                      顶层符号{symbols ? `（${symbols.length}）` : ''}
+                      {t('graph.symbolsTitle', {
+                        count: symbols ? t('graph.parenCount', { n: symbols.length }) : '',
+                      })}
                     </h4>
-                    {symbolsLoading && <p className="gv-note">正在读符号…</p>}
+                    {symbolsLoading && <p className="gv-note">{t('graph.symbolsLoading')}</p>}
                     {symbolsError && (
-                      <p className="gv-note gv-note-err">符号加载失败：{symbolsError}</p>
+                      <p className="gv-note gv-note-err">
+                        {t('graph.symbolsError', { err: symbolsError })}
+                      </p>
                     )}
                     {!symbolsLoading && !symbolsError && symbols && symbols.length === 0 && (
-                      <p className="gv-note">
-                        索引里没有这个文件的顶层符号（可能是纯配置 / 无声明，或还没索引完）。
-                      </p>
+                      <p className="gv-note">{t('graph.noSymbols')}</p>
                     )}
                     {!symbolsLoading &&
                       visibleSymbols.map((s) => (
                         <button
                           key={`${s.name}@${s.location.range.start.line}`}
                           className="gv-row"
-                          title={`${s.name} · 第 ${s.location.range.start.line} 行`}
+                          title={t('graph.symbolRowTitle', {
+                            name: s.name,
+                            line: s.location.range.start.line,
+                          })}
                           onClick={() => onOpenFile(s.location.file, s.location.range.start.line)}
                         >
                           <span className="gv-row-file">{s.name}</span>
@@ -1034,19 +1068,21 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
                       ))}
                     {symbols && symbols.length > SYMBOL_LIMIT && !symbolsExpanded && (
                       <button className="gv-btn gv-more" onClick={() => setSymbolsExpanded(true)}>
-                        展开全部（{symbols.length} 个）
+                        {t('graph.expandAll', { n: symbols.length })}
                       </button>
                     )}
                   </section>
 
-                  {depsLoading && <p className="gv-note">正在查反向依赖…</p>}
+                  {depsLoading && <p className="gv-note">{t('graph.depsLoading')}</p>}
                   {depsError && <p className="gv-note gv-note-err">{depsError}</p>}
                   {deps && !depsLoading && (
                     <>
                       <section className="gv-sec">
-                        <h4 className="gv-sec-title">直接引用 {deps.direct.length} 处</h4>
+                        <h4 className="gv-sec-title">
+                          {t('graph.directTitle', { n: deps.direct.length })}
+                        </h4>
                         {deps.direct.length === 0 && (
-                          <p className="gv-note">项目内没有文件引用它。</p>
+                          <p className="gv-note">{t('graph.noDirect')}</p>
                         )}
                         {deps.direct.map((d) => (
                           <button
@@ -1059,16 +1095,18 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
                             <span className="gv-row-meta">
                               {d.imports} import · {d.refs} ref
                             </span>
-                            {d.test && <span className="gv-badge">测试</span>}
+                            {d.test && <span className="gv-badge">{t('flow.badgeTest')}</span>}
                           </button>
                         ))}
                       </section>
 
                       <section className="gv-sec gv-sec-tests">
                         <h4 className="gv-sec-title">
-                          改坏了谁会红：覆盖它的测试（{deps.tests.length}）
+                          {t('graph.testsTitle', { n: deps.tests.length })}
                         </h4>
-                        {deps.tests.length === 0 && <p className="gv-note">没有测试文件引用它。</p>}
+                        {deps.tests.length === 0 && (
+                          <p className="gv-note">{t('graph.noTests')}</p>
+                        )}
                         {deps.tests.map((t) => (
                           <button
                             key={t.file}
@@ -1087,7 +1125,7 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
                       {transitiveGroups.map(([depth, list]) => (
                         <section className="gv-sec" key={depth}>
                           <h4 className="gv-sec-title">
-                            上游再上 {depth} 跳（{list.length}）
+                            {t('graph.transitiveTitle', { depth, n: list.length })}
                           </h4>
                           {list.slice(0, 50).map((t) => (
                             <button
@@ -1100,7 +1138,9 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
                             </button>
                           ))}
                           {list.length > 50 && (
-                            <p className="gv-note">仅列前 50 条，共 {list.length} 条。</p>
+                            <p className="gv-note">
+                              {t('graph.transitiveMore', { n: list.length })}
+                            </p>
                           )}
                         </section>
                       ))}
@@ -1116,32 +1156,30 @@ export function GraphView({ projectId, activeFile, onOpenFile, onClose, initial,
       <footer className="gv-legend">
         <span className="gv-legend-item">
           <i className="gv-dot" style={{ background: LAYER_COLOR.entry }} />
-          入口层（只依赖别人）
+          {t('graph.legendEntry')}
         </span>
         <span className="gv-legend-item">
           <i className="gv-dot" style={{ background: LAYER_COLOR.domain }} />
-          领域层（既被依赖也依赖别人）
+          {t('graph.legendDomain')}
         </span>
         <span className="gv-legend-item">
           <i className="gv-dot" style={{ background: LAYER_COLOR.infra }} />
-          基础设施层（只被别人依赖）
+          {t('graph.legendInfra')}
         </span>
         <span className="gv-legend-item">
           <i className="gv-dot" style={{ background: LAYER_COLOR.utility }} />
-          工具层
+          {t('layer.utility')}
         </span>
         <span className="gv-legend-item">
           <i className="gv-dot" style={{ background: LAYER_COLOR.isolated }} />
-          孤立 / 测试
+          {t('layer.isolated')}
         </span>
         <span className="gv-legend-item">
           <i className="gv-line-red" />
-          循环依赖
+          {t('graph.legendCycle')}
         </span>
-        <span className="gv-legend-item">
-          分层按职责 + 依赖方向判，不是架构真值；泳道下方一行是文件 / 外部依赖
-        </span>
-        <span className="gv-legend-item">单击目录展开/收起 · 双击文件打开 · 点节点看详情</span>
+        <span className="gv-legend-item">{t('graph.legendNote')}</span>
+        <span className="gv-legend-item">{t('graph.legendHint')}</span>
       </footer>
     </div>
   );

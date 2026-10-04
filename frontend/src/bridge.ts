@@ -11,6 +11,7 @@
  *
  * 粒度（docs/05-share.md §3 形态 A）：换文件必发、行号跟随（防抖）、选区后置。
  */
+import { translate } from './i18n';
 import { openProjectByRoot, suspendProjectEvents, useStore } from './state';
 
 /** 已登记宿主来源的 localStorage 键（按浏览器，不写被读项目）。 */
@@ -172,8 +173,7 @@ function onMessage(event: MessageEvent): void {
       warnedOrigin = event.origin;
       // 不弹错：嵌入方看控制台即可，读者不该被打断
       console.warn(
-        `[信使] 忽略了来源 ${event.origin} 的消息（信任边界已收紧）。` +
-          '宿主请在 iframe URL 上加 ?hostOrigin=<宿主源>，或在阅读器里登记该来源。',
+        translate('bridge.ignoredOrigin', { origin: event.origin }) + translate('bridge.ignoredOriginHint'),
       );
     }
     return;
@@ -206,7 +206,7 @@ async function handleDispose(): Promise<void> {
 
 /** 调用后端释放端点；失败也照实回报（宿主据此决定要不要提示用户）。 */
 export async function disposeProject(projectId: string | null): Promise<DisposeResult> {
-  if (!projectId) return { ok: false, error: '当前没有打开的项目' };
+  if (!projectId) return { ok: false, error: translate('bridge.noProject') };
   // 本地先断开自己的 SSE：即使后端不可达，也不留一个空转的连接
   suspendProjectEvents();
   try {
