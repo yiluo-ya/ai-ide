@@ -733,6 +733,7 @@ export default function App() {
                 filter={fileFilter}
                 decor={decor}
                 onAddToQueue={(file) => useGuideStore.getState().addQueue({ file, line: 1, col: 1 })}
+                onCopy={(text) => useStore.getState().copyText(text)}
               />
             </>
           )}

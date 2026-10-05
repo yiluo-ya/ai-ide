@@ -1137,6 +1137,8 @@ export const en: Record<string, string> = {
   'filetree.noProject': 'No project open yet',
   'filetree.noFiles': 'No readable files in this project',
   'filetree.noFilesFiltered': 'No files match the current filter',
+  'filetree.copyPath': 'Copy path',
+  'filetree.copyFileName': 'Copy file name',
   'quickopen.placeholderFileRecent': 'Search by file name (Ctrl/Cmd+P) · recently opened shown when empty',
   'quickopen.placeholderFile': 'Search by file name (Ctrl/Cmd+P)',
   'quickopen.placeholderSymbol': 'Search by symbol name (Ctrl/Cmd+T)',

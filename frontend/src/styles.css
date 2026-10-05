@@ -823,6 +823,8 @@ kbd {
 .tree-name {
   overflow: hidden;
   text-overflow: ellipsis;
+  /* flex 子项要能收缩到内容以下，省略号才会出现（单链目录名拼成 a/b/c 后会很长） */
+  min-width: 0;
 }
 
 /* 目录 / 文件两色（2026-10-03 用户要求）：目录偏蓝加粗，文件常规灰。 */

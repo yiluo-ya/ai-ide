@@ -35,11 +35,14 @@ interface Props {
   decor?: TreeDecor;
   /** G3.5：右键菜单里的「加入待读」。 */
   onAddToQueue?: (file: string) => void;
+  /** 右键菜单「复制路径 / 复制文件名」：写剪贴板 + 状态栏反馈（由 App 注入）。 */
+  onCopy?: (text: string) => void;
 }
 
-/** 右键菜单（视口坐标定位）。 */
+/** 右键菜单（视口坐标定位）：文件与目录都可开（目录用于复制路径 / 文件名）。 */
 interface LeafMenu {
-  file: string;
+  path: string;
+  isDir: boolean;
   x: number;
   y: number;
 }
@@ -102,6 +105,31 @@ function sortNodes(nodes: FileNode[]): FileNode[] {
   });
 }
 
+/** 过滤（搜索 / 只看）之后的子节点，按目录在前排序。 */
+function visibleChildren(node: FileNode, filter: string, decor?: TreeDecor): FileNode[] {
+  return sortNodes(
+    (node.children ?? []).filter((c) => matchesFilter(c, filter) && matchesVisible(c, decor?.visible)),
+  );
+}
+
+/**
+ * 单链目录压缩（2026-10-05 用户要求，等同 VSCode 的 compact folders）：
+ * 从 node 起，只要「过滤后唯一子节点还是目录」就一路并进来，直到出现分支（多个子项）或子项是文件。
+ * 返回的链首是最外层目录、链尾是这条链真正代表的目录。
+ */
+function compactChain(node: FileNode, filter: string, decor?: TreeDecor): FileNode[] {
+  const chain = [node];
+  let cur = node;
+  for (;;) {
+    const kids = visibleChildren(cur, filter, decor);
+    if (kids.length === 1 && kids[0].type === 'directory') {
+      cur = kids[0];
+      chain.push(cur);
+    } else break;
+  }
+  return chain;
+}
+
 function FileBadges({ file, decor }: { file: string; decor?: TreeDecor }) {
   const { t } = useI18n();
   const fact = decor?.timeline?.get(file);
@@ -153,8 +181,8 @@ function TreeNode({
   expanded: Set<string>;
   /** 用户显式折叠过的目录：过滤自动展开时也压得住。 */
   collapsed: Set<string>;
-  toggle: (path: string) => void;
-  onMenu: (e: React.MouseEvent, file: string) => void;
+  toggle: (paths: string[]) => void;
+  onMenu: (e: React.MouseEvent, path: string, isDir: boolean) => void;
 }) {
   if (!matchesFilter(node, filter) || !matchesVisible(node, decor?.visible)) return null;
 
@@ -162,23 +190,28 @@ function TreeNode({
     // 过滤时自动展开，方便直接看到命中项；但用户显式折叠过的目录优先 ——
     // 折叠得动，才算真的能折叠（之前 `|| depth === 0` 让顶层目录永远展开）。
     const auto = Boolean(filter || decor?.visible);
+    // 单链目录压缩（2026-10-05 用户要求）：唯一子目录并成一行 a/b/c 一直到分支处；
+    // 折叠时只显示最外层名字，展开时才显示整条链。
+    const chain = compactChain(node, filter, decor);
+    const tail = chain[chain.length - 1];
     const open = !collapsed.has(node.path) && (expanded.has(node.path) || auto);
-    const children = sortNodes(
-      (node.children ?? []).filter(
-        (c) => matchesFilter(c, filter) && matchesVisible(c, decor?.visible),
-      ),
-    );
+    const label = open ? chain.map((n) => n.name).join('/') : node.name;
+    const children = visibleChildren(tail, filter, decor);
     return (
       <div className="tree-dir">
         <div
           className="tree-row dir"
           style={{ paddingLeft: depth * 12 + 6 }}
-          onClick={() => toggle(node.path)}
-          title={dirTitle(node, decor)}
+          onClick={() => toggle(chain.map((n) => n.path))}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            onMenu(e, tail.path, true);
+          }}
+          title={dirTitle(tail, decor)}
         >
           <span className={`chevron ${open ? 'open' : ''}`}>▸</span>
           <span className="tree-name">
-            <Highlight text={node.name} term={filter} />
+            <Highlight text={label} term={filter} />
           </span>
           <span className="tree-count">{node.count ?? 0}</span>
         </div>
@@ -212,9 +245,9 @@ function TreeNode({
       style={{ paddingLeft: depth * 12 + 18 }}
       onClick={() => onOpen(node.path)}
       onContextMenu={(e) => {
-        // 右键：打开小菜单（含「加入待读」，G3.5）
+        // 右键：打开小菜单（复制路径 / 文件名；文件另含「加入待读」，G3.5）
         e.preventDefault();
-        onMenu(e, node.path);
+        onMenu(e, node.path, false);
       }}
       title={node.path}
     >
@@ -235,6 +268,7 @@ export function FileTree({
   filter = '',
   decor,
   onAddToQueue,
+  onCopy,
 }: Props) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -246,18 +280,23 @@ export function FileTree({
   // 2026-10-03 用户要求「文件夹默认折叠」：不再自动展开顶层目录，
   // 一进来就是折叠的树，要看哪一层自己点。
 
-  const toggle = (path: string) => {
-    const willOpen = !expanded.has(path) || collapsed.has(path);
+  /** 展开 / 收起一条目录链：链上所有目录同进同出（压缩成一行后它们共享一次点击）。 */
+  const toggle = (paths: string[]) => {
+    const willOpen = !expanded.has(paths[0]) || collapsed.has(paths[0]);
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (willOpen) next.add(path);
-      else next.delete(path);
+      for (const p of paths) {
+        if (willOpen) next.add(p);
+        else next.delete(p);
+      }
       return next;
     });
     setCollapsed((prev) => {
       const next = new Set(prev);
-      if (willOpen) next.delete(path);
-      else next.add(path);
+      for (const p of paths) {
+        if (willOpen) next.delete(p);
+        else next.add(p);
+      }
       return next;
     });
   };
@@ -284,7 +323,7 @@ export function FileTree({
           expanded={expanded}
           collapsed={collapsed}
           toggle={toggle}
-          onMenu={(e, file) => setMenu({ file, x: e.clientX, y: e.clientY })}
+          onMenu={(e, path, isDir) => setMenu({ path, isDir, x: e.clientX, y: e.clientY })}
         />
       ))}
       {menu && (
@@ -299,18 +338,38 @@ export function FileTree({
             }}
           />
           <div className="tree-menu" style={{ top: menu.y, left: menu.x }} role="menu">
-            <div className="tree-menu-file" title={menu.file}>
-              {menu.file}
+            <div className="tree-menu-file" title={menu.path}>
+              {menu.path}
             </div>
             <button
               role="menuitem"
               onClick={() => {
-                onAddToQueue?.(menu.file);
+                onCopy?.(menu.path);
                 setMenu(null);
               }}
             >
-              {t('guide.nav.queue')}
+              {t('filetree.copyPath')}
             </button>
+            <button
+              role="menuitem"
+              onClick={() => {
+                onCopy?.(menu.path.split('/').pop() ?? menu.path);
+                setMenu(null);
+              }}
+            >
+              {t('filetree.copyFileName')}
+            </button>
+            {!menu.isDir && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  onAddToQueue?.(menu.path);
+                  setMenu(null);
+                }}
+              >
+                {t('guide.nav.queue')}
+              </button>
+            )}
           </div>
         </>
       )}

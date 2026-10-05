@@ -182,6 +182,8 @@ interface State {
   rememberPosition: (file: string, position: MemoryPosition) => void;
   /** 判据 6：复制 `path:line:col` 到剪贴板，并在状态栏轻提示。 */
   copyLocation: (file: string, line: number, col: number) => void;
+  /** 通用复制：任意文本写剪贴板 + 状态栏轻提示（文件树右键「复制路径 / 文件名」）。 */
+  copyText: (text: string) => void;
   /** S3a：把选中的一段代码连同出处（`path:行范围` + 围栏语言）复制走。 */
   copySnippet: (input: Omit<SnippetInput, 'file' | 'lang'> & { file?: string; lang?: string }) => void;
   setError: (message: string | null) => void;
@@ -664,6 +666,12 @@ export const useStore = create<State>((set, get) => ({
   /** 判据 6：界面里出现的每一处位置都能复制成 `path:line:col`。 */
   copyLocation(file, line, col) {
     const text = `${file}:${line}:${col}`;
+    void navigator.clipboard?.writeText(text);
+    showFlash(translate('state.copied', { text }));
+  },
+
+  /** 通用复制：任意文本写剪贴板 + 状态栏轻提示。 */
+  copyText(text) {
     void navigator.clipboard?.writeText(text);
     showFlash(translate('state.copied', { text }));
   },

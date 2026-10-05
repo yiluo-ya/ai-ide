@@ -1109,6 +1109,8 @@ export const zh: Record<string, string> = {
   'filetree.noProject': '尚未打开项目',
   'filetree.noFiles': '项目里没有可读文件',
   'filetree.noFilesFiltered': '当前过滤条件下没有文件',
+  'filetree.copyPath': '复制路径',
+  'filetree.copyFileName': '复制文件名',
   'quickopen.placeholderFileRecent': '按文件名搜索（Ctrl/Cmd+P）· 空查询显示最近打开',
   'quickopen.placeholderFile': '按文件名搜索（Ctrl/Cmd+P）',
   'quickopen.placeholderSymbol': '按符号名搜索（Ctrl/Cmd+T）',
