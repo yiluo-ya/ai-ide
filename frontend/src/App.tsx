@@ -23,7 +23,7 @@ import { AgentSessions } from './AgentSessions';
 
 import { FlowView } from './FlowView';
 import { Overview, OverviewPanel } from './Overview';
-import { OutlinePanel, SearchPanel, symbolPathAt } from './SidePanel';
+import { OutlinePanel, SearchPanel } from './SidePanel';
 import { GotoNoticeBar, gotoFailureMessage } from './Notice';
 import { QuickOpen, type QuickOpenMode } from './QuickOpen';
 import { TopBar } from './TopBar';
@@ -37,6 +37,7 @@ import { ShareMenu } from './ShareMenu';
 import { Dialog } from './Dialog';
 import { initHostBridge } from './bridge';
 import { useMapStore } from './mapState';
+import { purgeLegacyReadState } from './marks';
 import { useGuideStore } from './guideState';
 import { ExplainPanel } from './ExplainPanel';
 import { useExplainStore } from './explainState';
@@ -46,7 +47,7 @@ import { useChangesStore } from './changesState';
 import { changesApi, flushSnapshot } from './readSnapshot';
 import { blameAt, blameText, loadBlame } from './blame';
 import { translate, useI18n } from './i18n';
-import type { BlameResult, FileNode, FileOrigin, SymbolInfo } from '../../shared/types';
+import type { BlameResult, FileNode, FileOrigin } from '../../shared/types';
 import type { HotMetric } from './mapApi';
 
 type PanelTab =
@@ -95,12 +96,6 @@ function writeSnapshot(params: Record<string, string | null>): void {
 const snapshot = new URLSearchParams(window.location.search);
 type RecentFilter = 'all' | 'today' | '3d' | '7d';
 
-/** 面包屑同级下拉（N7）的内容。 */
-interface CrumbMenu {
-  items: SymbolInfo[];
-  currentName: string;
-}
-
 /** 搜索范围胶囊的候选：顶层目录（N14）。 */
 function topDirs(node: FileNode | null): string[] {
   return (node?.children ?? []).filter((c) => c.type === 'directory').map((c) => c.path);
@@ -143,7 +138,6 @@ export default function App() {
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
   const [fileFilter, setFileFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [crumbMenu, setCrumbMenu] = useState<CrumbMenu | null>(null);
   const [searchFullscreen, setSearchFullscreen] = useState(false);
   /** N19 分屏：第二窗格的文件内容（与主窗格共享 model 池）。 */
   const [secondaryDoc, setSecondaryDoc] = useState<{
@@ -221,6 +215,8 @@ export default function App() {
 
   useEffect(() => {
     void store.init();
+    // 2026-10-08 用户要求清除「已读 / 待读」：清掉早期版本留在本机的旧标记（仅跑一次）。
+    purgeLegacyReadState();
     // 语言元数据（07-languages-plugin）：Monaco Provider 与扩展名推断都等它到位。
     void ensureLanguages();
     initHostBridge();
@@ -469,13 +465,11 @@ export default function App() {
     void useChangesStore.getState().load(id);
   }, [store.projectId, store.status?.indexedAt, store.tree]);
 
-  const crumbs = useMemo(() => symbolPathAt(store.symbols, cursor.line), [store.symbols, cursor.line]);
   const searchDirOptions = useMemo(() => topDirs(store.tree), [store.tree]);
   /** N21：最近打开（标签顺序即最近访问倒序）。 */
   const recentFiles = useMemo(() => store.tabs.map((t) => t.file), [store.tabs]);
   const fileSetRef = useRef<Set<string>>(new Set());
   fileSetRef.current = new Set(collectFiles(store.tree));
-  const rootName = store.project?.name ?? '';
   const canBack = store.historyIndex > 0;
   const canForward = store.historyIndex < store.history.length - 1;
 
@@ -559,7 +553,7 @@ export default function App() {
       });
   };
 
-  /** 文件树叠加层：时间 / 来源 / 孤立 / 热点 / 已读 / 忽略 / 刚变更 + 视图过滤。 */
+  /** 文件树叠加层：时间 / 来源 / 孤立 / 热点 / 刚变更 + 视图过滤。 */
   const decor = useMemo<TreeDecor>(() => {
     const timeline = new Map<string, { mtimeMs: number; origin: FileOrigin; confidence: number }>();
     for (const f of mapTimeline?.files ?? []) {
@@ -658,7 +652,7 @@ export default function App() {
               onOpen={(file) => jump(file)}
               filter={fileFilter}
               decor={decor}
-              onAddToQueue={(file) => useGuideStore.getState().addQueue({ file, line: 1, col: 1 })}
+              onOpenAside={(file) => void useStore.getState().openInSecondary(file)}
               onCopy={(text) => useStore.getState().copyText(text)}
             />
           </>
@@ -682,7 +676,6 @@ export default function App() {
                 void useStore.getState().runSearch(query, options);
               }}
               onOpen={(file, line, col) => jump(file, line, col)}
-              onQueue={(file, line, col) => useGuideStore.getState().addQueue({ file, line, col })}
             />
           </div>
         ) : (
@@ -782,118 +775,13 @@ export default function App() {
             />
           ) : (
             <>
-          <div className="nav-bar">
-            <button
-              className="btn ghost guide-home"
-              onClick={() => setMainView('map')}
-              title={t('guide.homeTitle')}
-            >
-              {t('guide.home')}
-            </button>
-            <button className="btn ghost" disabled={!canBack} onClick={() => void useStore.getState().goBack()} title="Alt+←">
-              ←
-            </button>
-            <button
-              className="btn ghost"
-              disabled={!canForward}
-              onClick={() => void useStore.getState().goForward()}
-              title="Alt+→"
-            >
-              →
-            </button>
-            <nav className="crumbs">
-              {rootName && <span className="crumb-root">{rootName}</span>}
-              {store.openFile && (
-                <span className="crumb" onClick={() => jump(store.openFile!, 1, 1)}>
-                  {store.openFile}
-                </span>
-              )}
-              {crumbs.map((s, i) => (
-                <span key={`${s.name}:${s.location.range.start.line}`} className="crumb-wrap">
-                  <span
-                    className="crumb symbol"
-                    onClick={() => {
-                      setCrumbMenu(null);
-                      jump(s.location.file, s.location.range.start.line, s.location.range.start.col);
-                    }}
-                  >
-                    {s.name}
-                  </span>
-                  <span
-                    className="crumb-caret"
-                    title={t('app.siblingSymbols')}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      // 同级 = 同容器内的符号（面包屑上一级的 children），优先同类（方法→方法）
-                      const container = i === 0 ? store.symbols : crumbs[i - 1].children ?? [];
-                      const sameKind = container.filter((x) => x.kind === s.kind);
-                      const items = sameKind.length ? sameKind : container;
-                      setCrumbMenu(items.length > 1 ? { items, currentName: s.name } : null);
-                    }}
-                  >
-                    ▾
-                  </span>
-                </span>
-              ))}
-            </nav>
-            {crumbMenu && (
-              <>
-                <div className="crumb-menu-backdrop" onClick={() => setCrumbMenu(null)} />
-                <div className="crumb-menu">
-                  <div className="crumb-menu-head">{t('app.siblingSymbolsHead', { n: crumbMenu.items.length })}</div>
-                  {crumbMenu.items.map((s) => (
-                    <div
-                      key={`${s.name}:${s.location.range.start.line}`}
-                      className={`crumb-menu-item ${s.name === crumbMenu.currentName ? 'current' : ''}`}
-                      onClick={() => {
-                        setCrumbMenu(null);
-                        jump(s.location.file, s.location.range.start.line, s.location.range.start.col);
-                      }}
-                    >
-                      <span className="crumb-menu-name">{s.name}</span>
-                      <span className="muted">L{s.location.range.start.line}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-            {store.openFile && (
-              <button
-                className="btn ghost small"
-                onClick={() => copyLocation(store.openFile!, cursor.line, cursor.col)}
-                title={t('app.copyLocationTitle')}
-              >
-                {t('app.copyLocation')}
-              </button>
-            )}
-            {store.openFile && (
-              <button
-                className="btn ghost small"
-                onClick={() => void useStore.getState().openInSecondary(store.openFile!, cursor.line, cursor.col)}
-                title={t('app.openAsideTitle')}
-              >
-                {t('app.openAside')}
-              </button>
-            )}
-            {store.openFile && (
-              <button
-                className="btn ghost map-toggle"
-                onClick={() => setMainView(mainView === 'map' ? 'auto' : 'map')}
-                title={t('app.mapToggleTitle')}
-              >
-                {mainView === 'map' ? t('app.backToCode') : t('app.projectMap')}
-              </button>
-            )}
-            {/* 05 信使：分享 / 导出 / 批注 / 给 agent 用（一个下拉收口，不再往顶栏堆按钮） */}
-            <ShareMenu
-              cursor={cursor}
-              searchQuery={searchQuery}
-            />
-          </div>
-
-          {/* N19：标签条（上限 8 + LRU + 同文件合并） */}
-          {!showMap && store.tabs.length > 0 && (
-            <div className="tabbar">
+          {/* 代码展示区顶条（2026-10-08 用户要求）：左边标签条，右边 ← → 与分享。
+              原来的导航条（总览 / 面包屑 / 复制位置 / 旁边打开 / 项目地图）整行去掉：
+              复制位置与旁边打开进代码右键菜单，项目地图落到右下角竖轨的「布局」上方。 */}
+          <div className="editor-topbar">
+            {/* N19：标签条（上限 8 + LRU + 同文件合并） */}
+            {!showMap && store.tabs.length > 0 && (
+              <div className="tabbar">
               {store.tabs.map((t) => (
                 <span
                   key={t.file}
@@ -918,8 +806,29 @@ export default function App() {
                   </span>
                 </span>
               ))}
+              </div>
+            )}
+            <div className="editor-actions">
+              <button
+                className="btn ghost"
+                disabled={!canBack}
+                onClick={() => void useStore.getState().goBack()}
+                title="Alt+←"
+              >
+                ←
+              </button>
+              <button
+                className="btn ghost"
+                disabled={!canForward}
+                onClick={() => void useStore.getState().goForward()}
+                title="Alt+→"
+              >
+                →
+              </button>
+              {/* 05 信使：分享 / 导出 / 批注 / 给 agent 用（一个下拉收口） */}
+              <ShareMenu cursor={cursor} searchQuery={searchQuery} />
             </div>
-          )}
+          </div>
 
           <div className="editor-wrap">
             {showMap ? (
@@ -942,6 +851,7 @@ export default function App() {
                     onPosition={(line, col, scrollTop) => rememberPosition(store.openFile!, line, col, scrollTop)}
                     onCopyLocation={copyLocation}
                     onCopySnippet={copySnippet}
+                    onOpenAside={(file, line, col) => void useStore.getState().openInSecondary(file, line, col)}
                     onOpenFile={jump}
                     blame={blameOn ? blame?.lines ?? null : null}
                     onOpenHistory={openHistoryVersion}
@@ -998,7 +908,8 @@ export default function App() {
             {store.fileLoading && <div className="loading-mask">{t('app.loading')}</div>}
           </div>
 
-          {/* 底部面板（VS Code 布局迁移 2026-10-08）：输出 / 终端，位于状态栏上方。 */}
+          {/* 底部面板（VS Code 布局迁移 2026-10-08）：输出 / 终端，位于状态栏上方。
+              标签竖排在面板右列（2026-10-08），不再占用顶部一行高度。 */}
           <div
             className={`bottom-panel ${bottomOpen ? '' : 'collapsed'}`}
             style={bottomOpen ? { height: bottomHeight } : undefined}
@@ -1021,46 +932,53 @@ export default function App() {
                 window.addEventListener('mouseup', up);
               }}
             />
-            <div className="bottom-head">
-              <div className="bottom-tabs" role="tablist" aria-label={t('app.bottomPanels')}>
-                {BOTTOM_TABS.map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    role="tab"
-                    id={`wcr-bottom-tab-${id}`}
-                    aria-selected={bottomTab === id}
-                    className={`bottom-tab${bottomTab === id ? ' active' : ''}`}
-                    title={t(BOTTOM_TITLE[id])}
-                    onClick={() => {
-                      if (bottomOpen && bottomTab === id) setBottomOpen(false);
-                      else {
-                        setBottomTab(id);
-                        setBottomOpen(true);
-                      }
-                    }}
-                  >
-                    {t(BOTTOM_TITLE[id])}
-                  </button>
-                ))}
+            <div className="bottom-stack">
+              {bottomOpen && (
+                <div className="bottom-body">
+                  {bottomTab === 'output' ? (
+                    <OutputPanel projectId={store.projectId} />
+                  ) : (
+                    <TerminalPanel projectId={store.projectId} />
+                  )}
+                </div>
+              )}
+              <div className="bottom-rail">
+                <div
+                  className="bottom-tabs"
+                  role="tablist"
+                  aria-orientation="vertical"
+                  aria-label={t('app.bottomPanels')}
+                >
+                  {BOTTOM_TABS.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="tab"
+                      id={`wcr-bottom-tab-${id}`}
+                      aria-selected={bottomTab === id}
+                      className={`bottom-tab${bottomTab === id ? ' active' : ''}`}
+                      title={t(BOTTOM_TITLE[id])}
+                      onClick={() => {
+                        if (bottomOpen && bottomTab === id) setBottomOpen(false);
+                        else {
+                          setBottomTab(id);
+                          setBottomOpen(true);
+                        }
+                      }}
+                    >
+                      {t(BOTTOM_TITLE[id])}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="bottom-toggle"
+                  onClick={() => setBottomOpen((v) => !v)}
+                  title={bottomOpen ? t('app.collapseBottom') : t('app.expandBottom')}
+                >
+                  {bottomOpen ? '▾' : '▴'}
+                </button>
               </div>
-              <button
-                className="bottom-toggle"
-                onClick={() => setBottomOpen((v) => !v)}
-                title={bottomOpen ? t('app.collapseBottom') : t('app.expandBottom')}
-              >
-                {bottomOpen ? '▾' : '▴'}
-              </button>
             </div>
-            {bottomOpen && (
-              <div className="bottom-body">
-                {bottomTab === 'output' ? (
-                  <OutputPanel projectId={store.projectId} />
-                ) : (
-                  <TerminalPanel projectId={store.projectId} />
-                )}
-              </div>
-            )}
           </div>
 
           <footer className="statusbar">
@@ -1110,6 +1028,32 @@ export default function App() {
               onReorder={(id, idx) => reorderView('right', id, idx)}
               gitCount={changesCount}
             />
+            {/* 右下角竖轨的底部：项目地图开关（搬自顶部导航条）+ 左/右/下 三区域开关 */}
+            <div className="rail-bottom">
+              {store.openFile && (
+                <button
+                  type="button"
+                  className={`region-toggle${mainView === 'map' ? ' active' : ''}`}
+                  title={t('app.mapToggleTitle')}
+                  aria-pressed={mainView === 'map'}
+                  onClick={() => setMainView(mainView === 'map' ? 'auto' : 'map')}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 6.4 9 4l6 2.4L21 4v13.6L15 20l-6-2.4L3 20V6.4Z" />
+                    <path d="M9 4v13.6M15 6.4V20" />
+                  </svg>
+                </button>
+              )}
             <div className="region-toggles" role="group" aria-label={t('app.regionToggles')}>
               <button
                 type="button"
@@ -1135,6 +1079,7 @@ export default function App() {
               >
                 <span className="region-glyph region-glyph-bottom" aria-hidden="true" />
               </button>
+            </div>
             </div>
           </div>
           </>
@@ -1163,7 +1108,6 @@ export default function App() {
               setSearchFullscreen(false);
               jump(file, line, col);
             }}
-            onQueue={(file, line, col) => useGuideStore.getState().addQueue({ file, line, col })}
           />
         </div>
       )}

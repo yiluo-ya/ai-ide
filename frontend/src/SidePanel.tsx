@@ -444,7 +444,6 @@ export function SearchPanel({
   onCancel,
   fullscreen = false,
   onToggleFullscreen,
-  onQueue,
 }: {
   hits: SearchHit[];
   busy: boolean;
@@ -463,8 +462,6 @@ export function SearchPanel({
   /** N11：独立全屏面板形态。 */
   fullscreen?: boolean;
   onToggleFullscreen?: () => void;
-  /** G3.5：把这条命中位置加入待读（与向导面板共用同一份队列）。 */
-  onQueue?: (file: string, line: number, col: number) => void;
 }) {
   const { t } = useI18n();
   const [text, setText] = useState(query);
@@ -657,18 +654,6 @@ export function SearchPanel({
                       <mark>{m.lineText.slice(m.col - 1, m.endCol - 1)}</mark>
                       {m.lineText.slice(m.endCol - 1)}
                     </span>
-                    {onQueue && (
-                      <button
-                        className="search-queue"
-                        title={t('guide.nav.queue')}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onQueue(group.file, m.line, m.col);
-                        }}
-                      >
-                        +
-                      </button>
-                    )}
                   </div>
                 ))}
               </div>

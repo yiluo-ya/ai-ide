@@ -21,7 +21,7 @@ endpoints a host calls itself.
 |---|---|
 | **Top bar** | Project dropdown, Add project (type a path or pick from a folder dialog), Reindex, Remove, project root, indexing progress, Copy file link, Model, Settings, `?` (shortcuts & highlight legend) |
 | **Left panel** (4 permanent tabs, drag-resizable 240–560) | Files / Outline / Search / Code sessions |
-| **Main area** (three states) | Code · Project map · Agent; its top row is “Overview · ← → · breadcrumbs · Copy location · Open to the side · Project map ↔ Back to code · Share ▾” |
+| **Main area** (three states) | Code · Project map · Agent; the code top bar holds tabs on the left (max 8) and “← → · Share ▾” on the right; the project-map toggle sits in the bottom-right rail, above the layout toggles |
 | **Right dock** (permanent, expanded by default, drag-resizable 220–560, collapsible) | Changes / Commands / Overview |
 
 Since 2026-10-03 the sidebar no longer has a “More ▾” submenu, and the Guide / References /

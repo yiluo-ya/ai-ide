@@ -18,7 +18,7 @@
   header.topbar,
   aside.sidebar,
   footer.statusbar,
-  div.nav-bar,
+  div.editor-topbar,
   div.tabbar,
   div.graph-overlay,
   div.search-overlay,
@@ -79,7 +79,6 @@
   /* 密度条 / 提示条这类叠加物不参与打印 */
   .density-toggle,
   .density-track,
-  .crumb-menu,
   .loading-mask {
     display: none !important;
   }

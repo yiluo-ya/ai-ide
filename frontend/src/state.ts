@@ -14,7 +14,6 @@ import type {
   TypeHierarchyResult,
 } from './api';
 import { api, subscribeEvents } from './api';
-import { setRead as setReadMark } from './marks';
 import { useGuideStore } from './guideState';
 import { translate } from './i18n';
 import { flushSnapshot, scheduleSnapshotWrite } from './readSnapshot';
@@ -603,8 +602,7 @@ export const useStore = create<State>((set, get) => ({
       ].slice(0, TAB_LIMIT);
       set({ tabs });
       void get().refreshSymbols();
-      // G3.1：打开即已读；G3.4：把断点记给向导的「继续阅读」
-      setReadMark(id, file, true);
+      // G3.4：把断点记给向导的「继续阅读」
       useGuideStore.getState().rememberRead(file, targetLine, targetCol, id);
       // W3 / G8.2：读到哪就把「现在的代码长什么样」防抖记一次（2s 后落盘）
       scheduleSnapshotWrite(id);

@@ -11,7 +11,9 @@
   directories first, files after, **collapsed by default**, two colours for dirs vs files;
   filter by time (all / changed today / within 3 days / within 7 days) and by “orphan”
 - File-tree badges: `●` just changed (flashes for 20 seconds), heat blocks (brighter = newer),
-  `◌` recently changed, `★` hotspot, `?` orphan; right-click a file → “Add to reading queue”
+  `◌` recently changed, `★` hotspot, `?` orphan
+  (2026-10-08, at the user’s request: the “Add to reading queue” context-menu item and all
+  read / unread marks were removed)
 - Monaco syntax highlighting, breadcrumbs (including symbol path with a sibling-symbol menu),
   outline (`Ctrl/Cmd+Shift+O`)
 - Go to definition (`F12` / `Ctrl+F12` / Ctrl+Click), find references (`Shift+F12`).
@@ -29,7 +31,7 @@
   a three-band density bar (code / comment / blank, click to jump), per-line blame view
   (`Ctrl/Cmd+Alt+B`), read-only diff overlay (working tree vs HEAD or a given rev)
 - Editor context menu: copy location (`Ctrl/Cmd+Alt+C`), copy selection with provenance,
-  add to reading queue, explain this symbol (`Ctrl/Cmd+Alt+E`), call flow
+  explain this symbol (`Ctrl/Cmd+Alt+E`), call flow
 - **Structural explanation** (no model involved): three scopes — selection / enclosing symbol /
   including callers — reporting “what it calls / who calls it / which project definitions it
   references / which external modules it depends on”, plus coverage. Always labelled
@@ -478,14 +480,18 @@ paths. The `?` button in the top-right corner has the full list plus the highlig
   the type hierarchy only sees **explicitly written** `extends` / `implements` / embedded fields —
   dynamic registration and duck typing are not covered (and are labelled as such rather than faked).
 - **Local data is written in only two places**: browser `localStorage` (preferences `wcr:prefs`,
-  per-project position memory, search history, reading queue, host allow-list)
+  per-project position memory, search history, host allow-list)
   and `~/.ide/` (project list, index snapshots, model config, command plans and logs). The trade-off
-  is that preferences are lost when you switch machines.
+  is that preferences are lost when you switch machines. (2026-10-08: read / unread marks and the
+  reading queue are no longer read or written.)
 - **UI entries that were removed (components and endpoints kept)**: Guide, References, Call hierarchy
   and Type hierarchy — on 2026-10-03 the user asked to remove only the UI entries and tabs; the
   capabilities remain available over the API (`/routes`, `/find-references`, `/call-hierarchy`,
   `/type-hierarchy`, `/explain`, `/flow`). The file tree no longer shows read / unread / agent-output
-  badges either (`POST /origin` and `/agent-lines` are kept).
+  badges either (`POST /origin` and `/agent-lines` are kept). **2026-10-08, at the user’s request,
+  read / unread handling was removed entirely**: no more “opened = read”, no read progress, no
+  “mark read / mark all read”, no “add to reading queue” entry or queue list (and old localStorage
+  data is purged on startup).
 - **Code Agent boundaries**:
   - It **writes project files** — one of the few entries that write to the read directory; every write
     path must stay inside the project root, otherwise it is rejected outright (400 `path_escape`).

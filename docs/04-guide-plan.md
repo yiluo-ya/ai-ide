@@ -36,11 +36,11 @@
 | G2.1–G2.4 | 四条阅读路线 | **未落地** | 全仓无「路线 / route」概念与端点 |
 | G2.5 | 路线内行进（上一步 / 下一步） | 未落地 | — |
 | G2.6 | 自定义路线 | 未落地 | — |
-| G3.1 | 文件级已读 / 待读 | 部分 | 已读标记已落地：`mapState.ts:140-148` `toggleRead`、`wcr.map-marks`（`mapState.ts:49`）、文件树右键 `FileTree.tsx`；**缺**「打开即已读」（`state.ts:496` `openFileAt` 不写 marks） |
-| G3.2 | 项目级进度 | 部分 | `Overview.tsx:679` 已读计数；无比例口径 |
+| G3.1 | 文件级已读 / 待读 | **已移除（2026-10-08 用户要求）**：`marks.ts` 不再有 `read` 子集、「打开即已读」自动推断与手动标记一并摘除 | — |
+| G3.2 | 项目级进度 | **已移除（2026-10-08，随 G3.1 摘除）** | — |
 | G3.3 | 阅读位置记忆 | **已落地**（03 的 N22） | `state.ts:273-295` `readPositions` / `writePositions`（上限 200）、`Editor.tsx:149-155` `onPosition` 防抖 400ms |
 | G3.4 | 继续阅读入口 | 未落地 | `QuickOpen.tsx` 的「最近打开」是文件流水，不是「回到上次断点」 |
-| G3.5 | 待读队列 | 未落地 | — |
+| G3.5 | 待读队列 | **已移除（2026-10-08 用户要求）**：不再有待读入口与清单 | — |
 | G4.1–G4.4 | 笔记（行级 / 文件级 / 汇总 / 导出） | **未落地** | 全仓无笔记概念；Monaco 未使用 `glyphMargin`（`Editor.tsx:51-58` 只用行槽） |
 | G5.1–G5.4 | 解释这段 | 未落地 | 上游原料齐备：`resolver.ts:309` `gotoDefinition`、`callgraph.ts:88-298`、`resolver.ts:450-533` `documentSymbols` / `workspaceSymbols` |
 | G6.1 | 文件级结构性摘要 | 未落地 | 有 `FileDensityBar.tsx`（密度条），不是摘要 |
@@ -72,19 +72,19 @@
 |---|---|---|
 | 路线生成（G2.1–G2.4） | 新模块 `guide.ts`：四条路线一次算全 —— ①`dep` 依赖序：用 `importsByName` + `resolveImport` 建文件级有向图，Tarjan SCC 去环后按「被依赖数」分层，层内按入度升序；②`entry` 入口向下：从 `looksLikeEntry` 的文件出发做 BFS（import 边 + 调用边）；③`hot` 热度序：按 `refsByName` 的「被项目内不同文件引用数」降序；④`fresh` 新鲜度序：按 `mtimeMs` 降序。每步附 `reason`（一句人话，如「6 依赖 4；2 与 3 被 4 依赖」）。 | 新 `backend/src/indexer/guide.ts`、`POST…` → `GET /api/projects/:id/routes` |
 | 路线端点 | `GET /routes` → `{routes: [{kind, label, total, steps:[{order, file, reason, lang, lines}], source}]}`；`source: 'index'`。索引未完成时返回 `partial` 标记（与 overview 同策略） | `backend/src/api/routes.ts`、`shared/types.ts` |
-| 路线面板（G2.5、G2.6） | 侧栏新 `guide` tab 的「路线」段：卡片列表（序号 / 文件 / 一句理由 / 状态点）+ 「开始 / 上一步 / 下一步 / 标记已读 / 加入待读」；「换一条」切换四条；「重排」用上移 / 下移（不做拖拽，避免新增 DnD 依赖）；「存为我的路线」把当前顺序写 `localStorage` | 新 `frontend/src/GuidePanel.tsx`、`frontend/src/guide.ts`、`App.tsx`（PanelTab） |
+| 路线面板（G2.5、G2.6） | 侧栏新 `guide` tab 的「路线」段：卡片列表（序号 / 文件 / 一句理由）+ 「上一步 / 下一步」；「换一条」切换四条；「重排」用上移 / 下移（不做拖拽，避免新增 DnD 依赖）；「存为我的路线」把当前顺序写 `localStorage`（**2026-10-08 清除「已读 / 待读」后，去掉状态点与「标记已读 / 加入待读」按钮**） | 新 `frontend/src/GuidePanel.tsx`、`frontend/src/guide.ts`、`App.tsx`（PanelTab） |
 | 文件读完提示（G2.5） | 编辑器底部提示条：「已读完整文件 · 下一步：`src/registry.ts` →」；判据 = 已滚到文件底部（`onScrollChange` 到 scrollTop 阈值）或用 `Ctrl+Enter` 主动声明 | `App.tsx`（状态栏区）、`state.ts` |
 | 首屏叠加（G1.1–G1.4） | `Overview.tsx` 顶部追加向导区块：`从这里开始`（复用已有入口候选）/`推荐路线`（依赖序前 6 步 + 开始按钮）/`继续阅读`（上次文件与行 + 笔记数）；顶栏加固定「总览」按钮；空项目（无索引文件）时展示冷启动引导（三条：填绝对路径、只读承诺、快捷键） | `Overview.tsx`、`TopBar.tsx`、`App.tsx` |
-| 打开即已读（G3.1） | 抽出共享模块 `frontend/src/marks.ts`（承接 `mapState.ts` 的 marks 读写），`state.ts` 的 `openFileAt` 成功后写已读 | 新 `frontend/src/marks.ts`、`mapState.ts`、`state.ts` |
+| ~~打开即已读（G3.1）~~ | **2026-10-08 用户要求清除「已读 / 待读」：本项取消**（`marks.ts` 只保留「忽略」标记） | — |
 | 文件级摘要条（G6.1） | 编辑器顶部可折叠条：`导出 N 个符号 · 依赖 M 个模块 · 被 K 处引用（测试 T 处）· 最长函数 X`；点击展开明细 | 新 `frontend/src/SummaryBar.tsx`、`Editor.tsx` |
 
 ### W2 有记忆（进度 + 笔记）
 
 | 项 | 做法 | 落点 |
 |---|---|---|
-| 进度（G3.2） | 顶栏 / 状态栏与总览页显示 `已读 12 / 40 个源码文件`（分母排除测试与文档配置，口径写在 title 上） | `state.ts`、`App.tsx`、`Overview.tsx` |
+| ~~进度（G3.2）~~ | **2026-10-08 用户要求清除「已读」：本项取消**（不再显示「已读 x/y 个源码文件」） | — |
 | 继续阅读（G3.4） | `wcr:readstate:<id>` 记 `{file, line, col, at}`；首屏「继续阅读」条目 + `Ctrl/Cmd+Shift+R` 直达 | `frontend/src/guide.ts`、`Overview.tsx`、`App.tsx` |
-| 待读队列（G3.5） | `wcr:queue:<id>`；入口：文件树右键、搜索命中行尾 `+`、编辑器右键「加入待读」；面板可勾掉 | `guide.ts`、`GuidePanel.tsx`、`FileTree.tsx`、`SidePanel.tsx` |
+| ~~待读队列（G3.5）~~ | **2026-10-08 用户要求清除「待读」：本项取消**（文件树 / 搜索命中 / 编辑器右键三处入口一并摘除，旧 `wcr:queue:*` 启动时清掉） | — |
 | 行级 / 文件级笔记（G4.1、G4.2） | 行槽图标（第三个独立装饰池，避免与语义着色 / agent 行互清）+ 自建 React 编辑浮层（`getScrolledVisiblePosition` 定位）；文件级笔记挂文件信息区 | 新 `frontend/src/notes.ts`、`NoteLayer.tsx`、`Editor.tsx` |
 | 笔记锚定（Q9） | `{file, line, col, anchor}`；恢复时行号优先、anchor 校验，失配在 ±30 行内搜 anchor，仍找不到进「待归位」 | `notes.ts` |
 | 笔记汇总与导出（G4.3、G4.4） | 侧栏 `guide` tab「笔记」段：按文件分组 + 「全部 / 当前文件 / 待归位」筛选；导出 Markdown（`- path:line — 内容`）；导出 / 导入 JSON | `GuidePanel.tsx`、`notes.ts` |
@@ -164,18 +164,18 @@
 
 | 域 | key | 内容 | 上限 |
 |---|---|---|---|
-| 已读 / 忽略 | `wcr.map-marks` | 复用 01 已有结构 `{read, ignored}` | 无（值=时间戳） |
+| 已读 / 忽略 | `wcr.map-marks` | 复用 01 已有结构（**2026-10-08 清除「已读」后只剩 `{ignored}`，旧 `read` 子集已清掉**） | 无（值=时间戳） |
 | 位置记忆 | `wcr:positions:<id>` | 复用 03 已有 `{line,col,scrollTop}` | 200 |
 | 书签 | `wcr:bookmarks:<id>` | 复用 03 已有 | 无 |
 | 搜索历史 | `wcr:search-history:<id>` | 复用 03 已有 | 20 |
-| **阅读路线** | `wcr:routes:<id>` | `{kind, custom?: string[], done: {file: at}}` | 1 条/项目 |
+| **阅读路线** | `wcr:routes:<id>` | `{kind, custom?: string[]}`（**2026-10-08 去掉 `done` 完成表**） | 1 条/项目 |
 | **阅读状态** | `wcr:readstate:<id>` | `{file,line,col,at}`（继续阅读） | 1 条/项目 |
 | **笔记** | `wcr:notes:<id>` | `{id,file,line,col,anchor,body,level:'line'\|'file',at,updatedAt}` | 无（但导出时提示体积） |
 | **阅读快照** | `wcr:readsnapshot:<id>` | `{at, files:{path:{mtimeMs,size,lines}}, noteLocs}` | 只存索引内源码文件 |
-| **待读队列** | `wcr:queue:<id>` | `{file,line,col,note?,at}` | 200 |
+| ~~待读队列~~ | ~~`wcr:queue:<id>`~~ | **2026-10-08 用户要求清除「待读」：不再读写，旧键启动时清掉** | — |
 
 - 全部读写包 `try/catch`（隐私模式 / 配额异常静默降级，与 03 一致）。
-- 导出 / 导入 JSON：笔记、书签、路线、待读四类可分别导出；导入按 `id/file+line` 合并去重。
+- 导出 / 导入 JSON：笔记、书签、路线三类可分别导出；导入按 `id/file+line` 合并去重。（原「待读」一类随 2026-10-08 清除而移除）
 
 ---
 

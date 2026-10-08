@@ -120,7 +120,6 @@ export const en: Record<string, string> = {
   'guide.homeTitle': 'Back to the project overview (entry candidates and the recommended route live there)',
 
   'guide.route.title': 'Route: {label} ({total} steps)',
-  'guide.route.done': '{done}/{total} done',
   'guide.route.change': 'Switch route',
   'guide.route.changeTitle': 'Switch between dependency order / entry-first / hotness / freshness',
   'guide.route.reorder': 'Reorder',
@@ -131,9 +130,6 @@ export const en: Record<string, string> = {
   'guide.route.partial': 'Indexing in progress: the route may be incomplete',
   'guide.route.loading': 'Loading routes…',
   'guide.route.empty': 'No route yet (indexing may still be running).',
-  'guide.route.status.read': 'read',
-  'guide.route.status.at': 'reading',
-  'guide.route.status.todo': 'to read',
   'guide.route.here': '<- you are here',
   'guide.route.up': 'Move up',
   'guide.route.down': 'Move down',
@@ -141,25 +137,12 @@ export const en: Record<string, string> = {
 
   'guide.nav.prev': 'Previous',
   'guide.nav.next': 'Next',
-  'guide.nav.markRead': 'Mark read',
-  'guide.nav.markUnread': 'Unmark read',
-  'guide.nav.queue': 'Add to queue',
   'guide.nav.ignore': 'Mark ignored',
   'guide.nav.unignore': 'Unmark ignored',
   'guide.nav.noPrev': 'Already the first step',
   'guide.nav.noNext': 'Already the last step',
 
-  'guide.progress.title': 'Progress',
-  'guide.progress.line': 'Read {read} / {total} source files',
-  'guide.progress.noTotal': 'Read {read} source files',
-  'guide.progress.note':
-    'Denominator: source files in the index (tests and docs/config excluded); numerator: local read marks',
   'guide.progress.lastRead': 'Last read: {file}:{line}',
-
-  'guide.queue.title': 'To read ({n})',
-  'guide.queue.empty': 'The queue is empty: use "Add to queue" in the route.',
-  'guide.queue.clear': 'Clear all',
-  'guide.queue.remove': 'Remove',
 
   // Notes inside the editor (G4.1 line / G4.2 file)
   'guide.note.popTitle': 'Notes on line {line}',
@@ -194,8 +177,6 @@ export const en: Record<string, string> = {
   'guide.start.continue': 'Continue reading',
   'guide.start.continueBtn': 'Continue',
   'guide.start.noRoute': 'Routes are still being computed (indexing may not be done).',
-  'guide.start.progress': 'Read {read} / {total} source files',
-  'guide.start.progressNoTotal': 'Read {read} source files',
 
   // ------------------------------------ Guide (04 · W3 change awareness / G7–G8)
   'time.now': 'just now',
@@ -510,7 +491,6 @@ export const en: Record<string, string> = {
   'overview.noCommit': '(no commits)',
   'overview.reading': 'Reading…',
   'overview.agentRound': 'Agent output this round ({files} files reported by the host: {ranged} with line ranges)',
-  'overview.markAllRead': 'Mark all as read',
   'overview.changedLines': 'Changed lines: {list}',
   'overview.fileLevelOnly': 'File level only',
   'overview.moreItems': '…and {n} more',
@@ -615,7 +595,6 @@ export const en: Record<string, string> = {
   'overview.panelFiles': '{n} files',
   'overview.panelDirs': '{n} dirs',
   'overview.panelAgentTitle': 'This round output ({n} reported by the host)',
-  'overview.markAllReadShort': 'Mark all read',
   'overview.changedLineSegments': '{n} changed line ranges',
   'overview.cyclesOpenTitle': 'Open to see which files form the cycles',
   'overview.noCycles': 'No circular dependencies',
@@ -1141,7 +1120,7 @@ export const en: Record<string, string> = {
   'editor.agentHover': 'Changed by the agent in this session (reported by the host, not inferred)',
   'editor.copyLocationLabel': 'Copy location (path:line:col)',
   'editor.copySnippetLabel': 'Copy selected code (with source)',
-  'editor.addToQueueLabel': 'Add current position to reading queue',
+  'editor.openAsideLabel': 'Open in aside pane',
   'state.bytes': '{n} bytes',
   'state.fileTooLarge': 'File is too large to preview: {file} ({size}; documents over {limit} are not loaded)',
   'state.copied': 'Copied {text}',

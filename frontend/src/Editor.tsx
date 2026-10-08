@@ -5,7 +5,6 @@ import { api } from './api';
 import { mapApi } from './mapApi';
 import { FileDensityBar } from './FileDensityBar';
 import { SummaryBar } from './SummaryBar';
-import { useGuideStore } from './guideState';
 import { shortAuthor } from './blame';
 import { translate } from './i18n';
 import { loadPrefs, resolvedTheme, usePrefs } from './prefs';
@@ -155,6 +154,8 @@ interface Props {
   onCopyLocation?: (file: string, line: number, col: number) => void;
   /** S3a：复制选中代码为「带出处的片段」（出处行 + 围栏代码块）。 */
   onCopySnippet?: (file: string, startLine: number, endLine: number, text: string) => void;
+  /** N19：在旁边的窗格打开（同一文件也允许，用于对照两个位置）。 */
+  onOpenAside?: (file: string, line: number, col: number) => void;
   /** W4 / G5.1：右键「解释这段」（Ctrl/Cmd+Alt+E）—— 结构性解释，不使用模型。 */
   onExplain?: (file: string, line: number, col: number) => void;
   /** W5 / G9.4：右键「看调用图」（流视图浮层）。 */
@@ -184,6 +185,7 @@ export function Editor({
   onPosition,
   onCopyLocation,
   onCopySnippet,
+  onOpenAside,
   onExplain,
   onFlow,
   onOpenFile,
@@ -203,6 +205,8 @@ export function Editor({
   onCopyRef.current = onCopyLocation;
   const onCopySnippetRef = useRef(onCopySnippet);
   onCopySnippetRef.current = onCopySnippet;
+  const onOpenAsideRef = useRef(onOpenAside);
+  onOpenAsideRef.current = onOpenAside;
   const onExplainRef = useRef(onExplain);
   onExplainRef.current = onExplain;
   const onFlowRef = useRef(onFlow);
@@ -323,17 +327,17 @@ export function Editor({
         onCopySnippetRef.current?.(current, sel.startLineNumber, sel.endLineNumber, text);
       },
     });
-    // G3.5：把当前位置加入待读（与文件树共用同一份 wcr:queue:<id>）
+    // N19：在旁边打开（分屏）—— 搬自顶部导航条的按钮（2026-10-08 用户要求）
     editor.addAction({
-      id: 'wcr.addToQueue',
-      label: translate('editor.addToQueueLabel'),
+      id: 'wcr.openAside',
+      label: translate('editor.openAsideLabel'),
       contextMenuGroupId: 'navigation',
-      contextMenuOrder: 1,
+      contextMenuOrder: 0.5,
       run: (ed) => {
         const pos = ed.getPosition();
         const current = fileRef.current;
         if (!current || !pos) return;
-        useGuideStore.getState().addQueue({ file: current, line: pos.lineNumber, col: pos.column });
+        onOpenAsideRef.current?.(current, pos.lineNumber, pos.column);
       },
     });
     // W4 / G5.1：解释光标处的符号（结构性解释，不使用模型）

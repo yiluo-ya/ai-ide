@@ -257,10 +257,14 @@ async function main() {
     return notice.replace(/\s+/g, ' ').slice(0, 90);
   });
 
-  await step('判据 6：复制位置 path:line:col', async () => {
+  await step('判据 6：复制位置 path:line:col（编辑器右键菜单 / 快捷键）', async () => {
     await openFile('util.ts');
     await gotoLine(12);
-    await page.locator('button', { hasText: '复制位置' }).first().click();
+    // 2026-10-08：顶部那一行导航条已按用户要求整行移除，「复制位置」只留在
+    // 代码右键菜单与 Ctrl/Cmd+Alt+C 上 —— 用例直接跑编辑器动作，与键盘 / 右键同一条路径。
+    await page.evaluate(() => {
+      window.__wcrMonaco.editor.getEditors()[0].getAction('wcr.copyLocation').run();
+    });
     await page.waitForTimeout(600);
     const flash = await page.locator('.statusbar .flash-text').innerText().catch(() => '');
     assert(/已复制 src\/util\.ts:\d+:\d+/.test(flash), `状态栏没给复制反馈：${flash}`);

@@ -1,4 +1,4 @@
-/** 文件树：目录可展开/折叠，点击文件打开；叠加「改动热力 / 来源徽标 / 已读」。 */
+/** 文件树：目录可展开/折叠，点击文件打开；叠加「改动热力 / 来源徽标」。 */
 import { useMemo, useState } from 'react';
 import type { FileOrigin } from '../../shared/types';
 import type { FileNode } from './api';
@@ -15,8 +15,6 @@ export interface TreeDecor {
   orphans?: Set<string>;
   /** 热点骨架文件（M3.1）。 */
   hot?: Set<string>;
-  /** 已读（M10.4）。 */
-  read?: Set<string>;
   /** 已标记忽略（M8.2）。 */
   ignored?: Set<string>;
   /** 刚刚被改动的文件（M9.3）：阅读时 agent 还在写，改动应即时可见。 */
@@ -33,8 +31,8 @@ interface Props {
   onOpen: (file: string) => void;
   filter?: string;
   decor?: TreeDecor;
-  /** G3.5：右键菜单里的「加入待读」。 */
-  onAddToQueue?: (file: string) => void;
+  /** N19：右键菜单里的「在旁边打开」（分屏对照）。 */
+  onOpenAside?: (file: string) => void;
   /** 右键菜单「复制路径 / 复制文件名」：写剪贴板 + 状态栏反馈（由 App 注入）。 */
   onCopy?: (text: string) => void;
 }
@@ -80,7 +78,7 @@ function matchesFilter(node: FileNode, term: string): boolean {
   return (node.children ?? []).some((c) => matchesFilter(c, term));
 }
 
-/** 过滤条件（只看最近改动 / agent 产出 / 孤立 / 未读）后的可见性。 */
+/** 过滤条件（只看最近改动 / 孤立）后的可见性。 */
 function matchesVisible(node: FileNode, visible: Set<string> | undefined): boolean {
   if (!visible) return true;
   if (node.type === 'file') return visible.has(node.path);
@@ -245,7 +243,7 @@ function TreeNode({
       style={{ paddingLeft: depth * 12 + 18 }}
       onClick={() => onOpen(node.path)}
       onContextMenu={(e) => {
-        // 右键：打开小菜单（复制路径 / 文件名；文件另含「加入待读」，G3.5）
+        // 右键：打开小菜单（复制路径 / 文件名；文件另含「在旁边打开」）
         e.preventDefault();
         onMenu(e, node.path, false);
       }}
@@ -267,14 +265,14 @@ export function FileTree({
   onOpen,
   filter = '',
   decor,
-  onAddToQueue,
+  onOpenAside,
   onCopy,
 }: Props) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   /** 用户显式折叠过的目录（优先级高于「过滤 / 只看」的自动展开）。 */
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  /** G3.5：右键菜单；null = 不开。 */
+  /** 右键菜单；null = 不开。 */
   const [menu, setMenu] = useState<LeafMenu | null>(null);
 
   // 2026-10-03 用户要求「文件夹默认折叠」：不再自动展开顶层目录，
@@ -360,15 +358,17 @@ export function FileTree({
               {t('filetree.copyFileName')}
             </button>
             {!menu.isDir && (
-              <button
-                role="menuitem"
-                onClick={() => {
-                  onAddToQueue?.(menu.path);
-                  setMenu(null);
-                }}
-              >
-                {t('guide.nav.queue')}
-              </button>
+              <>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    onOpenAside?.(menu.path);
+                    setMenu(null);
+                  }}
+                >
+                  {t('app.openAside')}
+                </button>
+              </>
             )}
           </div>
         </>

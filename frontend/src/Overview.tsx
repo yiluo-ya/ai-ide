@@ -121,19 +121,16 @@ function EntryRow({
   );
 }
 
-/** G1.1–G1.4 / G2：总览顶部「从这里开始」——推荐路线 / 继续阅读 / 已读进度。 */
+/** G1.1–G1.4 / G2：总览顶部「从这里开始」——推荐路线 / 继续阅读。 */
 function GuideStart({ onOpenFile }: { onOpenFile: (file: string, line?: number) => void }) {
   const { t } = useI18n();
   const routes = useGuideStore((s) => s.routes);
   const kind = useGuideStore((s) => s.kind);
   const setKind = useGuideStore((s) => s.setKind);
   const readstate = useGuideStore((s) => s.readstate);
-  const sourceFiles = useGuideStore((s) => s.sourceFiles);
-  const read = useMapStore((s) => s.read);
 
   const route = routes?.routes.find((r) => r.kind === kind) ?? null;
   const steps = route?.steps.slice(0, 6) ?? [];
-  const readCount = Object.keys(read).length;
 
   const cycle = () => {
     const i = ROUTE_KINDS.indexOf(kind);
@@ -194,11 +191,6 @@ function GuideStart({ onOpenFile }: { onOpenFile: (file: string, line?: number) 
             </button>
           </div>
         )}
-        <div className="guide-muted">
-          {sourceFiles
-            ? t('guide.start.progress', { read: readCount, total: sourceFiles })
-            : t('guide.start.progressNoTotal', { read: readCount })}
-        </div>
       </div>
     </section>
   );
@@ -215,7 +207,7 @@ function ChangesHint({
   onOpen,
 }: {
   onOpenChanges?: () => void;
-  /** 点「本轮 agent 产出」的 chip：打开文件并标已读（与主页其它入口同一条口径）。 */
+  /** 点「本轮 agent 产出」的 chip：打开文件（与主页其它入口同一条口径）。 */
   onOpen: (file: string, line?: number) => void;
 }) {
   const { t } = useI18n();
@@ -224,7 +216,6 @@ function ChangesHint({
   const refresh = useChangesStore((s) => s.refresh);
   /** M10.3：宿主上报的 agent 产出（原「最近」卡的内容，2026-10-03 并进变更卡）。 */
   const agentMarks = useMapStore((s) => s.overview?.agentMarks ?? []);
-  const markReadMany = useMapStore((s) => s.markReadMany);
   /** G8.1：SSE 报过的文件（20 秒后自动消失）——只说「刚有变更」，不描述变了什么。 */
   const pulse = useMapStore((s) => s.pulse);
 
@@ -276,9 +267,6 @@ function ChangesHint({
                 files: agentMarks.length,
                 ranged: agentMarks.filter((m) => m.lines.length > 0).length,
               })}
-              <button className="ov-row-act" onClick={() => markReadMany(agentMarks.map((m) => m.file))}>
-                {t('overview.markAllRead')}
-              </button>
             </div>
             <div className="ov-chips">
               {agentMarks.slice(0, 16).map((m) => (
@@ -376,8 +364,6 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
   const setOptions = useMapStore((s) => s.setOptions);
   const toggleIgnored = useMapStore((s) => s.toggleIgnored);
   const ignored = useMapStore((s) => s.ignored);
-  const read = useMapStore((s) => s.read);
-  const toggleRead = useMapStore((s) => s.toggleRead);
   const status = useStore((s) => s.status);
   const [showReadme, setShowReadme] = useState(false);
   const [drawer, setDrawer] = useState<Drawer>(null);
@@ -462,7 +448,6 @@ export function Overview({ onOpenFile, onOpenGraph, onOpenChanges }: Props) {
 
   const open = (file: string, line?: number) => {
     onOpenFile(file, line ?? 1);
-    if (!read[file]) toggleRead(file);
   };
 
   const sortedDirs = [...dirs].sort((a, b) => {
@@ -893,8 +878,6 @@ export function OverviewPanel({
   const overview = useMapStore((s) => s.overview);
   const ignored = useMapStore((s) => s.ignored);
   const toggleIgnored = useMapStore((s) => s.toggleIgnored);
-  const read = useMapStore((s) => s.read);
-  const markReadMany = useMapStore((s) => s.markReadMany);
   /** 侧栏也有「点数字看构成」：环 / 孤立 就地展开，最大直接打开（与主页同一纪律）。 */
   const [openSection, setOpenSection] = useState<'cycles' | 'orphans' | null>(null);
 
@@ -903,7 +886,6 @@ export function OverviewPanel({
   }
   const { identity, entries, orphans, largestFiles, cycles, meta, agentMarks, partial } = overview;
   const orphanVisible = orphans.filter((o) => !ignored[o.file]);
-  const unreadMarks = agentMarks.filter((m) => !read[m.file]);
 
   return (
     <div className="ov-panel">
@@ -927,21 +909,16 @@ export function OverviewPanel({
         ))}
       </div>
 
-      {/* M10.3：一轮 agent 产出成组呈现，可批量划掉 */}
+      {/* M10.3：一轮 agent 产出成组呈现 */}
       {agentMarks.length > 0 && (
         <>
           <div className="ov-panel-title">
             {t('overview.panelAgentTitle', { n: agentMarks.length })}
-            {unreadMarks.length > 0 && (
-              <button className="ov-row-act" onClick={() => markReadMany(unreadMarks.map((m) => m.file))}>
-                {t('overview.markAllReadShort')}
-              </button>
-            )}
           </div>
           {agentMarks.map((m) => (
             <div className="ov-row" key={m.file}>
               <button className="ov-row-main" onClick={() => onOpenFile(m.file, m.lines[0]?.[0] ?? 1)} title={m.file}>
-                <span className="ov-file">{read[m.file] ? '✓ ' : ''}{m.file}</span>
+                <span className="ov-file">{m.file}</span>
               </button>
               {m.lines.length > 0 && <span className="ov-note">{t('overview.changedLineSegments', { n: m.lines.length })}</span>}
             </div>

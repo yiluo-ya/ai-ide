@@ -1,5 +1,4 @@
 /* 文件树的叠加层：改动热力 / 来源徽标。 */
-/* 已读 / 忽略的样式随「已读未读标准」一起移除（2026-10-03 用户要求）。 */
 
 .heat {
   flex: none;
@@ -37,7 +36,6 @@
   color: var(--badge-orphan-fg);
 }
 
-/* （.badge.read / .badge.ignored 已随「已读未读标准」一并移除） */
 
 /* M9.3：阅读时 agent 还在写 —— 刚变更的行要跳出来 */
 .file-tree .badge.pulse {
@@ -55,7 +53,7 @@
   50% { opacity: 0.35; }
 }
 
-/* 视图过滤行：时间 / agent 产出 / 孤立 / 未读 / 隐藏忽略 */
+/* 视图过滤行：时间 / 孤立 */
 .tree-views {
   display: flex;
   flex-wrap: wrap;

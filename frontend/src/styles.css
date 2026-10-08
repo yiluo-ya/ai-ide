@@ -1103,50 +1103,24 @@ mark {
   min-height: 0;
 }
 
-.nav-bar {
+/* 代码展示区顶条（2026-10-08）：左标签条 + 右 ← → / 分享。
+   取代原来的导航条（总览 / 面包屑 / 复制位置 / 旁边打开 / 项目地图），少占一行。 */
+.editor-topbar {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 34px;
-  padding: 4px 8px;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 4px 8px 0;
   border-bottom: 1px solid var(--border);
   background: var(--bg-2);
 }
 
-.crumbs {
+.editor-actions {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 2px;
-  overflow: hidden;
-  white-space: nowrap;
-  color: var(--fg-dim);
-  font-size: var(--fs-sm);
-}
-
-.crumb {
-  padding: 2px 5px;
-  border-radius: var(--r-xs);
-  cursor: pointer;
-  transition:
-    background var(--dur) var(--ease),
-    color var(--dur) var(--ease);
-}
-
-.crumb:hover {
-  background: var(--row-hover);
-  color: var(--fg);
-}
-
-.crumb-root::after,
-.crumb:not(.symbol)::after {
-  content: '›';
-  margin-left: 6px;
-  color: var(--muted-2);
-  cursor: default;
-}
-
-.crumb.symbol {
-  color: var(--code-ref);
+  gap: 4px;
+  margin-left: auto;
+  padding-bottom: 2px;
 }
 
 .editor-wrap {
@@ -2184,12 +2158,12 @@ mark {
 
 /* ------------------------------------------------- 标签条与分屏（N19） */
 
+/* 标签条：现在住在 .editor-topbar 里（背景与下边框由它提供），只负责排标签 */
 .tabbar {
+  flex: 1;
+  min-width: 0;
   display: flex;
   gap: 2px;
-  padding: 4px 6px 0;
-  background: var(--bg-2);
-  border-bottom: 1px solid var(--border);
   overflow-x: auto;
 }
 
@@ -2376,80 +2350,6 @@ mark {
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
-}
-
-/* ------------------------------------------------- 面包屑同级下拉（N7） */
-
-.crumb-wrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 0;
-}
-
-.crumb-caret {
-  cursor: pointer;
-  padding: 0 3px;
-  color: var(--muted-2);
-  font-size: 10px;
-}
-
-.crumb-caret:hover {
-  color: var(--fg);
-  background: var(--row-hover);
-  border-radius: 3px;
-}
-
-.crumb-menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-}
-
-.crumb-menu {
-  position: absolute;
-  top: 30px;
-  left: 60px;
-  min-width: 220px;
-  max-height: 320px;
-  overflow: auto;
-  padding: 4px 0;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  box-shadow: var(--elev-2);
-  z-index: 41;
-}
-
-.crumb-menu-head {
-  padding: 4px 10px 6px;
-  color: var(--fg-dim);
-  font-size: var(--fs-xs);
-  border-bottom: 1px solid var(--border);
-}
-
-.crumb-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: var(--row-height);
-  padding: 4px 10px;
-  font-size: var(--fs-sm);
-  cursor: pointer;
-}
-
-.crumb-menu-item:hover {
-  background: var(--row-hover);
-}
-
-.crumb-menu-item.current {
-  color: var(--code-ref);
-  font-weight: 600;
-}
-
-.crumb-menu-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ------------------------------------------------- 浮层（设置 / 模型，P25） */
@@ -2914,25 +2814,33 @@ mark {
   display: none;
 }
 
-.bottom-head {
+/* 面板主体：右侧竖排标签 + 左侧内容（标签不再单独占顶部一行） */
+.bottom-stack {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.bottom-rail {
   flex: none;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 30px;
-  padding: 0 6px 0 8px;
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  gap: 2px;
+  width: 64px;
+  padding: 4px;
+  border-left: 1px solid var(--border);
+  background: var(--bg-2);
 }
 
 .bottom-tabs {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 2px;
 }
 
 .bottom-tab {
   height: var(--ctl-h-sm);
-  padding: 0 10px;
+  padding: 0 4px;
   border: 0;
   border-radius: var(--r-xs);
   background: transparent;
@@ -2957,8 +2865,8 @@ mark {
 
 .bottom-toggle {
   flex: none;
-  margin-left: auto;
-  width: 22px;
+  margin-top: auto;
+  width: 100%;
   height: var(--ctl-h-sm);
   padding: 0;
   border: 0;
@@ -3241,14 +3149,23 @@ mark {
   overflow: auto;
 }
 
-.region-toggles {
+.rail-bottom {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+}
+
+.region-toggles {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
   padding: 6px 0;
   border-top: 1px solid var(--border);
+  width: 100%;
 }
 
 .region-toggle {

@@ -128,10 +128,6 @@
   white-space: nowrap;
 }
 
-.guide-step.done .guide-step-file {
-  color: var(--fg-dim);
-}
-
 /* 行级指引：这一步的入口在哪一行、先看哪几个符号 */
 .guide-step-hints {
   font-size: var(--fs-xs);
@@ -142,10 +138,6 @@
   white-space: nowrap;
 }
 
-.guide-step.done .guide-step-hints {
-  color: var(--fg-dim);
-}
-
 .guide-step-reason {
   font-size: var(--fs-xs);
   color: var(--fg-dim);
@@ -153,20 +145,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.guide-step-state {
-  flex: none;
-  font-size: var(--fs-xs);
-  color: var(--fg-dim);
-}
-
-.guide-step-state.read {
-  color: var(--ok);
-}
-
-.guide-step-state.at {
-  color: var(--code-ref);
 }
 
 .guide-step-here {
@@ -188,55 +166,6 @@
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
-}
-
-/* ---------------------------------------------------------------- 进度 / 待读 */
-
-.guide-progress {
-  font-size: var(--fs-sm);
-  color: var(--fg);
-}
-
-.guide-queue-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 2px;
-  min-width: 0;
-}
-
-.guide-queue-row:hover {
-  background: var(--row-hover);
-}
-
-.guide-queue-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  background: none;
-  border: none;
-  padding: 0;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.guide-queue-file {
-  font-size: var(--fs-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.guide-queue-note {
-  font-size: var(--fs-xs);
-  color: var(--fg-dim);
-  max-width: 40%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------- 首屏「从这里开始」 */
@@ -412,11 +341,6 @@
 
 /* ---------------------------------------------------------------- App 接线点 */
 
-/* 导航条上固定的「总览」入口（G1.4） */
-.guide-home {
-  flex: none;
-}
-
 /* 状态栏里的「路线 a/b · 下一步：xxx →」（G2.5，可点） */
 .guide-status {
   background: none;
@@ -481,27 +405,6 @@
 
 .tree-menu button:hover {
   background: var(--row-hover);
-}
-
-/* ---------------------------------------------------------------- 搜索命中行尾的「加入待读」（G3.5） */
-
-.search-queue {
-  flex: none;
-  margin-left: auto;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--r-xs);
-  background: none;
-  color: var(--fg-dim);
-  line-height: 1;
-  cursor: pointer;
-}
-
-.search-queue:hover {
-  border-color: var(--accent-2);
-  color: var(--fg);
 }
 
 .summary-bar {
