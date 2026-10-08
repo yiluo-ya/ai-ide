@@ -504,7 +504,6 @@
   color: var(--fg);
 }
 
-/* 摘要条右上角挂「内容已更新 + 重新拉取」：不复用 toggle（button 里嵌 button 不合法） */
 .summary-bar {
   position: relative;
 }
@@ -515,33 +514,7 @@
   white-space: nowrap;
 }
 
-.summary-stale {
-  position: absolute;
-  right: 10px;
-  top: 3px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 1px 6px;
-  border: 1px solid var(--warn);
-  border-radius: var(--r-xs);
-  background: var(--bg-2);
-  color: var(--warn);
-}
 
-.summary-stale-btn {
-  padding: 0 6px;
-  border: 1px solid var(--warn);
-  border-radius: var(--r-xs);
-  background: none;
-  color: var(--warn);
-  font: inherit;
-  cursor: pointer;
-}
-
-.summary-stale-btn:hover {
-  background: var(--row-hover);
-}
 
 /* ---------------------------------------------------------------- 结构性解释面板（W4 / G5） */
 

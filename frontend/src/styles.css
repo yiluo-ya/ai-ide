@@ -2817,3 +2817,525 @@ mark {
   transition-duration: 0.001ms !important;
   scroll-behavior: auto !important;
 }
+
+/* ------------------------------------------------- 活动栏（VS Code 布局迁移 2026-10-08）
+   最左竖条窄栏：竖排图标，驱动左栏切换。 */
+.activitybar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 48px;
+  padding: 6px 0;
+  background: var(--bg-2);
+  border-right: 1px solid var(--border);
+}
+
+.activity-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.activity-item:hover {
+  color: var(--fg);
+  background: var(--row-hover);
+}
+
+.activity-item.active {
+  color: var(--fg);
+}
+
+/* 选中项左侧高亮竖条（VS Code 风格） */
+.activity-item.active::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--accent-2);
+  border-radius: 1px;
+}
+
+.activity-badge {
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent-2);
+  color: var(--accent-fg);
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+
+/* ------------------------------------------------- 底部面板（VS Code 布局迁移 2026-10-08）
+   位于主区状态栏上方：输出 / 终端。 */
+.bottom-panel {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* 底部面板顶部拖动条（调整面板高度） */
+.bottom-resize-handle {
+  flex: none;
+  height: 3px;
+  cursor: row-resize;
+  background: var(--border);
+}
+
+.bottom-resize-handle:hover {
+  background: var(--accent-2);
+}
+
+/* 收起后：整个面板不占位（展开入口已移到左下角「下」图标） */
+.bottom-panel.collapsed {
+  display: none;
+}
+
+.bottom-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 0 6px 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.bottom-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.bottom-tab {
+  height: var(--ctl-h-sm);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.bottom-tab:hover {
+  color: var(--fg);
+  background: var(--row-hover);
+}
+
+.bottom-tab.active {
+  color: var(--fg);
+  background: var(--row-active);
+}
+
+.bottom-toggle {
+  flex: none;
+  margin-left: auto;
+  width: 22px;
+  height: var(--ctl-h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bottom-toggle:hover {
+  color: var(--fg);
+  background: var(--row-hover);
+}
+
+.bottom-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 输出面板 */
+.output-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.output-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.output-toolbar .text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.output-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.output-run {
+  border-bottom: 1px solid var(--border);
+}
+
+.output-run:last-child {
+  border-bottom: 0;
+}
+
+.output-run-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  min-height: 24px;
+}
+
+.output-status {
+  flex: none;
+  font-size: var(--fs-xs);
+  padding: 1px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.output-status.s-running {
+  background: var(--badge-pulse-bg);
+  color: var(--badge-pulse-fg);
+}
+
+.output-status.s-done {
+  background: var(--badge-read-bg);
+  color: var(--badge-read-fg);
+}
+
+.output-status.s-failed {
+  background: var(--danger-bg-strong);
+  color: var(--danger);
+}
+
+.output-status.s-stopped,
+.output-status.s-lost {
+  background: var(--badge-ignored-bg);
+  color: var(--badge-ignored-fg);
+}
+
+.output-cmd {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono-font);
+  font-size: var(--fs-sm);
+  color: var(--code-ref);
+}
+
+.output-exit {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.output-time {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.output-meta {
+  padding: 0 10px 6px;
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+  word-break: break-all;
+}
+
+.output-text {
+  margin: 0;
+  padding: 4px 10px 8px;
+  font-family: var(--mono-font);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow: auto;
+}
+
+/* 终端占位 */
+.terminal-placeholder {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--fg-dim);
+  text-align: center;
+}
+
+.terminal-icon {
+  color: var(--fg-dim);
+}
+
+/* ------------------------------------------------- 右侧栏新结构（VS Code 布局迁移 2026-10-08）
+   右活动栏 + 右侧栏内容，视图可左右拖拽换侧。 */
+.dock-row {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.dock-row > .dock-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 右侧栏里的活动栏：竖条靠右，分隔线在左 */
+.dock-row > .activitybar {
+  border-right: 0;
+  border-left: 1px solid var(--border);
+}
+
+/* 收起 / 展开按钮（右侧栏顶角） */
+.dock-changes > .dock-toggle {
+  flex: none;
+  align-self: flex-end;
+  margin: 4px;
+  width: 22px;
+  height: var(--ctl-h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dock-changes > .dock-toggle:hover {
+  color: var(--fg);
+  background: var(--row-hover);
+}
+
+/* 收起后：展开按钮保持原位（活动栏正下方），撑满栏宽并加高，字体放大，醒目可见 */
+.dock-changes.collapsed > .dock-toggle-open {
+  align-self: stretch;
+  margin: 0 4px 4px;
+  height: 28px;
+  padding: 0;
+  font-size: 14px;
+  color: var(--fg);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+
+/* 拖拽换侧：源图标半透明，活动栏作为 drop 目标时高亮 */
+.activity-item.dragging {
+  opacity: 0.4;
+}
+
+.activitybar.drag-over {
+  background: var(--hover-soft-2);
+  box-shadow: inset 0 0 0 2px var(--accent-2);
+}
+
+/* 同侧排序的插入位置指示线 */
+.activity-dropline {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  height: 2px;
+  background: var(--accent-2);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.activity-dropline-before {
+  top: -3px;
+}
+
+.activity-dropline-after {
+  bottom: -3px;
+}
+
+/* ------------------------------------------------- 右侧竖轨 + 区域开关（2026-10-08）
+   最右侧：活动栏（上）+ 左/右/下 三区域收放开关（下） */
+.right-rail {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 48px;
+  background: var(--bg-2);
+  border-left: 1px solid var(--border);
+}
+
+/* 活动栏已入 right-rail，去掉它自带的左边框（由 right-rail 统一提供） */
+.right-rail > .activitybar {
+  border-left: 0;
+}
+
+/* 右侧内容栏（与左侧 .sidebar 对称）：可收起，宽度可拖 */
+.right-sidebar {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.right-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+.region-toggles {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+
+.region-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.region-toggle:hover {
+  color: var(--fg);
+  background: var(--row-hover);
+}
+
+/* 对应区域展开中：方块内部条显示为实心；未展开时为空心（透明） */
+.region-toggle.active {
+  color: var(--fg);
+}
+
+/* 分栏示意图标：外框 16×16 + 内部一条方向线（左/右/下），形如「日」字。
+   方向线的位置表方向，恒定不消失；
+   收拢时方向线是「空心描边」，展开时方向线「填充为白/灰实心块」。 */
+.region-glyph {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid var(--fg-dim);
+  border-radius: 2px;
+  transition: border-color var(--dur) var(--ease);
+}
+
+/* 方向线：始终带描边（空心），展开后填充 */
+.region-glyph::before {
+  content: '';
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--fg-dim);
+  background: transparent;
+  border-radius: 1px;
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+/* 展开中：方向线填充为浅灰白实心块，外框同步提亮 */
+.region-toggle.active .region-glyph {
+  border-color: var(--fg);
+}
+
+.region-toggle.active .region-glyph::before {
+  background: var(--fg);
+  border-color: var(--fg);
+}
+
+/* 左：左侧竖条 */
+.region-glyph-left::before {
+  left: 2px;
+  top: 2px;
+  bottom: 2px;
+  width: 5px;
+}
+
+/* 右：右侧竖条 */
+.region-glyph-right::before {
+  right: 2px;
+  top: 2px;
+  bottom: 2px;
+  width: 5px;
+}
+
+/* 下：底部横条 */
+.region-glyph-bottom::before {
+  left: 2px;
+  right: 2px;
+  bottom: 2px;
+  height: 5px;
+}

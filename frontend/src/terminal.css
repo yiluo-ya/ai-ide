@@ -1,0 +1,173 @@
+/* 终端面板（2026-10-08）：多标签 + 向下分屏 + 可拖动分隔线。 */
+
+.terminal-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 工具栏：标签 + 操作按钮 */
+.terminal-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+}
+
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+}
+
+.terminal-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--ctl-h-sm);
+  padding: 0 8px 0 10px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.terminal-tab:hover {
+  color: var(--fg);
+  background: var(--row-hover);
+}
+
+.terminal-tab.active {
+  color: var(--fg);
+  background: var(--row-active);
+}
+
+.terminal-tab-name {
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 标签状态圆点（VS Code：运行中配色点 / 结束灰色） */
+.terminal-status-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+  opacity: 0.55;
+}
+
+.terminal-status-dot.running {
+  background: #55c855;
+  opacity: 1;
+}
+
+.terminal-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--r-xs);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--fg-dim);
+}
+
+.terminal-tab-close:hover {
+  color: var(--fg);
+  background: var(--row-hover);
+}
+
+.terminal-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.terminal-action {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--fg-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.terminal-action svg {
+  display: block;
+}
+
+.terminal-action:hover {
+  color: var(--fg);
+  background: var(--row-hover);
+}
+
+/* 终端主体 */
+.terminal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.terminal-tab-panes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-pane {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+
+.terminal-pane-host {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px;
+}
+
+.terminal-pane-host .xterm {
+  height: 100%;
+}
+
+.terminal-pane-host .xterm-viewport {
+  overflow-y: auto;
+}
+
+/* 分屏分隔线（向下分屏的拖动条） */
+.terminal-split-handle {
+  flex: none;
+  height: 3px;
+  cursor: row-resize;
+  background: var(--border);
+}
+
+.terminal-split-handle:hover {
+  background: var(--accent-2);
+}

@@ -13,11 +13,14 @@ import { ensureLanguages, guessLangFor } from './languages';
 import { Editor } from './Editor';
 import { FileTree, type TreeDecor } from './FileTree';
 import { FileSearch, MIN_LEN } from './FileSearch';
-import { CommandPanel } from './CommandPanel';
+import { ActivityBar } from './ActivityBar';
+import { moveView, reorderView, setActiveView, useLayout, viewsOn, type ViewId } from './layout';
+import { OutputPanel } from './OutputPanel';
+import { TerminalPanel } from './TerminalPanel';
 import { GraphView, type GraphViewState } from './GraphView';
 import { AgentView } from './AgentView';
 import { AgentSessions } from './AgentSessions';
-import { useAgent } from './agentStore';
+
 import { FlowView } from './FlowView';
 import { Overview, OverviewPanel } from './Overview';
 import { OutlinePanel, SearchPanel, symbolPathAt } from './SidePanel';
@@ -55,39 +58,25 @@ type PanelTab =
   | 'outline'
   | 'search'
   | 'changes'
+  | 'git'
   | 'agent';
 
 /**
- * 右栏常驻栏的入口（2026-10-03 用户要求）：变更 / 命令 / 总览 / 大纲 / 搜索。
- * 大纲与搜索原本在左栏，一起搬来右栏；五个入口一行放不下，按两行排（见 .dock-tabs）。
+ * 底部面板的入口（VS Code 布局迁移 2026-10-08）：输出 / 终端。
+ * 输出 = 命令运行历史（跑测试 / 编译结果）；终端 = 占位空壳（PTY 后置）。
  */
-type DockTab = 'changes' | 'service' | 'overview' | 'outline' | 'search';
-const DOCK_TABS: DockTab[] = ['changes', 'service', 'overview', 'outline', 'search'];
-/** 右栏入口的 hover 说明（每个入口一句「点开看到什么」）。 */
-const DOCK_TITLE: Record<DockTab, string> = {
-  changes: 'app.dockChangesTitle',
-  service: 'app.dockServiceTitle',
-  overview: 'app.dockOverviewTitle',
-  outline: 'app.dockOutlineTitle',
-  search: 'app.dockSearchTitle',
+type BottomTab = 'output' | 'terminal';
+const BOTTOM_TABS: BottomTab[] = ['output', 'terminal'];
+const BOTTOM_TITLE: Record<BottomTab, string> = {
+  output: 'app.panelOutput',
+  terminal: 'app.panelTerminal',
 };
 
-/** 左栏 tab（2026-10-03 用户要求）：只留「文件」与「code 会话」，其余都在右栏。 */
-const LEFT_TABS: PanelTab[] = ['files', 'agent'];
-/** 快捷键顺序的**唯一次序来源**：Ctrl/Cmd+1..4 = 文件 / 大纲 / 搜索 / code会话，0 = 最后一个。
- * 顺序不再等于左栏 tab 顺序（大纲 / 搜索搬去了右栏，由 openPanel 路由），键位保持不变。
+/**
+ * 快捷键顺序的**唯一次序来源**：Ctrl/Cmd+1..6 = 文件 / 搜索 / 源码管理 / code会话 / 总览 / 大纲，0 = 最后一个。
+ * 视图实际在哪一侧由 layout.ts 决定；快捷键聚焦到该视图所在侧。
  */
-const PANEL_TABS: PanelTab[] = ['files', 'outline', 'search', 'agent'];
-/** tab 文字对应的 i18n key（guide / changes 有各自的 key，单独处理）。 */
-const TAB_TEXT: Record<string, string> = {
-  overview: 'app.tab.overview',
-  files: 'app.tab.files',
-  outline: 'app.tab.outline',
-  refs: 'app.tab.refs',
-  hierarchy: 'app.tab.hierarchy',
-  search: 'app.tab.search',
-  agent: 'app.tab.agent',
-};
+const PANEL_TABS: ViewId[] = ['files', 'search', 'git', 'agent', 'overview', 'outline'];
 const HOT_METRICS: HotMetric[] = ['files', 'refs', 'symbols', 'defined', 'unique', 'recent'];
 
 /** M20 地图快照：把「地图的哪个视图」写进 URL，这样「看这个模块的依赖图 / 概览」可以被贴出去。
@@ -137,45 +126,18 @@ export default function App() {
   // 2026-10-03 用户要求移除向导面板：状态栏的「路线 · 下一步」提示与它依赖的派生值一并去掉。
   /** W4：结构性解释面板的目标（null = 关着）。 */
   const explainTarget = useExplainStore((s) => s.target);
-  const [tab, setTab] = useState<PanelTab>(() => {
-    // 左栏只剩文件 / code会话：URL 里的 outline / search 交给右栏（见下面的 dockTab 初值）
-    const fromUrl = snapshot.get('tab') as PanelTab | null;
-    return fromUrl && LEFT_TABS.includes(fromUrl) ? fromUrl : 'files';
-  });
+  const layout = useLayout();
+  // 左栏 / 右栏当前视图：由左右活动栏选中，位置在 layout.ts（localStorage 持久化）。
+  const tab: PanelTab = layout.active.left;
+  const dockTab: PanelTab = layout.active.right;
   /** W3：变更面板 tab 上的计数（变了几个文件）。 */
   // 变更计数 = git 报的未提交改动条数（2026-10-03：变更以 git 为准，不再自记录）
   const changesCount = useChangesStore((s) => s.result?.entries.length ?? 0);
 
-  /** tab 文字：guide / changes 走 i18n，其余走 TAB_TEXT。 */
-  const tabLabel = (id: PanelTab) =>
-    id === 'guide' ? t('guide.tab') : id === 'changes' ? t('changes.tab') : t(TAB_TEXT[id]);
-
-  /** tab 上的计数（变更）。 */
-  const tabCount = (id: PanelTab) => (id === 'changes' ? changesCount : 0);
-
-  /** 一个 tab 按钮（常驻直接排；辅助的在「更多」菜单里复用同一套文字与计数）。 */
-  const renderTabButton = (id: PanelTab) => {
-    const count = tabCount(id);
-    const title = id === 'changes' ? t('changes.tabTitle') : undefined;
-    return (
-      <button
-        key={id}
-        role="tab"
-        id={`wcr-tab-${id}`}
-        aria-selected={tab === id}
-        aria-controls="wcr-side-panel"
-        className={tab === id ? 'active' : ''}
-        onClick={() => {
-          setTab(id);
-          // 2026-10-03：顶栏「Agent 对话」入口已删 —— 点「code会话」tab 直接把主区切到 Agent
-          if (id === 'agent' && store.projectId) setMainView('agent');
-        }}
-        title={title}
-      >
-        {tabLabel(id)}
-        {count > 0 && <span className="tab-count">{count}</span>}
-      </button>
-    );
+  /** 选中某侧视图；点「code会话」时主区切到 Agent。 */
+  const onSelectView = (side: 'left' | 'right', id: ViewId) => {
+    setActiveView(side, id);
+    if (id === 'agent' && store.projectId) setMainView('agent');
   };
   const [quick, setQuick] = useState<QuickOpenMode>(null);
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
@@ -216,26 +178,32 @@ export default function App() {
   /** 右侧常驻栏：默认展开（默认值来自设置），宽度可拖，可收起。 */
   const [changesDockOpen, setChangesDockOpen] = useState(() => loadPrefs().changesOpen);
   const [changesDockWidth, setChangesDockWidth] = useState(280);
+  /** 左侧内容栏显隐（2026-10-08：左下角「左/右/下」三开关控制三区域收放）。 */
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   /**
    * 右侧栏里的五个入口，分两行排（变更 / 命令 / 总览 ｜ 大纲 / 搜索），默认变更。
    * 「变更」= git 工作区改动清单 + 四个常用命令；「命令」= 服务状态与重启 / 停止；
    * 「总览」= 规模 / 起点 / 结构告警 / 本轮产出；「大纲」「搜索」2026-10-03 从左栏搬来。
    * 初值兼容旧链接：URL 里 tab=outline / search 时直接打开右栏对应入口。
    */
-  const [dockTab, setDockTab] = useState<DockTab>(() => {
-    const fromUrl = snapshot.get('tab') as DockTab | null;
-    return fromUrl && DOCK_TABS.includes(fromUrl) ? fromUrl : 'changes';
-  });
+  /** 底部面板：默认展开、默认「输出」页。 */
+  const [bottomOpen, setBottomOpen] = useState(true);
+  const [bottomTab, setBottomTab] = useState<BottomTab>('output');
+  /** 底部面板高度（px），拖动顶边调整。 */
+  const [bottomHeight, setBottomHeight] = useState(220);
 
-  /** 打开某个面板：大纲 / 搜索在右栏（顺带把右栏展开），其余在左栏。 */
-  const openPanel = useCallback((id: PanelTab) => {
-    if (id === 'outline' || id === 'search') {
-      setChangesDockOpen(true);
-      setDockTab(id);
-      return;
-    }
-    setTab(id);
-  }, []);
+  /** 打开某个面板：视图在哪一侧就聚焦那一侧；在右侧时顺带展开右侧栏。 */
+  const openPanel = useCallback(
+    (id: ViewId) => {
+      if (layout.sides[id] === 'right') {
+        setChangesDockOpen(true);
+        setActiveView('right', id);
+        return;
+      }
+      setActiveView('left', id);
+    },
+    [layout.sides],
+  );
   /** W3 / G7.3：整文件 blame 视图开关 + 当前文件的 blame（按文件缓存，光标移动不重新拉）。 */
   const [blameOn, setBlameOn] = useState(false);
   const [blame, setBlame] = useState<BlameResult | null>(null);
@@ -287,16 +255,7 @@ export default function App() {
     });
   }, [store.projectId]);
 
-  // 常驻引用面板（N4）：切到引用 tab 时按光标位置查引用（防抖）
-  useEffect(() => {
-    if (tab !== 'refs' || !store.openFile) return;
-    const file = store.openFile;
-    const { line, col } = cursor;
-    const timer = setTimeout(() => {
-      void useStore.getState().loadReferences(file, line, col);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [tab, store.openFile, cursor.line, cursor.col]);
+  
 
   // no-symbol 不弹条（Q1），但也不能毫无反馈：状态栏轻提示几秒后自动消失
   useEffect(() => {
@@ -440,7 +399,7 @@ export default function App() {
       } else if (mod && e.shiftKey && key === 'f') {
         e.preventDefault();
         openPanel('search');
-        // 搜索框现在挂在右栏：展开 + 切到该入口后才在，所以晚一拍聚焦
+        // 搜索框在左栏（活动栏「搜索」）：切换到该视图后才在，所以晚一拍聚焦
         setTimeout(() => {
           searchInputRef.current?.querySelector('input')?.focus();
         }, 0);
@@ -449,7 +408,7 @@ export default function App() {
         openPanel('outline');
       } else if (mod && e.shiftKey && key === 'e') {
         e.preventDefault();
-        setTab('files');
+        openPanel('files');
       } else if (mod && e.shiftKey && key === 'r') {
         // G3.4：继续阅读 —— 直达上次离开的文件与行列（没有断点就不抢这个键）
         const last = useGuideStore.getState().readstate;
@@ -654,6 +613,119 @@ export default function App() {
   const copySnippet = (file: string, startLine: number, endLine: number, text: string) =>
     useStore.getState().copySnippet({ file, startLine, endLine, text });
 
+  /** 统一渲染某视图的面板（左右两栏共用），无项目时给占位。 */
+  const renderView = (id: ViewId) => {
+    switch (id) {
+      case 'files':
+        return (
+          <>
+            <input
+              className="text-input sidebar-filter"
+              placeholder={t('app.filterPlaceholder', { min: MIN_LEN })}
+              value={fileFilter}
+              onChange={(e) => setFileFilter(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setFileFilter('');
+              }}
+            />
+            {/* 2026-10-03：文件名过滤与内容搜索共用一个输入框（≥4 字才搜内容） */}
+            <FileSearch query={fileFilter} onOpen={(file, line, col) => jump(file, line, col)} />
+            <div className="tree-views">
+              <select
+                className="ov-select"
+                value={recentFilter}
+                onChange={(e) => setRecentFilter(e.target.value as RecentFilter)}
+                title={t('app.recentFilterTitle')}
+              >
+                <option value="all">{t('app.recentAll')}</option>
+                <option value="today">{t('app.recentToday')}</option>
+                <option value="3d">{t('app.recent3d')}</option>
+                <option value="7d">{t('app.recent7d')}</option>
+              </select>
+              <label title={t('app.onlyOrphansTitle')}>
+                <input
+                  type="checkbox"
+                  checked={onlyOrphans}
+                  onChange={(e) => setOnlyOrphans(e.target.checked)}
+                />
+                {t('app.orphan')}
+              </label>
+            </div>
+            {/* 打开文件不带行号：回到上次读到的位置（N22） */}
+            <FileTree
+              tree={store.tree}
+              activeFile={store.openFile}
+              onOpen={(file) => jump(file)}
+              filter={fileFilter}
+              decor={decor}
+              onAddToQueue={(file) => useGuideStore.getState().addQueue({ file, line: 1, col: 1 })}
+              onCopy={(text) => useStore.getState().copyText(text)}
+            />
+          </>
+        );
+      case 'search':
+        return store.projectId ? (
+          <div ref={searchInputRef} className="search-host">
+            <SearchPanel
+              hits={store.searchHits}
+              busy={store.searchBusy}
+              truncated={store.searchTruncated}
+              query={searchQuery}
+              history={store.searchHistory}
+              dirs={searchDirOptions}
+              selectedDirs={store.searchDirs}
+              onDirsChange={(dirs) => useStore.getState().setSearchDirs(dirs)}
+              onCancel={() => useStore.getState().cancelSearch()}
+              onToggleFullscreen={() => setSearchFullscreen(true)}
+              onSearch={(query, options) => {
+                setSearchQuery(query);
+                void useStore.getState().runSearch(query, options);
+              }}
+              onOpen={(file, line, col) => jump(file, line, col)}
+              onQueue={(file, line, col) => useGuideStore.getState().addQueue({ file, line, col })}
+            />
+          </div>
+        ) : (
+          <div className="panel-empty">{t('app.noProject')}</div>
+        );
+      case 'git':
+        return store.projectId ? (
+          <ChangesPanel onOpenFile={(file) => jump(file)} onOpenDiff={(file) => setDiffFile(file)} />
+        ) : (
+          <div className="panel-empty">{t('app.noProject')}</div>
+        );
+      case 'agent':
+        return store.projectId ? (
+          <AgentSessions
+            projectId={store.projectId}
+            onBack={() => setMainView('auto')}
+            onOpen={() => setMainView('agent')}
+          />
+        ) : (
+          <div className="panel-empty">{t('app.noProject')}</div>
+        );
+      case 'overview':
+        return store.projectId ? (
+          <OverviewPanel
+            onOpenFile={(file, line) => jump(file, line ?? 1, 1)}
+            onOpenMap={() => setMainView('map')}
+            onOpenGraph={() => setGraphOpen(true)}
+          />
+        ) : (
+          <div className="panel-empty">{t('app.noProject')}</div>
+        );
+      case 'outline':
+        return (
+          <OutlinePanel
+            symbols={store.symbols}
+            fileName={store.openFile}
+            cursorLine={cursor.line}
+            onJump={(s) => jump(s.location.file, s.location.range.start.line, s.location.range.start.col)}
+          />
+        );
+    }
+  };
+
   return (
     <div className="app">
       <TopBar
@@ -670,6 +742,18 @@ export default function App() {
       />
 
       <div className="body">
+        {/* 最左活动栏：竖排图标，驱动左栏切换（VS Code 布局迁移 2026-10-08） */}
+        <ActivityBar
+          side="left"
+          views={viewsOn('left')}
+          active={tab}
+          onSelect={(id) => onSelectView('left', id)}
+          onMove={moveView}
+          onReorder={(id, idx) => reorderView('left', id, idx)}
+          gitCount={changesCount}
+        />
+
+        {sidebarOpen && (
         <aside className="sidebar">
           {/* P24：侧栏宽拖拽把手（键盘 ←/→ 同效） */}
           <div
@@ -681,77 +765,13 @@ export default function App() {
             onPointerDown={onSidebarResizeStart}
             onKeyDown={onSidebarResizeKey}
           />
-          {/* tab 顺序只来自 LEFT_TABS（快捷键用同一份），不要再在这里手写一遍 */}
-          <div className="panel-tabs" role="tablist" aria-label={t('app.sidebarPanels')}>
-            {LEFT_TABS.map((id) => renderTabButton(id))}
-          </div>
 
-          {/* P25：面板容器补 tabpanel 语义（aria-labelledby 指向当前 tab） */}
-          <div className="panel-body" role="tabpanel" id="wcr-side-panel" aria-labelledby={`wcr-tab-${tab}`}>
-
-          {/* 「变更」「命令」「总览」都在右侧常驻栏（见 .dock-changes），不再占侧栏 tab */}
-
-          {tab === 'files' && (
-            <>
-              <input
-                className="text-input sidebar-filter"
-                placeholder={t('app.filterPlaceholder', { min: MIN_LEN })}
-                value={fileFilter}
-                onChange={(e) => setFileFilter(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') setFileFilter('');
-                }}
-              />
-              {/* 2026-10-03：文件名过滤与内容搜索共用一个输入框（≥4 字才搜内容） */}
-              <FileSearch query={fileFilter} onOpen={(file, line, col) => jump(file, line, col)} />
-              <div className="tree-views">
-                <select
-                  className="ov-select"
-                  value={recentFilter}
-                  onChange={(e) => setRecentFilter(e.target.value as RecentFilter)}
-                  title={t('app.recentFilterTitle')}
-                >
-                  <option value="all">{t('app.recentAll')}</option>
-                  <option value="today">{t('app.recentToday')}</option>
-                  <option value="3d">{t('app.recent3d')}</option>
-                  <option value="7d">{t('app.recent7d')}</option>
-                </select>
-                <label title={t('app.onlyOrphansTitle')}>
-                  <input
-                    type="checkbox"
-                    checked={onlyOrphans}
-                    onChange={(e) => setOnlyOrphans(e.target.checked)}
-                  />
-                  {t('app.orphan')}
-                </label>
-              </div>
-              {/* 打开文件不带行号：回到上次读到的位置（N22） */}
-              <FileTree
-                tree={store.tree}
-                activeFile={store.openFile}
-                onOpen={(file) => jump(file)}
-                filter={fileFilter}
-                decor={decor}
-                onAddToQueue={(file) => useGuideStore.getState().addQueue({ file, line: 1, col: 1 })}
-                onCopy={(text) => useStore.getState().copyText(text)}
-              />
-            </>
-          )}
-
-          {/* 大纲 / 搜索 已搬到右栏（见 .dock-changes 里的 dockTab 分支） */}
-
-          {tab === 'agent' &&
-            (store.projectId ? (
-              <AgentSessions
-                projectId={store.projectId}
-                onBack={() => setMainView('auto')}
-                onOpen={() => setMainView('agent')}
-              />
-            ) : (
-              <div className="panel-empty">{t('app.noProject')}</div>
-            ))}
+          {/* P25：面板容器补 tabpanel 语义（aria-labelledby 指向活动栏当前项） */}
+          <div className="panel-body" role="tabpanel" id="wcr-side-panel" aria-labelledby={`wcr-activity-left-${tab}`}>
+            {renderView(tab)}
           </div>
         </aside>
+        )}
 
         <main className="main">
           {mainView === 'agent' ? (
@@ -906,7 +926,7 @@ export default function App() {
               <Overview
                 onOpenFile={(file, line) => jump(file, line ?? 1, 1)}
                 onOpenGraph={() => setGraphOpen(true)}
-                onOpenChanges={() => setTab('changes')}
+                onOpenChanges={() => openPanel('git')}
               />
             ) : store.openFile ? (
               <div className={`panes ${store.secondary ? 'split' : ''}`}>
@@ -978,6 +998,71 @@ export default function App() {
             {store.fileLoading && <div className="loading-mask">{t('app.loading')}</div>}
           </div>
 
+          {/* 底部面板（VS Code 布局迁移 2026-10-08）：输出 / 终端，位于状态栏上方。 */}
+          <div
+            className={`bottom-panel ${bottomOpen ? '' : 'collapsed'}`}
+            style={bottomOpen ? { height: bottomHeight } : undefined}
+          >
+            <div
+              className="bottom-resize-handle"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const startY = e.clientY;
+                const startH = bottomHeight;
+                const move = (ev: MouseEvent) => {
+                  // 向上拖（clientY 减小）→ 面板变高
+                  setBottomHeight(Math.max(80, Math.min(600, startH + (startY - ev.clientY))));
+                };
+                const up = () => {
+                  window.removeEventListener('mousemove', move);
+                  window.removeEventListener('mouseup', up);
+                };
+                window.addEventListener('mousemove', move);
+                window.addEventListener('mouseup', up);
+              }}
+            />
+            <div className="bottom-head">
+              <div className="bottom-tabs" role="tablist" aria-label={t('app.bottomPanels')}>
+                {BOTTOM_TABS.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    id={`wcr-bottom-tab-${id}`}
+                    aria-selected={bottomTab === id}
+                    className={`bottom-tab${bottomTab === id ? ' active' : ''}`}
+                    title={t(BOTTOM_TITLE[id])}
+                    onClick={() => {
+                      if (bottomOpen && bottomTab === id) setBottomOpen(false);
+                      else {
+                        setBottomTab(id);
+                        setBottomOpen(true);
+                      }
+                    }}
+                  >
+                    {t(BOTTOM_TITLE[id])}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="bottom-toggle"
+                onClick={() => setBottomOpen((v) => !v)}
+                title={bottomOpen ? t('app.collapseBottom') : t('app.expandBottom')}
+              >
+                {bottomOpen ? '▾' : '▴'}
+              </button>
+            </div>
+            {bottomOpen && (
+              <div className="bottom-body">
+                {bottomTab === 'output' ? (
+                  <OutputPanel projectId={store.projectId} />
+                ) : (
+                  <TerminalPanel projectId={store.projectId} />
+                )}
+              </div>
+            )}
+          </div>
+
           <footer className="statusbar">
             <span>{store.openFile ?? '—'}</span>
             {cursorBlame && (
@@ -999,14 +1084,11 @@ export default function App() {
           )}
         </main>
 
-        {/* 2026-10-03 用户要求：「变更」「命令」都常驻在右边（不再占侧栏 tab），默认显示变更。 */}
+        {/* 右侧栏（VS Code 布局迁移 2026-10-08）：右活动栏 + 右侧栏内容，视图可在左右两侧拖拽换侧。 */}
         {store.projectId && (
-          <aside
-            className={`dock-changes ${changesDockOpen ? '' : 'collapsed'}`}
-            style={changesDockOpen ? { width: changesDockWidth } : undefined}
-            aria-label={t('app.dockAria')}
-          >
-            {changesDockOpen && (
+          <>
+          {changesDockOpen && (
+            <aside className="right-sidebar" style={{ width: changesDockWidth }} aria-label={t('app.dockAria')}>
               <div
                 className="dock-resizer"
                 role="separator"
@@ -1015,90 +1097,47 @@ export default function App() {
                 tabIndex={0}
                 onPointerDown={onChangesDockResizeStart}
               />
-            )}
-            <div className="dock-head">
+              <div className="right-body">{renderView(dockTab)}</div>
+            </aside>
+          )}
+          <div className="right-rail">
+            <ActivityBar
+              side="right"
+              views={viewsOn('right')}
+              active={dockTab}
+              onSelect={(id) => onSelectView('right', id)}
+              onMove={moveView}
+              onReorder={(id, idx) => reorderView('right', id, idx)}
+              gitCount={changesCount}
+            />
+            <div className="region-toggles" role="group" aria-label={t('app.regionToggles')}>
               <button
-                className="dock-toggle"
-                onClick={() => setChangesDockOpen((v) => !v)}
-                title={changesDockOpen ? t('app.collapseDock') : t('app.expandDock')}
+                type="button"
+                className={`region-toggle${sidebarOpen ? ' active' : ''}`}
+                title={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')}
+                onClick={() => setSidebarOpen((v) => !v)}
               >
-                {changesDockOpen ? '▸' : '◂'}
+                <span className="region-glyph region-glyph-left" aria-hidden="true" />
               </button>
-              {changesDockOpen && (
-                <div className="dock-tabs" role="tablist" aria-label={t('app.dockPanels')}>
-                  {DOCK_TABS.map((id) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="tab"
-                      id={`wcr-dock-tab-${id}`}
-                      aria-selected={dockTab === id}
-                      className={`dock-tab${dockTab === id ? ' active' : ''}`}
-                      title={t(DOCK_TITLE[id])}
-                      onClick={() => setDockTab(id)}
-                    >
-                      {id === 'changes'
-                        ? t('changes.tab')
-                        : id === 'service'
-                          ? t('app.dockService')
-                          : t(TAB_TEXT[id])}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <button
+                type="button"
+                className={`region-toggle${changesDockOpen ? ' active' : ''}`}
+                title={changesDockOpen ? t('app.collapseDock') : t('app.expandDock')}
+                onClick={() => setChangesDockOpen((v) => !v)}
+              >
+                <span className="region-glyph region-glyph-right" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={`region-toggle${bottomOpen ? ' active' : ''}`}
+                title={bottomOpen ? t('app.collapseBottom') : t('app.expandBottom')}
+                onClick={() => setBottomOpen((v) => !v)}
+              >
+                <span className="region-glyph region-glyph-bottom" aria-hidden="true" />
+              </button>
             </div>
-            {changesDockOpen && (
-              <div className="dock-body">
-                {dockTab === 'changes' ? (
-                  <ChangesPanel onOpenFile={(file) => jump(file)} onOpenDiff={(file) => setDiffFile(file)} />
-                ) : dockTab === 'service' ? (
-                  <CommandPanel
-                    projectId={store.projectId}
-                    project={store.project}
-                    onOpenSession={(sessionId) => {
-                      const agent = useAgent.getState();
-                      void agent.refreshSessions().then(() => agent.select(sessionId));
-                      setMainView('agent');
-                    }}
-                  />
-                ) : dockTab === 'overview' ? (
-                  <OverviewPanel
-                    onOpenFile={(file, line) => jump(file, line ?? 1, 1)}
-                    onOpenMap={() => setMainView('map')}
-                    onOpenGraph={() => setGraphOpen(true)}
-                  />
-                ) : dockTab === 'outline' ? (
-                  <OutlinePanel
-                    symbols={store.symbols}
-                    fileName={store.openFile}
-                    cursorLine={cursor.line}
-                    onJump={(s) => jump(s.location.file, s.location.range.start.line, s.location.range.start.col)}
-                  />
-                ) : (
-                  <div ref={searchInputRef} className="search-host">
-                    <SearchPanel
-                      hits={store.searchHits}
-                      busy={store.searchBusy}
-                      truncated={store.searchTruncated}
-                      query={searchQuery}
-                      history={store.searchHistory}
-                      dirs={searchDirOptions}
-                      selectedDirs={store.searchDirs}
-                      onDirsChange={(dirs) => useStore.getState().setSearchDirs(dirs)}
-                      onCancel={() => useStore.getState().cancelSearch()}
-                      onToggleFullscreen={() => setSearchFullscreen(true)}
-                      onSearch={(query, options) => {
-                        setSearchQuery(query);
-                        void useStore.getState().runSearch(query, options);
-                      }}
-                      onOpen={(file, line, col) => jump(file, line, col)}
-                      onQueue={(file, line, col) => useGuideStore.getState().addQueue({ file, line, col })}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-          </aside>
+          </div>
+          </>
         )}
       </div>
 

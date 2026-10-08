@@ -13,7 +13,6 @@ import { useEffect, useRef, useState } from 'react';
 import type { FileHistoryResult, FileSummary } from '../../shared/types';
 import { guideApi } from './guide';
 import { changesApi } from './readSnapshot';
-import { useStore } from './state';
 import { useI18n } from './i18n';
 import './guide.css';
 
@@ -43,26 +42,12 @@ function SummaryBar({
   const [data, setData] = useState<FileSummary | null>(null);
   const [open, setOpen] = useState(false);
   const [history, setHistory] = useState<FileHistoryResult | null>(null);
-  /** G6.4：这一份摘要是基于哪个索引版本 / 哪份正文取的（变了才提示「内容已更新」）。 */
-  const loadedRef = useRef<{ token: number; content: string } | null>(null);
-  const [stale, setStale] = useState(false);
-  /** 手动「重新拉取」的计数器（加一 = 重新请求）。 */
-  const [reloadSeq, setReloadSeq] = useState(0);
   /** 上一次请求对应的文件：同一文件重拉不清展开区，换文件才清。 */
   const loadedFileRef = useRef<string | null>(null);
-  // 索引版本信号：file-changed / file-deleted / index-ready 都会让它 +1（state.ts）
-  const indexToken = useStore((s) => s.highlightsToken);
-  // 重新打开同一个文件时正文会重新拉一次（内容相同则字符串相等，不会误报）
-  const fileContent = useStore((s) => s.fileContent);
-  const tokenRef = useRef(indexToken);
-  tokenRef.current = indexToken;
-  const contentRef = useRef(fileContent);
-  contentRef.current = fileContent;
 
   useEffect(() => {
     if (!projectId || !file) {
       setData(null);
-      loadedRef.current = null;
       return;
     }
     const fileChanged = loadedFileRef.current !== file;
@@ -72,34 +57,21 @@ function SummaryBar({
       setData(null);
       setOpen(false);
       setHistory(null);
-      setStale(false);
-      loadedRef.current = null;
     }
     void guideApi
       .fileSummary(projectId, file)
       .then((res) => {
         if (cancelled) return;
         setData(res);
-        // 记下这份摘要取到时的索引版本与正文，供「内容已更新」判断
-        loadedRef.current = { token: tokenRef.current, content: contentRef.current };
-        setStale(false);
       })
       .catch(() => {
-        // 不在索引内 / 非源码 / 后端旧版本：整条不渲染（重拉失败则保留旧数据，只留提示）
+        // 不在索引内 / 非源码 / 后端旧版本：整条不渲染（重拉失败则保留旧数据）
         if (!cancelled && fileChanged) setData(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [projectId, file, reloadSeq]);
-
-  // G6.4：收到 file-changed / index-ready（token 变）或这个文件被重新打开（正文变）时，
-  // 只标记「内容已更新」，不自动重拉 —— 索引可能还在跑，让用户决定什么时候取。
-  useEffect(() => {
-    const loaded = loadedRef.current;
-    if (!data || !loaded) return;
-    if (loaded.token !== indexToken || loaded.content !== fileContent) setStale(true);
-  }, [data, indexToken, fileContent]);
+  }, [projectId, file]);
 
   // G7.4：提交历史只在展开时拉一次（git 调用有成本，不展开就不发）
   useEffect(() => {
@@ -144,18 +116,6 @@ function SummaryBar({
           {t('summary.rev', { rev: data.revision })}
         </span>
       </button>
-      {stale && (
-        <span className="summary-stale">
-          {t('summary.stale')}
-          <button
-            className="summary-stale-btn"
-            onClick={() => setReloadSeq((v) => v + 1)}
-            title={t('summary.refreshTitle')}
-          >
-            {t('summary.refresh')}
-          </button>
-        </span>
-      )}
       {open && (
         <div className="summary-body">
           <div className="summary-block">

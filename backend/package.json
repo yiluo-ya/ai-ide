@@ -19,6 +19,7 @@
     "@tree-sitter-grammars/tree-sitter-yaml": "^0.7.1",
     "chokidar": "^4.0.3",
     "hono": "^4.7.0",
+    "node-pty": "^1.1.0",
     "tree-sitter": "0.25.1",
     "tree-sitter-bash": "^0.25.1",
     "tree-sitter-css": "^0.25.0",

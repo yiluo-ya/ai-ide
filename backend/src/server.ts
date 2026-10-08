@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { createApp } from './api/routes';
+import { closeAllTerminals, handleTerminalUpgrade } from './api/terminal';
 import { ProjectRegistry } from './registry';
 import { DATA_DIR, HOST, PORT, CORS_ORIGINS, SHARE_NOTE_LOCAL, SHARE_NOTE_SHARED, shareHintFor } from './config';
 import { installNoWatch, installProjectHint, migrateLegacyDataDir } from './bootstrap';
@@ -42,6 +43,8 @@ export async function createServer(opts: ServerOptions): Promise<ServerHandle> {
 
   const app = createApp(registry);
   const server = serve({ fetch: app.fetch, port: opts.port, hostname: opts.host });
+  // 交互式终端（WebSocket 升级）：Hono 不处理 upgrade，这里挂到底层 http.Server 上。
+  installTerminalUpgrade(registry, server as unknown as import('node:http').Server);
   await new Promise<void>((resolve, reject) => {
     server.once('listening', () => resolve());
     server.once('error', (err: Error) => reject(err));
@@ -70,10 +73,21 @@ export async function createServer(opts: ServerOptions): Promise<ServerHandle> {
     dataDir,
     close: () =>
       new Promise<void>((resolve) => {
+        closeAllTerminals();
         registry.closeAll();
         server.close(() => resolve());
       }),
   };
+}
+
+/** 把 WebSocket 升级事件交给终端模块（不引额外依赖）。 */
+function installTerminalUpgrade(
+  registry: ProjectRegistry,
+  httpServer: import('node:http').Server,
+): void {
+  httpServer.on('upgrade', (req, socket, head) => {
+    handleTerminalUpgrade(registry, req, socket, head);
+  });
 }
 
 /** 启动日志：同机同目录分享提示与 CORS 口径（S5a）。 */
