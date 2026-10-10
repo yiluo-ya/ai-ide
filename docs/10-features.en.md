@@ -27,6 +27,13 @@
 - Tabs (limit 8; middle-click or “Open to the side” for split view), recent files (empty query in
   Ctrl+P), position memory (switching back restores the last line and scroll position),
   back / forward (`Alt+←` / `Alt+→`)
+- **Editing and deletion** (2026-10-10, see `FR/FR-0008-fr.md`): a file is editable as soon as it
+  opens, saved **1 s after you stop typing** (the status bar shows unsaved / saving / saved); if the
+  file changed on disk meanwhile, a dialog asks whether to keep yours or the disk version; right-click
+  in the file tree deletes a file or directory (moved to the **system recycle bin**, restorable;
+  Windows only — other platforms fail loudly). Plain text editing only — no completion, diagnostics,
+  formatting, or quick fixes; the split pane and historical snapshots stay read-only.
+  **Works in share mode too** (unlike the four `git` write actions in Changes, which are local-only)
 - Around the editor: file summary bar (exports / dependencies / dependents + commit history),
   a three-band density bar (code / comment / blank, click to jump), per-line blame view
   (`Ctrl/Cmd+Alt+B`), read-only diff overlay (working tree vs HEAD or a given rev)

@@ -10,10 +10,13 @@ Positioning (see `FR/FR-0002-fr.md`): **built for reading** — no compiling, de
 or type checking.
 
 Reading itself is read-only: indexing and browsing **never modify a single file in the directory
-being read**. Only four things write to disk, and every one of them must be triggered by you
-explicitly: **git write actions in the Changes panel** (add / commit / pull / push),
-**running commands in the Commands panel**, **the Code Agent editing files**, and the command
-endpoints a host calls itself.
+being read**. Six things write to disk, and every one of them must be triggered by you
+explicitly: **editing a file in the editor** (saved 1 s after you stop typing), **deleting from the
+file tree** (moved to the system recycle bin, restorable from there), **git write actions in the
+Changes panel** (add / commit / pull / push), **running commands in the Commands panel**, **the Code
+Agent editing files**, and the command endpoints a host calls itself.
+(Editing and deletion: see `FR/FR-0008-fr.md`; the editor is plain text editing — no completion,
+diagnostics, or formatting assistance.)
 
 ## UI at a glance
 
