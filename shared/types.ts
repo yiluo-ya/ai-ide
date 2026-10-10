@@ -525,6 +525,28 @@ export type IndexEvent =
   | { type: 'file-deleted'; file: string }
   | { type: 'index-ready'; status: IndexStatus };
 
+/** 2026-10-10：编辑器保存（`PUT /api/projects/:id/file`）成功后的回执。 */
+export interface SaveFileResult {
+  ok: true;
+  size: number;
+  /** 写入后的 mtime，前端拿它当下一次保存的冲突基准。 */
+  mtimeMs: number;
+}
+
+/** 2026-10-10：文件树删除（`DELETE /api/projects/:id/file`）成功后的回执。 */
+export interface DeleteEntryResult {
+  ok: true;
+  path: string;
+  /** 一定是「移到回收站」，本版没有永久删除。 */
+  trashed: true;
+}
+
+/** 保存冲突时（409）后端随 `ApiError` 一并给出的磁盘现状。 */
+export interface FileConflictDetail {
+  mtimeMs: number | null;
+  size: number | null;
+}
+
 /**
  * 语义着色：区分「本项目符号」与「外部依赖 / 标准库符号」，供编辑器提亮 / 压暗。
  * 只标注能判定的符号；无法判定的（通常是需要类型推断的 obj.method）不出现在结果里，

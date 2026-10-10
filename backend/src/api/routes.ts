@@ -58,6 +58,7 @@ import {
 import { buildOverview, isTestFile } from '../indexer/insight';
 import { callHierarchy, implementationsOf, typeHierarchy } from '../indexer/callgraph';
 import { buildGraph, dependentsOf, dirDependentsOf } from '../indexer/graph';
+import { trashEntry, writeProjectFile } from '../indexer/fswrite';
 import { buildRoutes } from '../indexer/guide';
 import { fileSummary } from '../indexer/summary';
 import { buildTimeline, DEFAULT_RECENT_WINDOW_MS, hostLinesFor, markHostOrigins } from '../indexer/timeline';
@@ -133,7 +134,7 @@ const HOT_METRICS: HotMetric[] = ['files', 'refs', 'symbols', 'defined', 'unique
 
 const fail = (
   c: Context,
-  status: 400 | 403 | 404 | 413 | 415 | 500,
+  status: 400 | 403 | 404 | 409 | 413 | 415 | 500,
   error: string,
   message?: string,
   extra?: Record<string, unknown>,
@@ -650,7 +651,8 @@ export function createApp(
     if (!project) return fail(c, 404, 'project_not_found');
     const rel = c.req.query('path');
     if (!rel) return fail(c, 400, 'bad_request', 'path is required');
-    if (!project.resolveInside(rel)) return fail(c, 400, 'path_escape', '路径越界');
+    const abs = project.resolveInside(rel);
+    if (!abs) return fail(c, 400, 'path_escape', '路径越界');
     const file = await project.readText(rel);
     // 读不到时给「为什么」：二进制与过大是两回事，前端要分别说清楚
     if (!file) {
@@ -663,7 +665,64 @@ export function createApp(
       }
       return fail(c, 404, 'file_not_found', `无法读取：${rel}`);
     }
-    return c.json({ file: rel, lang: file.lang, text: file.text, size: file.size });
+    // 2026-10-10：前端编辑拿 mtime 当冲突基准（保存时原样带回，不一致就是磁盘被人改过）
+    let mtimeMs: number | null = null;
+    try {
+      mtimeMs = (await fsp.stat(abs)).mtimeMs;
+    } catch {
+      mtimeMs = null;
+    }
+    return c.json({ file: rel, lang: file.lang, text: file.text, size: file.size, mtimeMs });
+  });
+
+  /**
+   * 2026-10-10 用户要求：编辑器直接改文件（停止输入 1s 自动保存）。
+   * 只改**已有**文件（本轮不做新建）；`baseMtimeMs` 与磁盘不一致 → 409，
+   * 让前端去问用户「留我的还是留磁盘上的」。共享模式下同样允许（用户拍板）。
+   */
+  app.put('/api/projects/:id/file', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = await readJson<{ path?: string; text?: string; baseMtimeMs?: number }>(c);
+    const rel = body?.path?.trim();
+    if (!rel) return fail(c, 400, 'bad_request', 'path is required');
+    if (typeof body?.text !== 'string') return fail(c, 400, 'bad_request', 'text is required');
+    const abs = project.resolveInside(rel);
+    if (!abs) return fail(c, 400, 'path_escape', '路径越界');
+    const result = await writeProjectFile(abs, body.text, body.baseMtimeMs);
+    if (!result.ok) {
+      if (result.error === 'conflict') {
+        return fail(c, 409, 'file_conflict', result.message, { mtimeMs: result.mtimeMs, size: result.size });
+      }
+      if (result.error === 'too_large') return fail(c, 413, 'file_too_large', result.message);
+      if (result.error === 'is_dir') return fail(c, 400, 'is_directory', result.message);
+      return fail(c, 404, 'file_not_found', result.message);
+    }
+    return c.json({ ok: true, size: result.size, mtimeMs: result.mtimeMs });
+  });
+
+  /**
+   * 2026-10-10 用户要求：文件树右键删除（文件与目录都行），走系统回收站（可恢复）。
+   * 路径必经 `resolveInside`；项目根自身不可删。
+   */
+  app.delete('/api/projects/:id/file', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const rel = c.req.query('path')?.trim();
+    if (!rel) return fail(c, 400, 'bad_request', 'path is required');
+    const abs = project.resolveInside(rel);
+    if (!abs) return fail(c, 400, 'path_escape', '路径越界');
+    if (abs === path.resolve(project.root)) return fail(c, 400, 'bad_request', '不能删除项目根目录');
+    const result = await trashEntry(abs);
+    if (!result.ok) {
+      if (result.error === 'not_found') return fail(c, 404, 'file_not_found', result.message);
+      // 没有回收站可用时如实报错（不静默改成永久删除）
+      if (result.error === 'unsupported') return fail(c, 500, 'recycle_unsupported', result.message);
+      return fail(c, 500, 'delete_failed', result.message);
+    }
+    // 删完就让索引立刻收敛（watcher 收不到 unlinkDir，目录删除否则会在树里留幽灵目录）
+    await project.onFileDeleted(rel).catch(() => undefined);
+    return c.json({ ok: true, path: rel, trashed: true });
   });
 
   // ---------------------------------------------------------------- 项目地图

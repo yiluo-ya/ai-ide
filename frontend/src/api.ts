@@ -11,8 +11,10 @@ import type {
   CommandRisk,
   CommandRun,
   DefinitionResult,
+  DeleteEntryResult,
   DensitySegment,
   ExternalSource,
+  FileConflictDetail,
   FileDensity,
   FileDiffResult,
   FileNode,
@@ -36,6 +38,7 @@ import type {
   ReferenceLocation,
   ReferenceResult,
   RepoLogResult,
+  SaveFileResult,
   SearchMatch,
   SearchResult,
   SearchOptions,
@@ -54,6 +57,9 @@ export type {
   SymbolInfo,
   FileNode,
   SearchResult,
+  SaveFileResult,
+  DeleteEntryResult,
+  FileConflictDetail,
   Position,
   HighlightResult,
   // 透镜（02-lens）：悬停卡片与密度条
@@ -82,6 +88,22 @@ export type {
 
 const BASE = '/api';
 
+/**
+ * 后端返回非 2xx 时抛出的错误：message 仍是给人看的那句，
+ * 另带 `status` 与解析后的 body —— 保存冲突（409）要靠它把磁盘现状取出来。
+ */
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+
+  constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'content-type': 'application/json' },
@@ -89,13 +111,15 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
+    let body: unknown = null;
     try {
-      const body = (await res.json()) as { message?: string; error?: string };
-      detail = body.message ?? body.error ?? detail;
+      body = await res.json();
+      const parsed = body as { message?: string; error?: string };
+      detail = parsed.message ?? parsed.error ?? detail;
     } catch {
       /* 保底用状态码 */
     }
-    throw new Error(detail);
+    throw new ApiRequestError(detail, res.status, body);
   }
   return (await res.json()) as T;
 }
@@ -230,9 +254,25 @@ export const api = {
     ),
 
   fileText: (id: string, path: string) =>
-    request<{ file: string; lang: string; text: string; size: number }>(
+    request<{ file: string; lang: string; text: string; size: number; mtimeMs: number | null }>(
       `/projects/${id}/file?path=${encodeURIComponent(path)}`,
     ),
+
+  /**
+   * 2026-10-10：把编辑器里的正文写回磁盘。
+   * `baseMtimeMs` 是打开文件时拿到的 mtime：磁盘在编辑期间被改过 → 409（看 `ApiRequestError.status`）。
+   */
+  saveFile: (id: string, path: string, text: string, baseMtimeMs?: number | null) =>
+    request<SaveFileResult>(`/projects/${id}/file`, {
+      method: 'PUT',
+      body: JSON.stringify({ path, text, baseMtimeMs: baseMtimeMs ?? undefined }),
+    }),
+
+  /** 2026-10-10：删除文件 / 目录（移到系统回收站）。 */
+  deleteEntry: (id: string, path: string) =>
+    request<DeleteEntryResult>(`/projects/${id}/file?path=${encodeURIComponent(path)}`, {
+      method: 'DELETE',
+    }),
 
   gotoDefinition: (id: string, file: string, line: number, col: number) =>
     request<DefinitionResult>(`/projects/${id}/goto-definition`, {

@@ -4,6 +4,7 @@ import type {
   CallDirection,
   CallHierarchyResult,
   ExternalSource,
+  FileConflictDetail,
   FileNode,
   ImplementationsResult,
   IndexStatus,
@@ -13,7 +14,7 @@ import type {
   SymbolInfo,
   TypeHierarchyResult,
 } from './api';
-import { api, subscribeEvents } from './api';
+import { ApiRequestError, api, subscribeEvents } from './api';
 import { useGuideStore } from './guideState';
 import { translate } from './i18n';
 import { flushSnapshot, scheduleSnapshotWrite } from './readSnapshot';
@@ -99,6 +100,16 @@ export interface RunToast {
   ok: boolean;
 }
 
+/** FR-0008：编辑器保存状态（右上角那行小字的来源）。 */
+export type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
+
+/** FR-0008：保存冲突 —— 磁盘被外部改过，而本地还有没落盘的改动。 */
+export interface SaveConflict {
+  file: string;
+  /** 冲突时磁盘上的 mtime（后端 409 里带的；拿不到就是 null）。 */
+  diskMtimeMs: number | null;
+}
+
 interface State {
   ready: boolean;
   projects: ProjectInfo[];
@@ -150,6 +161,20 @@ interface State {
 
   highlightsToken: number;
 
+  // ---- 2026-10-10：编辑与自动保存（FR-0008）
+  /**
+   * 当前打开文件在磁盘上的 mtime：保存时当冲突基准（`baseMtimeMs`）。
+   * 打开文件 / 保存成功时更新；null = 没有基准。
+   */
+  fileMtimeMs: number | null;
+  /** 「未改动」的正文基准：打开文件时的内容，或最近一次保存成功的内容。 */
+  savedText: string;
+  /** 保存状态（编辑器右上角那行小字的来源）。 */
+  saveStatus: SaveStatus;
+  saveError: string | null;
+  /** 非空 = 磁盘被外部改过、本地还有没落盘的改动 → 弹窗让用户选留哪一份。 */
+  conflict: SaveConflict | null;
+
   init: () => Promise<void>;
   refreshProjects: () => Promise<void>;
   selectProject: (id: string) => Promise<void>;
@@ -188,6 +213,14 @@ interface State {
   setError: (message: string | null) => void;
   showNotice: (notice: GotoNotice) => void;
   dismissNotice: () => void;
+  /** FR-0008：编辑器正文变化（停手 1 s 后自动落盘）。 */
+  editorChanged: (text: string) => void;
+  /** FR-0008：立刻把待保存的改动写盘（切文件 / 关页面前调用，不丢最后一笔）。 */
+  flushSave: () => Promise<void>;
+  /** FR-0008：保存冲突时用户的选择：留我的（强制写）/ 留磁盘上的（重载）/ 稍后再说。 */
+  resolveConflict: (keep: 'mine' | 'disk' | 'later') => Promise<void>;
+  /** FR-0008：删除文件 / 目录（移到系统回收站），失败如实提示。 */
+  deleteEntry: (path: string) => Promise<void>;
 }
 
 let unsubscribeEvents: (() => void) | null = null;
@@ -196,6 +229,46 @@ let suppressHistory = false;
 const HISTORY_LIMIT = 300;
 /** N19：标签页上限（Q5：上限 8 + LRU 淘汰 + 同文件合并）。 */
 const TAB_LIMIT = 8;
+
+/**
+ * FR-0008（2026-10-10）编辑与自动保存的模块级状态。
+ *
+ * 正文**不进 store**：每敲一个字都 set 一次会把整棵 React 树重渲一遍。
+ * 未落盘的正文按 file 存在这里，直到保存成功或用户选择放弃。
+ */
+const SAVE_DEBOUNCE_MS = 1000;
+/** 自己刚写完的时间窗：watcher 的 file-changed 事件不带 mtime，只能这样认出「是我写的」。 */
+const SELF_WRITE_WINDOW_MS = 5000;
+let saveTimer: number | null = null;
+let selfWriteAt = 0;
+let selfWriteFile: string | null = null;
+/** file → 还没落盘的正文（用户正在输入 / 保存失败时存在）。 */
+const unsavedEdits = new Map<string, string>();
+/**
+ * file → 我们刚写进去的 { 正文, mtime }。
+ *
+ * 用途：`GET /file` 读的是索引缓存，watcher 刷新有防抖窗口。若在这窗口里重新打开
+ * 刚保存过的文件，会拿到**旧正文**，再一改一存就把上一次的修改盖掉。
+ * 只要磁盘 mtime 严格等于我们那次写入的 mtime，就说明磁盘上就是我们写的内容，直接用它。
+ */
+const lastWrites = new Map<string, { text: string; mtimeMs: number }>();
+/** 我们自己刚删掉的路径：后端删完会回推 file-deleted，那一下不该再弹「文件已不在磁盘上」。 */
+const localDeletes = new Map<string, number>();
+const LOCAL_DELETE_WINDOW_MS = 10_000;
+
+/** 这个变更是不是「我刚写完」引起的：是的话不该反过来重载编辑器。 */
+function isSelfWrite(file: string): boolean {
+  return selfWriteFile === file && Date.now() - selfWriteAt < SELF_WRITE_WINDOW_MS;
+}
+
+function scheduleSave(): void {
+  if (saveTimer != null) window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    saveTimer = null;
+    void useStore.getState().flushSave();
+  }, SAVE_DEBOUNCE_MS);
+}
+
 /** 状态栏轻提示的定时器（判据 6：复制位置后的反馈）。 */
 let flashTimer: number | null = null;
 
@@ -424,6 +497,11 @@ export const useStore = create<State>((set, get) => ({
   history: [],
   historyIndex: -1,
   highlightsToken: 0,
+  fileMtimeMs: null,
+  savedText: '',
+  saveStatus: 'idle',
+  saveError: null,
+  conflict: null,
 
   async init() {
     const params = new URLSearchParams(window.location.search);
@@ -454,6 +532,12 @@ export const useStore = create<State>((set, get) => ({
     // W3：离开的那个项目先把阅读快照落一次（防抖可能还没到点）
     const previous = get().projectId;
     unsubscribeEvents?.();
+    // FR-0008：切项目时丢掉上一个项目的自动保存队列
+    if (saveTimer != null) {
+      window.clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    unsavedEdits.clear();
     if (previous && previous !== id) void flushSnapshot(previous);
     set({
       projectId: id,
@@ -479,6 +563,11 @@ export const useStore = create<State>((set, get) => ({
       history: [],
       historyIndex: -1,
       highlightsToken: 0,
+      fileMtimeMs: null,
+      savedText: '',
+      saveStatus: 'idle',
+      saveError: null,
+      conflict: null,
     });
     try {
       // 文件树给「所有文件」（2026-10-03 用户要求）：二进制 / 被规则忽略的也看得见，
@@ -499,7 +588,38 @@ export const useStore = create<State>((set, get) => ({
         } else if (event.type === 'file-changed' || event.type === 'file-deleted') {
           void get().loadTree();
           set((s) => ({ highlightsToken: s.highlightsToken + 1 }));
-          if (event.file === get().openFile) void get().openFileAt(event.file as string);
+          const changed = typeof event.file === 'string' ? event.file : null;
+          if (!changed || changed !== get().openFile) return;
+          if (event.type === 'file-deleted') {
+            // 文件被（外部）删了：编辑器里再留着就是幽灵内容
+            if (saveTimer != null) {
+              window.clearTimeout(saveTimer);
+              saveTimer = null;
+            }
+            unsavedEdits.delete(changed);
+            lastWrites.delete(changed);
+            set({
+              openFile: null,
+              fileContent: '',
+              savedText: '',
+              fileMtimeMs: null,
+              saveStatus: 'idle',
+              saveError: null,
+              symbols: [],
+            });
+            // 自己发起的删除已经给过「已移到回收站」的回执，不再叠一句
+            const at = localDeletes.get(changed);
+            if (at == null || Date.now() - at > LOCAL_DELETE_WINDOW_MS) {
+              showToast(translate('editor.goneOnDisk', { file: changed }), false);
+            }
+          } else if (isSelfWrite(changed)) {
+            // 自己刚保存触发的变更：磁盘上就是自己刚写的内容，重载只会打断编辑（清 undo、跳光标）
+          } else if (unsavedEdits.has(changed) || get().fileContent !== get().savedText) {
+            // 本地有没落盘的改动，磁盘又被外部改了：不覆盖，交给用户决定（FR-0008 决策 5）
+            set({ conflict: { file: changed, diskMtimeMs: null } });
+          } else {
+            void get().openFileAt(changed);
+          }
         }
       });
     } catch (e) {
@@ -554,6 +674,8 @@ export const useStore = create<State>((set, get) => ({
   async openFileAt(file, line, col, endLine, endCol) {
     const id = get().projectId;
     if (!id) return;
+    // FR-0008：切走之前把没落盘的改动写掉（1 s 防抖可能还没到点）
+    await get().flushSave();
     // 历史导航自身触发的打开不压栈、也不推 URL（避免自激）
     const suppressed = suppressHistory;
     suppressHistory = false;
@@ -574,11 +696,20 @@ export const useStore = create<State>((set, get) => ({
     }
     try {
       const res = await api.fileText(id, file);
+      // 上次保存失败留下的正文优先（不能拿磁盘上的旧内容换掉用户还没落盘的手改）
+      const pending = unsavedEdits.get(file);
+      // 刚写过的文件：接口可能还返回索引缓存里的旧正文，以磁盘 mtime 为准挑我们那份
+      const written = lastWrites.get(file);
+      const fresh = written && res.mtimeMs === written.mtimeMs ? written.text : res.text;
       set({
         openFile: file,
-        fileContent: res.text,
+        fileContent: pending ?? fresh,
         fileLang: res.lang,
         fileLoading: false,
+        savedText: fresh,
+        fileMtimeMs: res.mtimeMs,
+        saveStatus: pending == null ? 'idle' : 'pending',
+        saveError: null,
         reveal: {
           file,
           line: targetLine,
@@ -607,6 +738,7 @@ export const useStore = create<State>((set, get) => ({
       // W3 / G8.2：读到哪就把「现在的代码长什么样」防抖记一次（2s 后落盘）
       scheduleSnapshotWrite(id);
       syncUrl(id, file, targetLine, targetCol, suppressed ? 'replace' : 'push');
+      if (pending != null) scheduleSave();
     } catch (e) {
       set({ fileLoading: false, error: e instanceof Error ? e.message : String(e) });
     }
@@ -878,6 +1010,165 @@ export const useStore = create<State>((set, get) => ({
     } catch {
       set({ referencesBusy: false, references: null });
     }
+  },
+
+  /**
+   * FR-0008：编辑器正文变化。停手 1 s 落盘；正文只进模块级 `unsavedEdits`，
+   * 不进 store（每敲一个字都 set 会把整棵 React 树重渲一遍）。
+   */
+  editorChanged(text) {
+    const openFile = get().openFile;
+    if (!openFile) return;
+    unsavedEdits.set(openFile, text);
+    const dirty = text !== get().savedText;
+    if (dirty) {
+      if (get().saveStatus !== 'pending') set({ saveStatus: 'pending' });
+    } else {
+      unsavedEdits.delete(openFile);
+      if (get().saveStatus !== 'idle') set({ saveStatus: 'idle' });
+    }
+    if (saveTimer != null) {
+      window.clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    if (dirty) scheduleSave();
+  },
+
+  /** FR-0008：立刻把待保存的改动写盘。没有待保存内容时是一次空操作。 */
+  async flushSave() {
+    if (saveTimer != null) {
+      window.clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    const id = get().projectId;
+    const openFile = get().openFile;
+    if (!id || !openFile) return;
+    const text = unsavedEdits.get(openFile);
+    if (text == null || text === get().savedText) return;
+    set({ saveStatus: 'saving', saveError: null });
+    try {
+      const res = await api.saveFile(id, openFile, text, get().fileMtimeMs);
+      // 认下「这是我自己写的」：watcher 随后推来的 file-changed 不该触发重载
+      selfWriteAt = Date.now();
+      selfWriteFile = openFile;
+      lastWrites.set(openFile, { text, mtimeMs: res.mtimeMs });
+      if (get().openFile !== openFile) return; // 期间已切走：内容已在盘上，不再动界面
+      const stillDirty = unsavedEdits.get(openFile) !== text;
+      if (!stillDirty) unsavedEdits.delete(openFile);
+      set({
+        fileContent: text,
+        savedText: text,
+        fileMtimeMs: res.mtimeMs,
+        saveStatus: stillDirty ? 'pending' : 'saved',
+        saveError: null,
+        conflict: null,
+      });
+      if (stillDirty && saveTimer == null) scheduleSave();
+    } catch (e) {
+      if (e instanceof ApiRequestError && e.status === 409) {
+        const detail = e.body as FileConflictDetail | null;
+        set({
+          saveStatus: 'error',
+          conflict: { file: openFile, diskMtimeMs: detail?.mtimeMs ?? null },
+        });
+        return;
+      }
+      const message = e instanceof Error ? e.message : String(e);
+      set({ saveStatus: 'error', saveError: message });
+      showToast(translate('editor.saveFailed', { message }), false);
+    }
+  },
+
+  /** FR-0008：冲突由用户裁决 —— 留我的（强制写）/ 留磁盘上的（重载）。 */
+  async resolveConflict(keep) {
+    const id = get().projectId;
+    const conflict = get().conflict;
+    if (!id || !conflict) return;
+    const file = conflict.file;
+    set({ conflict: null });
+    if (keep === 'later') {
+      // 稍后再说：本地改动留着（下次输入 / 切文件时会再触发保存与提示）
+      if (unsavedEdits.has(file)) set({ saveStatus: 'pending' });
+      return;
+    }
+    if (keep === 'disk') {
+      try {
+        const res = await api.fileText(id, file);
+        unsavedEdits.delete(file);
+        if (get().openFile !== file) return;
+        set({
+          fileContent: res.text,
+          savedText: res.text,
+          fileMtimeMs: res.mtimeMs,
+          saveStatus: 'idle',
+          saveError: null,
+        });
+      } catch (e) {
+        set({ saveStatus: 'error', saveError: e instanceof Error ? e.message : String(e) });
+      }
+      return;
+    }
+    // 留我的：不带 baseMtimeMs（跳过冲突检查 —— 用户已明确知道要覆盖）
+    const text = unsavedEdits.get(file);
+    if (text == null) return;
+    set({ saveStatus: 'saving' });
+    try {
+      const res = await api.saveFile(id, file, text);
+      selfWriteAt = Date.now();
+      selfWriteFile = file;
+      lastWrites.set(file, { text, mtimeMs: res.mtimeMs });
+      if (get().openFile !== file) return;
+      const stillDirty = unsavedEdits.get(file) !== text;
+      if (!stillDirty) unsavedEdits.delete(file);
+      set({
+        fileContent: text,
+        savedText: text,
+        fileMtimeMs: res.mtimeMs,
+        saveStatus: stillDirty ? 'pending' : 'saved',
+        saveError: null,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      set({ saveStatus: 'error', saveError: message });
+      showToast(translate('editor.saveFailed', { message }), false);
+    }
+  },
+
+  /** FR-0008：删除文件 / 目录（移到系统回收站）。成功后就地刷新文件树。 */
+  async deleteEntry(path) {
+    const id = get().projectId;
+    if (!id) return;
+    // 记一下这是本地发起的删除：后端回推的 file-deleted 不再重复提示
+    localDeletes.set(path, Date.now());
+    try {
+      await api.deleteEntry(id, path);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      showToast(translate('editor.deleteFailed', { message }), false);
+      return;
+    }
+    // 删掉的正是当前打开的文件（或它所在的目录）→ 关掉它，不留幽灵标签
+    const open = get().openFile;
+    if (open && (open === path || open.startsWith(`${path}/`))) {
+      if (saveTimer != null) {
+        window.clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+      unsavedEdits.delete(open);
+      set({
+        openFile: null,
+        fileContent: '',
+        savedText: '',
+        fileMtimeMs: null,
+        saveStatus: 'idle',
+        saveError: null,
+        conflict: null,
+        symbols: [],
+        tabs: get().tabs.filter((t) => t.file !== open),
+      });
+    }
+    void get().loadTree();
+    showToast(translate('editor.trashed', { path }), true);
   },
 
   setError(message) {

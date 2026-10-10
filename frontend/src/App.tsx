@@ -168,7 +168,13 @@ export default function App() {
    * 二次确认（2026-10-03 用户要求）：重建索引 / 移除项目都是不可逆或有代价的动作，
    * 误点一下就跑掉不合理 —— 先把「会发生什么」说清楚再执行。
    */
-  const [confirmAction, setConfirmAction] = useState<{ kind: 'reindex' | 'forget'; id?: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{
+    kind: 'reindex' | 'forget' | 'delete';
+    id?: string;
+    /** FR-0008：待删路径（kind=delete）。 */
+    path?: string;
+    isDir?: boolean;
+  } | null>(null);
   /** 右侧常驻栏：默认展开（默认值来自设置），宽度可拖，可收起。 */
   const [changesDockOpen, setChangesDockOpen] = useState(() => loadPrefs().changesOpen);
   const [changesDockWidth, setChangesDockWidth] = useState(280);
@@ -209,6 +215,18 @@ export default function App() {
     [blameOn, blame, cursor.line],
   );
   const mapOverview = useMapStore((s) => s.overview);
+  /** FR-0008：状态栏的保存状态文案（idle / 无文件时不显示）。 */
+  const saveLabel = !store.openFile
+    ? null
+    : store.saveStatus === 'pending'
+      ? t('save.pending')
+      : store.saveStatus === 'saving'
+        ? t('save.saving')
+        : store.saveStatus === 'saved'
+          ? t('save.saved')
+          : store.saveStatus === 'error'
+            ? t('save.error')
+            : null;
   const mapTimeline = useMapStore((s) => s.timeline);
   const mapPulse = useMapStore((s) => s.pulse);
   const mapOptions = useMapStore((s) => s.options);
@@ -654,6 +672,7 @@ export default function App() {
               decor={decor}
               onOpenAside={(file) => void useStore.getState().openInSecondary(file)}
               onCopy={(text) => useStore.getState().copyText(text)}
+              onDelete={(path, isDir) => setConfirmAction({ kind: 'delete', path, isDir })}
             />
           </>
         );
@@ -857,6 +876,8 @@ export default function App() {
                     onOpenHistory={openHistoryVersion}
                     onExplain={openExplain}
                     onFlow={openFlow}
+                    editable
+                    onChange={(text) => useStore.getState().editorChanged(text)}
                   />
                 </div>
                 {store.secondary && secondaryDoc && secondaryDoc.file === store.secondary.file && (
@@ -983,6 +1004,7 @@ export default function App() {
 
           <footer className="statusbar">
             <span>{store.openFile ?? '—'}</span>
+            {saveLabel && <span className={`save-state ${store.saveStatus}`}>{saveLabel}</span>}
             {cursorBlame && (
               <span className="blame-status" title={t('blame.title')}>
                 {blameText(cursorBlame, t)}
@@ -1179,13 +1201,21 @@ export default function App() {
 
       {confirmAction && (
         <Dialog
-          title={t(confirmAction.kind === 'reindex' ? 'app.confirmReindexTitle' : 'app.confirmRemoveTitle')}
+          title={t(
+            confirmAction.kind === 'reindex'
+              ? 'app.confirmReindexTitle'
+              : confirmAction.kind === 'forget'
+                ? 'app.confirmRemoveTitle'
+                : 'app.confirmDeleteTitle',
+          )}
           onClose={() => setConfirmAction(null)}
         >
           <p className="confirm-text">
             {confirmAction.kind === 'reindex'
               ? t('app.confirmReindexBody')
-              : t('app.confirmRemoveBody')}
+              : confirmAction.kind === 'forget'
+                ? t('app.confirmRemoveBody')
+                : t('app.confirmDeleteBody', { path: confirmAction.path ?? '' })}
           </p>
           <div className="confirm-actions">
             <button className="btn ghost" onClick={() => setConfirmAction(null)}>
@@ -1197,10 +1227,36 @@ export default function App() {
                 const action = confirmAction;
                 setConfirmAction(null);
                 if (action.kind === 'reindex') void useStore.getState().reindex();
-                else if (action.id) void useStore.getState().forgetProject(action.id);
+                else if (action.kind === 'forget' && action.id) void useStore.getState().forgetProject(action.id);
+                else if (action.kind === 'delete' && action.path) void useStore.getState().deleteEntry(action.path);
               }}
             >
-              {t(confirmAction.kind === 'reindex' ? 'app.confirmReindexOk' : 'app.confirmRemoveOk')}
+              {t(
+                confirmAction.kind === 'reindex'
+                  ? 'app.confirmReindexOk'
+                  : confirmAction.kind === 'forget'
+                    ? 'app.confirmRemoveOk'
+                    : 'app.confirmDeleteOk',
+              )}
+            </button>
+          </div>
+        </Dialog>
+      )}
+
+      {/* FR-0008：保存冲突 —— 磁盘被外部改过，而本地还有没落盘的改动。
+          Esc / 点遮罩 = 「稍后再说」：本地改动留着，不丢。 */}
+      {store.conflict && (
+        <Dialog
+          title={t('conflict.title')}
+          onClose={() => void useStore.getState().resolveConflict('later')}
+        >
+          <p className="confirm-text">{t('conflict.body', { file: store.conflict.file })}</p>
+          <div className="confirm-actions">
+            <button className="btn ghost" onClick={() => void useStore.getState().resolveConflict('disk')}>
+              {t('conflict.useDisk')}
+            </button>
+            <button className="btn" onClick={() => void useStore.getState().resolveConflict('mine')}>
+              {t('conflict.keepMine')}
             </button>
           </div>
         </Dialog>

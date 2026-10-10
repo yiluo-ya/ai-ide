@@ -925,15 +925,26 @@ export class ProjectIndex {
     this.schedulePersist();
   }
 
+  /**
+   * 条目被删除（watcher 的 unlink / 对账发现消失 / 文件树的删除接口）。
+   *
+   * 传目录时连**整棵子树**一起清：chokidar 对目录删除只给 unlinkDir，
+   * 而 `watcher.ts` 只订阅 unlink / change / add，不收敛子树的话，
+   * 文件树里会留着一棵已经不存在的「幽灵目录」（allFiles / dirs 都不会自己变）。
+   */
   async onFileDeleted(rel: string): Promise<void> {
-    const fi = this.files.get(rel);
-    if (fi) {
-      this.removeFromMaps(rel, fi);
-      this.files.delete(rel);
+    const prefix = `${rel}/`;
+    const inSubtree = (p: string) => p === rel || p.startsWith(prefix);
+    for (const [p, fi] of [...this.files]) {
+      if (!inSubtree(p)) continue;
+      this.removeFromMaps(p, fi);
+      this.files.delete(p);
     }
-    this.textCache.delete(rel);
-    this.skipLog.delete(rel);
-    this.entries.delete(rel);
+    for (const p of [...this.textCache.keys()]) if (inSubtree(p)) this.textCache.delete(p);
+    for (const p of [...this.skipLog.keys()]) if (inSubtree(p)) this.skipLog.delete(p);
+    for (const p of [...this.allFiles.keys()]) if (inSubtree(p)) this.allFiles.delete(p);
+    for (const p of [...this.entries.keys()]) if (inSubtree(p)) this.entries.delete(p);
+    for (const p of [...this.dirs]) if (inSubtree(p)) this.dirs.delete(p);
     this.rebuildClassMap();
     this.indexVersion++;
     this.status.filesIndexed = this.files.size;

@@ -172,6 +172,12 @@ interface Props {
   blame?: BlameLine[] | null;
   /** G7.5：从摘要条的提交历史里点某一次提交（App 负责取正文并在第二窗格打开）。 */
   onOpenHistory?: (file: string, rev: string) => void;
+  /**
+   * FR-0008（2026-10-10）：本窗格可编辑。缺省 false —— 分屏第二窗格与历史快照保持只读。
+   */
+  editable?: boolean;
+  /** FR-0008：正文变化（停手 1 s 由 App 自动落盘）。 */
+  onChange?: (text: string) => void;
 }
 
 export function Editor({
@@ -192,6 +198,8 @@ export function Editor({
   historyRev,
   blame,
   onOpenHistory,
+  editable = false,
+  onChange,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -211,6 +219,12 @@ export function Editor({
   onExplainRef.current = onExplain;
   const onFlowRef = useRef(onFlow);
   onFlowRef.current = onFlow;
+  /** FR-0008：正文变化上报（放 ref：create 只跑一次，不该因它重建设编辑器）。 */
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  /** FR-0008：可编辑开关（同上，用 ref 读最新值）。 */
+  const editableRef = useRef(editable);
+  editableRef.current = editable;
   /** G7.5：本窗格是历史版本快照（不是磁盘上的真实文件）。 */
   const historical = Boolean(file && historyRev);
   const historicalRef = useRef(historical);
@@ -236,12 +250,19 @@ export function Editor({
     });
   }, [prefs.fontSize, prefs.wrap, prefs.tabSize, prefs.minimap, prefs.whitespace]);
 
+  /** FR-0008：可编辑开关（历史版本恒只读）—— 编辑器已建好，改的是运行时选项。 */
+  useEffect(() => {
+    const readOnly = !editable || historical;
+    editorRef.current?.updateOptions({ readOnly, domReadOnly: readOnly });
+  }, [editable, historical]);
+
   useEffect(() => {
     if (!hostRef.current) return;
     const initial = loadPrefs();
     const editor = monaco.editor.create(hostRef.current, {
-      readOnly: true,
-      domReadOnly: true,
+      // FR-0008：可编辑由 prop 决定（默认只读；分屏第二窗格与历史快照不传）
+      readOnly: !editableRef.current,
+      domReadOnly: !editableRef.current,
       automaticLayout: true,
       theme: themeNameFor(resolvedTheme(initial.theme)),
       fontSize: initial.fontSize,
@@ -271,6 +292,11 @@ export function Editor({
       }, 400);
     };
     const subs = [
+      // FR-0008：正文变化上报（App 负责 1 s 防抖落盘）；历史快照不上报
+      editor.onDidChangeModelContent(() => {
+        if (historicalRef.current) return;
+        onChangeRef.current?.(editor.getValue());
+      }),
       editor.onDidChangeCursorPosition((e) => {
         if (historicalRef.current) return; // 历史版本不上报光标
         onCursorRef.current?.(e.position.lineNumber, e.position.column);
@@ -429,10 +455,11 @@ export function Editor({
       .catch(() => {
         /* 着色失败不影响阅读，保持语法色 */
       });
+    // 只跟「文件 + 索引版本」走：带上 content 会把着色请求打成一片（编辑时每次输入都变）
     return () => {
       cancelled = true;
     };
-  }, [file, content, projectId, highlightsToken]);
+  }, [file, projectId, highlightsToken, historical]);
 
   // M10.2：本轮 agent 改了哪几行 —— 只信宿主上报的行范围，没上报就什么都不画
   useEffect(() => {
@@ -453,10 +480,11 @@ export function Editor({
       .catch(() => {
         /* 拿不到就不画，不能猜哪些行是 agent 写的 */
       });
+    // 同上：不跟 content 走（编辑期间 content 会变）
     return () => {
       cancelled = true;
     };
-  }, [file, content, projectId, highlightsToken]);
+  }, [file, projectId, highlightsToken, historical]);
 
   // G7.3：整文件 blame 视图 —— 每行行尾一个作者短名（数据由 App 按文件缓存后传入：
   // 光标移动不重新请求，只在换文件 / 显式重取时拉一次）
@@ -467,7 +495,7 @@ export function Editor({
     const previous = blamePool.get(model) ?? [];
     const next = blame && !historical ? toBlameDecorations(model, blame) : [];
     blamePool.set(model, model.deltaDecorations(previous, next));
-  }, [blame, historical, file, content]);
+  }, [blame, historical, file]);
 
   useEffect(() => {
     const editor = editorRef.current;

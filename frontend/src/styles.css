@@ -1489,6 +1489,22 @@ mark {
   white-space: nowrap;
 }
 
+/* ---------------------------------------------------------------- FR-0008：编辑 / 自动保存 */
+
+/* 状态栏里的保存状态（编辑器里改完 1 s 自动落盘） */
+.save-state {
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+}
+.save-state.pending { color: var(--warn); }
+.save-state.saving { opacity: 0.75; }
+.save-state.saved { color: var(--ok); }
+.save-state.error { color: var(--danger); }
+
+/* 文件树右键菜单里的删除（危险动作） */
+.tree-menu button.danger { color: var(--danger); }
+
 /* ---------------------------------------------------------------- 快速打开 */
 
 .quickopen-backdrop {

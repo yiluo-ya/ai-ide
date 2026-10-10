@@ -35,6 +35,8 @@ interface Props {
   onOpenAside?: (file: string) => void;
   /** 右键菜单「复制路径 / 复制文件名」：写剪贴板 + 状态栏反馈（由 App 注入）。 */
   onCopy?: (text: string) => void;
+  /** FR-0008：右键菜单「删除」（文件与目录都有）；App 负责二次确认与调后端。 */
+  onDelete?: (path: string, isDir: boolean) => void;
 }
 
 /** 右键菜单（视口坐标定位）：文件与目录都可开（目录用于复制路径 / 文件名）。 */
@@ -267,6 +269,7 @@ export function FileTree({
   decor,
   onOpenAside,
   onCopy,
+  onDelete,
 }: Props) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -370,6 +373,17 @@ export function FileTree({
                 </button>
               </>
             )}
+            {/* FR-0008：删除（文件与目录都有）—— 实际动作交给 App 二次确认，这里只发起。 */}
+            <button
+              role="menuitem"
+              className="danger"
+              onClick={() => {
+                onDelete?.(menu.path, menu.isDir);
+                setMenu(null);
+              }}
+            >
+              {t('filetree.delete')}
+            </button>
           </div>
         </>
       )}
