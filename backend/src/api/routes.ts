@@ -11,6 +11,7 @@ import type {
   ChangeSnapshotInput,
   ChangeSummary,
   CommandKind,
+  CommitInfo,
   DependencyGraph,
   DependentsResult,
   DirDependentsResult,
@@ -22,6 +23,8 @@ import type {
   FileSummary,
   GitChangeEntry,
   GitChangesResult,
+  GitHistoryWriteAction,
+  GitHistoryWriteRequest,
   GitWriteRequest,
   FindReferencesRequest,
   FlowKind,
@@ -38,6 +41,7 @@ import type {
   ReadmapResult,
   ProjectTimeline,
   RegisterProjectRequest,
+  RepoLogResult,
   SearchOptions,
   SearchResult,
 } from '../types';
@@ -58,17 +62,33 @@ import { buildRoutes } from '../indexer/guide';
 import { fileSummary } from '../indexer/summary';
 import { buildTimeline, DEFAULT_RECENT_WINDOW_MS, hostLinesFor, markHostOrigins } from '../indexer/timeline';
 import { compareSnapshot, readmap } from '../indexer/changes';
-import { gitAddAll, gitCommit, gitPull, gitPush } from '../indexer/gitwrite';
+import {
+  gitAddAll,
+  gitCherryPick,
+  gitCheckout,
+  gitCommit,
+  gitCreateBranch,
+  gitCreateTag,
+  gitDeleteBranch,
+  gitDeleteTag,
+  gitPull,
+  gitPush,
+} from '../indexer/gitwrite';
 import { explainAt } from '../indexer/explain';
 import { flowGraph } from '../indexer/flow';
 import {
   BLAME_MAX_LINES,
   blame,
+  commitChanges,
+  commitFileDiff,
+  commitInfo,
   DIFF_MAX_CHARS,
   diffNumstat,
   fileDiff,
   fileHistory,
   isValidRev,
+  listRefs,
+  repoLog,
   showFile,
   worktreeChanges,
 } from '../indexer/gitread';
@@ -914,6 +934,114 @@ export function createApp(
     const text = await showFile(project.root, rev, file);
     if (text === null) return fail(c, 400, 'bad_revision', `该版本里读不到这个文件：${rev}:${file}`);
     return c.json({ file, rev, text });
+  });
+
+  /** SCM commits 视图（2026-10-09）：仓库最近 limit 条提交（含 parentIds / refs）；无 git → 空清单 + reason。 */
+  app.get('/api/projects/:id/git-log', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const rawLimit = Number(c.req.query('limit') ?? 50);
+    const limit = Number.isFinite(rawLimit) ? rawLimit : 50;
+    const commits = await repoLog(project.root, limit);
+    const result: RepoLogResult = {
+      commits: commits ?? [],
+      ...(commits === null ? { reason: 'no-git' } : {}),
+    };
+    return c.json(result);
+  });
+
+  /** 单条提交改动的文件清单（展开提交看 change list 用）。rev 非法 → 400。 */
+  app.get('/api/projects/:id/git-commit-changes', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const rev = c.req.query('rev');
+    if (!rev || !isValidRev(rev)) return fail(c, 400, 'bad_rev', 'rev 非法或缺失');
+    const changes = await commitChanges(project.root, rev);
+    if (changes === null) return fail(c, 400, 'bad_revision', `这个提交读不到改动：${rev}`);
+    return c.json({ rev, changes });
+  });
+
+  /** 两提交之间某个文件的差异（commits 视图点文件看 diff）。base 缺省 = rev 的父提交。 */
+  app.get('/api/projects/:id/git-commit-file-diff', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const rev = c.req.query('rev');
+    const base = c.req.query('base');
+    const file = c.req.query('path');
+    if (!rev || !file || !isValidRev(rev)) return fail(c, 400, 'bad_request', 'rev/path 必填');
+    if (base && !isValidRev(base)) return fail(c, 400, 'bad_rev', `非法 base：${base}`);
+    if (!project.resolveInside(file)) return fail(c, 400, 'path_escape', '路径越界');
+    const parent = base?.trim() || `${rev.trim()}~1`;
+    const diff = await commitFileDiff(project.root, parent, rev, file);
+    const result: FileDiffResult = {
+      file,
+      rev,
+      diff,
+      ...(diff === null ? { reason: 'no-git' } : {}),
+    };
+    return c.json(result);
+  });
+
+  /** 单条提交详情（hover / 详情面板用）。rev 非法 → 400。 */
+  app.get('/api/projects/:id/git-commit', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const rev = c.req.query('rev');
+    if (!rev || !isValidRev(rev)) return fail(c, 400, 'bad_rev', 'rev 非法或缺失');
+    const info = await commitInfo(project.root, rev);
+    if (info === null) return fail(c, 400, 'bad_revision', `这个提交读不到：${rev}`);
+    return c.json(info as CommitInfo);
+  });
+
+  /** 仓库所有引用（分支 / 标签 / 远程），供按 ref 筛选与徽章用。 */
+  app.get('/api/projects/:id/git-refs', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const refs = await listRefs(project.root);
+    return c.json(refs ?? { refs: [], headBranch: null, reason: 'no-git' });
+  });
+
+  /**
+   * 提交历史视图的写操作（2026-10-09）：checkout / cherry-pick / 建删分支标签。
+   * 全部对外可见或改工作区，因此**强制** `?confirm=1`，且只在共享模式下的本机监听可用（见 serviceGuarded）。
+   */
+  app.post('/api/projects/:id/git-history-write', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const guard = serviceGuarded(c);
+    if (guard) return guard;
+    if (c.req.query('confirm') !== '1') {
+      return fail(c, 400, 'confirm_required', '这一步改工作区 / 对外可见，必须 ?confirm=1');
+    }
+    const body = await readJson<GitHistoryWriteRequest>(c);
+    if (!body?.action) return fail(c, 400, 'bad_request', 'action 必填');
+    const action = body.action as GitHistoryWriteAction;
+    const allowed: GitHistoryWriteAction[] = [
+      'checkout',
+      'cherry-pick',
+      'create-branch',
+      'create-tag',
+      'delete-branch',
+      'delete-tag',
+    ];
+    if (!allowed.includes(action)) return fail(c, 400, 'bad_action', `非法 action：${action}`);
+    const result = await (() => {
+      switch (action) {
+        case 'checkout':
+          return gitCheckout(project.root, body.rev ?? body.name ?? '');
+        case 'cherry-pick':
+          return gitCherryPick(project.root, body.rev ?? '');
+        case 'create-branch':
+          return gitCreateBranch(project.root, body.name ?? '');
+        case 'create-tag':
+          return gitCreateTag(project.root, body.name ?? '');
+        case 'delete-branch':
+          return gitDeleteBranch(project.root, body.name ?? '');
+        case 'delete-tag':
+          return gitDeleteTag(project.root, body.name ?? '');
+      }
+    })();
+    return c.json(result);
   });
 
   /** G5.2 / G5.3：结构性解释（纯静态）；定位不到项目内符号 → 404 `no-symbol`。 */
