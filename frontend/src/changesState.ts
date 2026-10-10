@@ -9,7 +9,7 @@
  * git 说改了才算改了，不让阅读器自己存一份去比对（也就没有「还没记录基线」这种死路）。
  */
 import { create } from 'zustand';
-import type { GitChangeEntry, GitChangesResult, GitWriteAction } from '../../shared/types';
+import type { GitChangeEntry, GitChangesResult, GitWriteAction, RepoLogEntry } from '../../shared/types';
 import { api } from './api';
 import { translate } from './i18n';
 import { showToast } from './state';
@@ -42,6 +42,10 @@ interface ChangesState {
   projectId: string | null;
   /** 最近一次拿到的 git 变更；null = 还没拿过。 */
   result: GitChangesResult | null;
+  /** SCM commits 视图：仓库最近提交（空 = 还没拉 / 无 git）。 */
+  commits: RepoLogEntry[];
+  /** commits 拿不到的原因（无 git 时为 'no-git'）。 */
+  commitsReason: string | null;
   busy: boolean;
   /** 正在跑的写命令（null = 没有）；四个按钮据此一起禁用。 */
   running: GitWriteAction | null;
@@ -58,12 +62,14 @@ interface ChangesState {
 export const useChangesStore = create<ChangesState>((set, get) => ({
   projectId: null,
   result: null,
+  commits: [],
+  commitsReason: null,
   busy: false,
   running: null,
   error: null,
 
   async load(projectId) {
-    set({ projectId, result: null, error: null });
+    set({ projectId, result: null, commits: [], commitsReason: null, error: null });
     await get().refresh();
   },
 
@@ -73,8 +79,15 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const result = await api.gitChanges(id);
+      // commits 视图同步拉一次（不阻塞 changes 展示；失败单独记 reason）
+      const log = await api.gitLog(id).catch(() => null);
       if (get().projectId !== id) return; // 期间切了项目
-      set({ result, busy: false });
+      set({
+        result,
+        commits: log?.commits ?? [],
+        commitsReason: log === null ? 'load-failed' : (log.reason ?? null),
+        busy: false,
+      });
     } catch (e) {
       if (get().projectId !== id) return;
       set({ error: e instanceof Error ? e.message : String(e), busy: false });
@@ -98,6 +111,6 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
   },
 
   reset() {
-    set({ projectId: null, result: null, busy: false, running: null, error: null });
+    set({ projectId: null, result: null, commits: [], commitsReason: null, busy: false, running: null, error: null });
   },
 }));

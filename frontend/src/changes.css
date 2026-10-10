@@ -22,6 +22,7 @@
 
 .changes-head {
   display: flex;
+  flex-shrink: 0;
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
@@ -96,6 +97,448 @@
 .changes-cmd-busy {
   color: var(--fg-dim);
   font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- SCM 风格（2026-10-09）
+   命令从「四个平铺文字按钮」改成 VS Code 源码管理：输入框 + 紧凑图标。 */
+
+.changes-head-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 大按钮 + 下拉箭头（对齐 VS Code SCM action button） */
+.scm-split {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: visible;
+}
+
+.scm-primary {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 14px;
+  border-top-left-radius: 3px;
+  border-bottom-left-radius: 3px;
+  cursor: pointer;
+}
+
+.scm-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.scm-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.scm-dropdown {
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.35);
+  background: var(--accent);
+  color: #fff;
+  padding: 0 6px;
+  border-top-right-radius: 3px;
+  border-bottom-right-radius: 3px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.scm-dropdown:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.scm-dropdown:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chevron.down {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.scm-menu {
+  position: absolute;
+  right: 0;
+  top: 26px;
+  z-index: 30;
+  min-width: 130px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+}
+
+.scm-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.scm-menu-item:hover:not(:disabled) {
+  background: var(--row-hover);
+}
+
+.scm-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Changes | Commits 切换 */
+.scm-tabs {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  align-self: flex-start;
+  /* sticky 置顶：commit 列表很长时，Changes/Commits 切换按钮仍固定可见（对齐 VS Code SCM 顶部栏） */
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg);
+}
+
+.scm-tab {
+  border: none;
+  background: none;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.scm-tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ---- 提交历史视图（2026-10-09，graph 泳道 + ref 徽章 + 展开 + diff + 写操作） */
+.cg {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 1px;
+  padding: 2px 0;
+}
+
+.cg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.cg-row:hover {
+  background: var(--row-hover);
+}
+
+/* 展开态：背景加深，突出当前展开的这条提交（2026-10-10 用户要求「点击后背景加深突出内容」）。 */
+.cg-row-open {
+  background: var(--row-active);
+  border-radius: 4px;
+}
+
+.cg-row-open:hover {
+  background: var(--row-active);
+}
+
+.cg-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 4px 4px 0;
+}
+
+.cg-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--fg);
+}
+
+.cg-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.cg-subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cg-when {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* ref 徽章：紧凑的内联小图标（分支 / 标签 / 远程），随标题行排列，悬停看名字。 */
+.cg-refs {
+  flex: none;
+  display: inline-flex;
+  gap: 3px;
+  flex-wrap: nowrap;
+}
+
+.cg-ref {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.cg-ref:hover {
+  background: var(--row-hover);
+}
+
+.cg-ref-icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cg-ref-branch {
+  color: var(--accent-2);
+}
+
+.cg-ref-tag {
+  color: var(--warn);
+}
+
+.cg-ref-remote {
+  color: var(--fg-dim);
+}
+
+.cg-ref.head {
+  color: var(--accent);
+}
+
+.cg-meta {
+  color: var(--fg-dim);
+  font-size: 11px;
+  margin-top: 1px;
+}
+
+/* 提交 hover 浮层（对齐 openvscode commit hover：subject + body + stats + 作者/邮箱/时间） */
+.cg-row {
+  position: relative;
+}
+
+.cg-hover {
+  position: fixed;
+  z-index: 40;
+  width: 330px;
+  max-width: calc(100vw - 24px);
+  max-height: 60vh;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* git 面板在右侧 → 浮层在鼠标左侧弹出；反之在右侧（方向类只作语义标记，坐标由 inline style 提供）。 */
+.cg-hover-left {
+  /* 向左弹出：left 已在 JS 里算成「鼠标 x - 浮层宽」 */
+}
+
+.cg-hover-right {
+  /* 向右弹出：left 已在 JS 里算成「鼠标 x + 间距」 */
+}
+
+.cg-hover-subject {
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 6px;
+}
+
+.cg-hover-body {
+  color: var(--fg);
+  margin-bottom: 6px;
+}
+
+.cg-hover-body p {
+  margin: 0 0 4px;
+}
+
+.cg-hover-body ul,
+.cg-hover-body ol {
+  margin: 0 0 4px;
+  padding-left: 18px;
+}
+
+.cg-hover-body code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+}
+
+.cg-hover-stats {
+  color: var(--fg-dim);
+  margin-bottom: 6px;
+}
+
+.cg-hover-add {
+  color: var(--ok);
+}
+
+.cg-hover-del {
+  color: var(--err);
+}
+
+.cg-hover-author {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.cg-detail {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cg-message-body {
+  white-space: pre-wrap;
+  color: var(--fg-dim);
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.cg-stats {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.cg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cg-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.cg-change {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  cursor: pointer;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.cg-change:last-child {
+  border-bottom: none;
+}
+
+.cg-change:hover {
+  background: var(--row-hover);
+}
+
+.cg-change-badge {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  font-family: ui-monospace, Consolas, monospace;
+  font-weight: 600;
+}
+
+.cg-change-badge.a {
+  color: var(--ok);
+}
+
+.cg-change-badge.d {
+  color: var(--err);
+}
+
+.cg-change-badge.m {
+  color: var(--accent-2);
+}
+
+.cg-change-badge.r {
+  color: var(--warn);
+}
+
+.cg-change-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cg-change-delta {
+  flex: none;
+  color: var(--fg-dim);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
 }
 
 /* 提交说明输入框（git commit 的 Dialog） */

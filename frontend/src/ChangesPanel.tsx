@@ -1,18 +1,14 @@
 /**
- * 变更面板（2026-10-03 用户要求：**以 git 为基础**，不自己记录变更）。
+ * 源码管理面板（2026-10-03 定「以 git 为基础」，2026-10-09 改成 VS Code 源码管理的命令形态）。
  *
- * 显示 `git status` 的改动清单 + `git diff --numstat HEAD` 的增删行数（默认展示，无需点）。
- * 顶上四个最常用的 git 命令（add all / commit / pull / push）直接执行，结果走右下角冒泡。
+ * 顶上一行标题「git」+ 右侧「大按钮 + 下拉箭头」（对齐 VS Code 的 SCM action button）：
+ *   · 大按钮 = git commit（点它弹提交说明弹窗，沿用旧有 2000 字限制）；
+ *   · 下拉箭头 = 次要命令（add all / pull / push / refresh）。
  *
- * 行的形态与交互（2026-10-03 用户两次澄清后定稿）：
- * 一行 = 状态徽标 + 文件 + 增删行数；**点增删行数（`+2 -0` 那块）弹出差异**（只读浮层，
- * 看完就关 —— 主用途还是看代码，不该让 diff 顶掉阅读位）。行末不再多加一个 `+` 按钮。
- * 点文件名仍然是打开该文件。
+ * 下面一个 Changes | Commits 切换（默认 Changes）：Changes 视图 = 改动清单（平铺 / 按目录），
+ * Commits 视图 = 仓库最近若干条提交（摘要 · 短 sha · 作者 · 相对时间）。
  *
- * 默认**平铺**（一行一个文件、完整相对路径，像 git status 那样一眼扫完）；
- * 需要看「哪些目录在动」时可切「按目录」，那时根目录默认展开、子目录默认折叠。
- *
- * 三条不撒谎的规矩：
+ * 三条不撒谎的规矩（沿用 2026-10-03）：
  * 1) 不是 git 仓库（或没装 git）→ 如实说，不用别的东西凑一份「变更」；
  * 2) 工作区干净 → 说干净，不编数字；
  * 3) 未跟踪 / 二进制文件没有 numstat → 不显示 `+0 -0`（后端给的是 null）。
@@ -20,6 +16,7 @@
 import { useMemo, useState } from 'react';
 import type { GitChangeEntry } from '../../shared/types';
 import { statusMeta, useChangesStore } from './changesState';
+import { CommitHistory } from './CommitHistory';
 import { Dialog } from './Dialog';
 import { translate, useI18n } from './i18n';
 import './changes.css';
@@ -195,19 +192,26 @@ export function ChangesPanel({
   onOpenDiff: (file: string) => void;
 }) {
   const { t } = useI18n();
+  const projectId = useChangesStore((s) => s.projectId);
   const result = useChangesStore((s) => s.result);
   const busy = useChangesStore((s) => s.busy);
   const running = useChangesStore((s) => s.running);
   const error = useChangesStore((s) => s.error);
+  const commits = useChangesStore((s) => s.commits);
+  const commitsReason = useChangesStore((s) => s.commitsReason);
   const refresh = useChangesStore((s) => s.refresh);
   const run = useChangesStore((s) => s.run);
+  /** SCM 视图：Changes（默认）| Commits。 */
+  const [view, setView] = useState<'changes' | 'commits'>('changes');
   /** 默认平铺（一行一个文件、完整路径，像 git status 那样扫）。 */
   const [byDir, setByDir] = useState(false);
   /** 按目录展示时，哪些目录是展开的：根目录默认展开，子目录默认折叠。 */
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['']));
-  /** git commit 的提交说明（点按钮时弹输入框，不是 prompt）。 */
+  /** git commit 的提交说明（点大按钮弹输入框，不是 prompt）。 */
   const [commitOpen, setCommitOpen] = useState(false);
   const [commitMessage, setCommitMessage] = useState('');
+  /** 大按钮右侧的下拉菜单（add / pull / push / refresh）。 */
+  const [menuOpen, setMenuOpen] = useState(false);
   /** git push 对外可见，先确认一次。 */
   const [pushOpen, setPushOpen] = useState(false);
 
@@ -228,106 +232,142 @@ export function ChangesPanel({
     <div className="changes-panel">
       <div className="changes-head">
         <h3>{t('changesPanel.title')}</h3>
-        <button className="btn ghost small" onClick={() => setByDir((v) => !v)} title={t('changesPanel.toggleViewTitle')}>
-          {byDir ? t('changesPanel.viewByDir') : t('changesPanel.viewFlat')}
+        <div className="changes-head-actions">
+          {/* 大按钮 + 下拉箭头（对齐 VS Code SCM action button） */}
+          <div className="scm-split">
+            <button
+              className="scm-primary"
+              type="button"
+              disabled={running !== null}
+              title={t('changesPanel.commitCmdTitle')}
+              onClick={() => setCommitOpen(true)}
+            >
+              {t('changesPanel.commit')}
+            </button>
+            <button
+              className="scm-dropdown"
+              type="button"
+              disabled={running !== null}
+              title={t('changesPanel.more')}
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              <span className="chevron down">▾</span>
+            </button>
+          </div>
+          {menuOpen && (
+            <div className="scm-menu" onMouseLeave={() => setMenuOpen(false)}>
+              <button className="scm-menu-item" disabled={running !== null} onClick={() => { setMenuOpen(false); void run('add'); }}>
+                {t('changesPanel.add')}
+              </button>
+              <button className="scm-menu-item" disabled={running !== null} onClick={() => { setMenuOpen(false); void run('pull'); }}>
+                {t('changesPanel.pull')}
+              </button>
+              <button className="scm-menu-item" disabled={running !== null} onClick={() => { setMenuOpen(false); setPushOpen(true); }}>
+                {t('changesPanel.push')}
+              </button>
+              <button className="scm-menu-item" disabled={busy} onClick={() => { setMenuOpen(false); void refresh(); }}>
+                {t('changesPanel.refresh')}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* SCM 视图切换：默认 Changes */}
+      <div className="scm-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'changes'}
+          className={`scm-tab${view === 'changes' ? ' active' : ''}`}
+          onClick={() => setView('changes')}
+        >
+          {t('changesPanel.viewChanges')}
         </button>
-        <button className="btn ghost small" onClick={() => void refresh()} disabled={busy}>
-          {busy ? t('changesPanel.reading') : t('changesPanel.refresh')}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'commits'}
+          className={`scm-tab${view === 'commits' ? ' active' : ''}`}
+          onClick={() => setView('commits')}
+        >
+          {t('changesPanel.viewCommits')}{commits.length > 0 ? ` (${commits.length})` : ''}
         </button>
       </div>
 
-      {/* 四个最常用的写命令（2026-10-03 用户要求）：git status 就是下面的清单，默认已经在那儿了。 */}
-      <div className="changes-cmds">
-        <button
-          className="btn ghost small"
-          disabled={running !== null}
-          title={t('changesPanel.addTitle')}
-          onClick={() => void run('add')}
-        >
-          git add all
-        </button>
-        <button
-          className="btn ghost small"
-          disabled={running !== null}
-          title={t('changesPanel.commitCmdTitle')}
-          onClick={() => setCommitOpen(true)}
-        >
-          git commit
-        </button>
-        <button
-          className="btn ghost small"
-          disabled={running !== null}
-          title={t('changesPanel.pullTitle')}
-          onClick={() => void run('pull')}
-        >
-          git pull
-        </button>
-        <button
-          className="btn ghost small"
-          disabled={running !== null}
-          title={t('changesPanel.pushTitle')}
-          onClick={() => setPushOpen(true)}
-        >
-          git push
-        </button>
-        {running && <span className="changes-cmd-busy">{t('changesPanel.cmdBusy', { cmd: running })}</span>}
-      </div>
-
-      {result?.isRepo && (
-        <div className="changes-counts">
-          <span>{t('changesPanel.branch', { branch: result.branch ?? t('changesPanel.noCommit') })}</span>
-          <span>·</span>
-          <span>{entries.length === 0 ? t('changesPanel.clean') : t('changesPanel.uncommitted', { n: totals.files })}</span>
-          {totals.files > 0 && (totals.added > 0 || totals.removed > 0) && (
-            <span className="changes-delta">
-              +{totals.added} -{totals.removed}
-            </span>
+      {view === 'changes' ? (
+        <>
+          {result?.isRepo && (
+            <div className="changes-counts">
+              <span>{t('changesPanel.branch', { branch: result.branch ?? t('changesPanel.noCommit') })}</span>
+              <span>·</span>
+              <span>{entries.length === 0 ? t('changesPanel.clean') : t('changesPanel.uncommitted', { n: totals.files })}</span>
+              {totals.files > 0 && (totals.added > 0 || totals.removed > 0) && (
+                <span className="changes-delta">
+                  +{totals.added} -{totals.removed}
+                </span>
+              )}
+            </div>
           )}
-        </div>
-      )}
 
-      {error && (
-        <div className="changes-error" role="alert">
-          {t('changesPanel.readError', { error })}
-        </div>
-      )}
-
-      {!error && result && !result.isRepo && (
-        <div className="changes-nogit">
-          {t('changesPanel.noGit')}
-        </div>
-      )}
-
-      {result?.isRepo && entries.length === 0 && <div className="changes-nobase">{t('changesPanel.cleanDetail')}</div>}
-
-      {entries.length > 0 && (
-        <div className="changes-rows">
-          {byDir ? (
-            <DirNode
-              group={tree}
-              depth={0}
-              expanded={expanded}
-              onToggle={toggle}
-              onOpenDiff={onOpenDiff}
-              onOpenFile={onOpenFile}
-            />
-          ) : (
-            flat.map((entry) => (
-              <FileRow
-                key={entry.file}
-                entry={entry}
-                indent={0}
-                full
-                onOpenDiff={onOpenDiff}
-                onOpenFile={onOpenFile}
-              />
-            ))
+          {error && (
+            <div className="changes-error" role="alert">
+              {t('changesPanel.readError', { error })}
+            </div>
           )}
-          {result && result.truncated > 0 && (
-            <div className="changes-note-summary">{t('changesPanel.truncated', { n: result.truncated })}</div>
+
+          {!error && result && !result.isRepo && <div className="changes-nogit">{t('changesPanel.noGit')}</div>}
+
+          {result?.isRepo && entries.length === 0 && <div className="changes-nobase">{t('changesPanel.cleanDetail')}</div>}
+
+          {entries.length > 0 && (
+            <>
+              <div className="changes-rows">
+                {byDir ? (
+                  <DirNode
+                    group={tree}
+                    depth={0}
+                    expanded={expanded}
+                    onToggle={toggle}
+                    onOpenDiff={onOpenDiff}
+                    onOpenFile={onOpenFile}
+                  />
+                ) : (
+                  flat.map((entry) => (
+                    <FileRow
+                      key={entry.file}
+                      entry={entry}
+                      indent={0}
+                      full
+                      onOpenDiff={onOpenDiff}
+                      onOpenFile={onOpenFile}
+                    />
+                  ))
+                )}
+                {result && result.truncated > 0 && (
+                  <div className="changes-note-summary">{t('changesPanel.truncated', { n: result.truncated })}</div>
+                )}
+              </div>
+            </>
           )}
-        </div>
+
+          {/* 平铺 / 按目录切换（保留原来的视图切换） */}
+          {entries.length > 0 && (
+            <div className="changes-toolbar">
+              <button className="btn ghost small" onClick={() => setByDir((v) => !v)} title={t('changesPanel.toggleViewTitle')}>
+                {/* 显示「点了会变成的状态」，而不是当前状态 */}
+                {byDir ? t('changesPanel.viewFlat') : t('changesPanel.viewByDir')}
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        /* Commits 视图：仓库提交历史（graph / ref 徽章 / 展开 / diff / 写操作） */
+        projectId ? <CommitHistory projectId={projectId} /> : <>{commitsReason && <div className="changes-nogit">{t('changesPanel.noGit')}</div>}</>
       )}
+
+      {running && <span className="changes-cmd-busy">{t('changesPanel.cmdBusy', { cmd: running })}</span>}
 
       {commitOpen && (
         <Dialog title={t('changesPanel.commitDialog')} onClose={() => setCommitOpen(false)}>

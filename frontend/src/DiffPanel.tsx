@@ -14,6 +14,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { FileDiffResult } from '../../shared/types';
+import { api } from './api';
 import { changesApi } from './readSnapshot';
 import { useI18n } from './i18n';
 import './changes.css';
@@ -50,12 +51,15 @@ export function DiffPanel({
   projectId,
   file,
   rev = 'HEAD',
+  baseRev,
   onClose,
 }: {
   projectId: string;
   file: string;
   /** 对比的版本；缺省 HEAD = 工作区 vs HEAD。 */
   rev?: string;
+  /** 历史提交 diff 的基点（通常是 rev 的父提交）；传了就走两提交 diff，忽略工作区。 */
+  baseRev?: string;
   onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -68,8 +72,10 @@ export function DiffPanel({
     setLoading(true);
     setError(null);
     setData(null);
-    void changesApi
-      .fileDiff(projectId, file, rev)
+    const req = baseRev
+      ? api.gitCommitFileDiff(projectId, rev, file, baseRev)
+      : changesApi.fileDiff(projectId, file, rev);
+    void req
       .then((res) => {
         if (!cancelled) setData(res);
       })
@@ -82,7 +88,7 @@ export function DiffPanel({
     return () => {
       cancelled = true;
     };
-  }, [projectId, file, rev]);
+  }, [projectId, file, rev, baseRev]);
 
   // Esc 关闭（与其它浮层一致）
   useEffect(() => {

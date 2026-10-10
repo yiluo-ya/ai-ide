@@ -4,6 +4,8 @@ import type {
   CallDirection,
   CallHierarchyResult,
   CallNode,
+  CommitChange,
+  CommitInfo,
   CommandKind,
   CommandPlan,
   CommandRisk,
@@ -12,9 +14,12 @@ import type {
   DensitySegment,
   ExternalSource,
   FileDensity,
+  FileDiffResult,
   FileNode,
   FindReferencesRequest,
   GitChangesResult,
+  GitHistoryWriteRequest,
+  GitRefName,
   GitRunResult,
   GitWriteAction,
   HighlightResult,
@@ -30,6 +35,7 @@ import type {
   ProjectInfo,
   ReferenceLocation,
   ReferenceResult,
+  RepoLogResult,
   SearchMatch,
   SearchResult,
   SearchOptions,
@@ -154,6 +160,33 @@ export const api = {
     request<GitRunResult>(`/projects/${id}/git-write${action === 'push' ? '?confirm=1' : ''}`, {
       method: 'POST',
       body: JSON.stringify({ action, message }),
+    }),
+
+  /** SCM commits 视图（2026-10-09）：仓库最近 limit 条提交。 */
+  gitLog: (id: string, limit = 50) => request<RepoLogResult>(`/projects/${id}/git-log?limit=${limit}`),
+
+  /** 单条提交改动的文件清单（展开提交看 change list）。 */
+  gitCommitChanges: (id: string, rev: string) =>
+    request<{ rev: string; changes: CommitChange[] }>(`/projects/${id}/git-commit-changes?rev=${encodeURIComponent(rev)}`),
+
+  /** 单条提交详情（hover / 详情面板）。 */
+  gitCommit: (id: string, rev: string) =>
+    request<CommitInfo>(`/projects/${id}/git-commit?rev=${encodeURIComponent(rev)}`),
+
+  /** 两提交之间某个文件的差异（commits 视图点文件看 diff）。base 缺省 = rev 的父提交。 */
+  gitCommitFileDiff: (id: string, rev: string, file: string, base?: string) =>
+    request<FileDiffResult>(
+      `/projects/${id}/git-commit-file-diff?rev=${encodeURIComponent(rev)}&path=${encodeURIComponent(file)}${base ? `&base=${encodeURIComponent(base)}` : ''}`,
+    ),
+
+  /** 仓库所有引用（分支 / 标签 / 远程）。 */
+  gitRefs: (id: string) => request<{ refs: Array<GitRefName & { commit: string }>; headBranch: string | null }>(`/projects/${id}/git-refs`),
+
+  /** 提交历史视图的写操作（checkout / cherry-pick / 建删分支标签），固定 ?confirm=1。 */
+  gitHistoryWrite: (id: string, body: GitHistoryWriteRequest) =>
+    request<GitRunResult>(`/projects/${id}/git-history-write?confirm=1`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 
   /** 命令管理（2026-10-03）：服务状态与启停（重启 / 停止都要 confirm=1）。 */
