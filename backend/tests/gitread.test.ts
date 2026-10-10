@@ -18,6 +18,7 @@ import {
   fileDiff,
   fileHistory,
   isValidRev,
+  repoLog,
   showFile,
   worktreeChanges,
 } from '../src/indexer/gitread';
@@ -46,6 +47,7 @@ test('gitread: 非 git 目录全部降级为 null 且不抛', async () => {
     assert.equal(await fileDiff(fx.root, 'src/a.ts'), null, '非 git 目录没有 diff');
     assert.equal(await blame(fx.root, 'src/a.ts'), null, '非 git 目录没有 blame');
     assert.equal(await fileHistory(fx.root, 'src/a.ts'), null, '非 git 目录没有文件历史');
+    assert.equal(await repoLog(fx.root), null, '非 git 目录没有仓库提交历史');
     assert.equal(await showFile(fx.root, 'HEAD', 'src/a.ts'), null, '非 git 目录拿不到历史版本');
   } finally {
     await fx.cleanup();
@@ -102,6 +104,36 @@ test('worktreeChanges: 未跟踪按新增报，被 .gitignore 的文件不出现
     assert.equal(status.has('ignored.txt'), false, '被 .gitignore 忽略的文件不该出现在变更清单里');
     // 没有任何一条状态叫 untracked（这一档已按用户要求取消）
     assert.equal(res.entries.some((e) => (e.status as string) === 'untracked'), false);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+/** 仓库级提交历史（SCM commits 视图，2026-10-09）：提交按新→旧，字段齐全。 */
+test('repoLog: 返回最近提交，短 sha / 作者 / 摘要齐全', async (t) => {
+  const fx = await makeProject({ 'src/a.ts': 'export const a = 1;\n' });
+  try {
+    if (!(await initRepo(fx.root))) {
+      t.skip('本机 git 不可用，跳过');
+      return;
+    }
+    // 再补一提交，用可断言的摘要
+    await fsp.writeFile(path.join(fx.root, 'src', 'a.ts'), 'export const a = 2;\n');
+    await run('git', ['-C', fx.root, 'add', '-A'], { windowsHide: true });
+    await run('git', ['-C', fx.root, 'commit', '-qm', 'second'], { windowsHide: true });
+
+    const log = await repoLog(fx.root, 10);
+    assert.ok(log, 'git 仓库应有提交历史');
+    assert.ok(log.length >= 2, `至少两条提交：${JSON.stringify(log)}`);
+    assert.equal(log[0].summary, 'second', '最新提交在最前');
+    assert.match(log[0].rev, /^[0-9a-f]{7,40}$/, '完整 sha 合法');
+    assert.ok(log[0].shortRev.length <= log[0].rev.length, '短 sha 不长于完整 sha');
+    assert.ok(log[0].author.length > 0, '有作者');
+    assert.ok(Number.isFinite(log[0].at) && log[0].at > 0, '有提交时间');
+
+    // limit 钳制：要 1 条就只给 1 条
+    const one = await repoLog(fx.root, 1);
+    assert.equal(one?.length, 1);
   } finally {
     await fx.cleanup();
   }

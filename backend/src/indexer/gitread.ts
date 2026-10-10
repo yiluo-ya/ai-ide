@@ -335,6 +335,264 @@ function parseHistoryLog(out: string): FileHistoryCommit[] {
   return commits;
 }
 
+// ---------------------------------------------------------------- 仓库级提交历史（2026-10-09）
+
+/**
+ * 仓库级提交历史的一项（SCM 面板「commits」视图用）。
+ * 与 fileHistory 不同：不 `--follow`、不限单文件，是 `git log` 全仓库最近的提交。
+ */
+export interface RepoLogEntry {
+  /** 完整 40 位 sha。 */
+  rev: string;
+  /** 短 sha（git 的 %h，通常 7 位）。 */
+  shortRev: string;
+  /** 提交时间（毫秒）。 */
+  at: number;
+  author: string;
+  summary: string;
+  /** 父提交 sha（graph 泳道用；根提交为空数组）。 */
+  parentIds: string[];
+  /** 挂在这条提交上的分支 / 标签（列表视图的 ref 徽章）。 */
+  refs: GitRefName[];
+}
+
+/**
+ * `git log -n<limit> --date-order --pretty=format:%H\x02%h\x02%P\x02%ct\x02%an\x02%s`：
+ * 仓库最近 limit 条提交，一行一条；再用 `for-each-ref` 给每条提交挂 ref 徽章。
+ * limit 钳制在 1..200。只读，失败（非 git 仓库 / 没装 git）返回 null。
+ */
+export async function repoLog(root: string, limit = 200): Promise<RepoLogEntry[] | null> {
+  const n = clampInt(limit, 1, 200, 200);
+  const out = await git(root, [
+    'log',
+    `-n${n}`,
+    '--date-order',
+    '--pretty=format:%H\x02%h\x02%P\x02%ct\x02%an\x02%s',
+  ]);
+  if (out === null) return null;
+  const refs = await refMap(root);
+  return parseRepoLog(out, refs ?? new Map());
+}
+
+function parseRepoLog(out: string, refs: Map<string, GitRefName[]>): RepoLogEntry[] {
+  const entries: RepoLogEntry[] = [];
+  for (const raw of out.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (!line) continue;
+    // %H \x02 %h \x02 %P \x02 %ct \x02 %an \x02 %s
+    const m = line.match(/^([0-9a-f]{7,40})\x02([0-9a-f]+)\x02([0-9a-f ]*)\x02(\d+)\x02([^\x02]*)\x02(.*)$/);
+    if (!m) continue;
+    const at = Number(m[4]) * 1000;
+    if (!Number.isFinite(at)) continue;
+    const parentIds = m[3].trim() ? m[3].trim().split(/ +/) : [];
+    entries.push({
+      rev: m[1],
+      shortRev: m[2],
+      at,
+      author: m[5],
+      summary: m[6],
+      parentIds,
+      refs: refs.get(m[1]) ?? [],
+    });
+  }
+  return entries;
+}
+
+// ---------------------------------------------------------------- 引用（ref / branch / tag）
+
+/** 一个 git 引用（分支 / 标签 / 远程分支）。 */
+export interface GitRefName {
+  name: string;
+  type: 'branch' | 'tag' | 'remote';
+  /** 是否是当前 HEAD 指向的引用。 */
+  isHead: boolean;
+}
+
+/** refname（refs/heads/main、refs/tags/v1、refs/remotes/origin/main）→ 展示名与类型。 */
+function parseRefName(refname: string): { name: string; type: GitRefName['type'] } | null {
+  const r = refname.trim();
+  if (r.startsWith('refs/heads/')) return { name: r.slice('refs/heads/'.length), type: 'branch' };
+  if (r.startsWith('refs/tags/')) return { name: r.slice('refs/tags/'.length), type: 'tag' };
+  if (r.startsWith('refs/remotes/')) return { name: r.slice('refs/remotes/'.length), type: 'remote' };
+  return null;
+}
+
+/** 提交 sha → 挂在其上的引用清单（含是否 HEAD）。非 git / 没装 git 返回 null。 */
+async function refMap(root: string): Promise<Map<string, GitRefName[]> | null> {
+  const out = await git(root, ['for-each-ref', '--format=%(objectname)\x02%(refname)']);
+  if (out === null) return null;
+  const headBranch = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD']))?.trim() ?? '';
+  const byCommit = new Map<string, GitRefName[]>();
+  for (const raw of out.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (!line) continue;
+    const sep = line.indexOf('\x02');
+    if (sep <= 0) continue;
+    const commit = line.slice(0, sep).trim();
+    const parsed = parseRefName(line.slice(sep + 1));
+    if (!commit || !parsed) continue;
+    const isHead = parsed.type === 'branch' && parsed.name === headBranch;
+    const list = byCommit.get(commit) ?? [];
+    list.push({ name: parsed.name, type: parsed.type, isHead });
+    byCommit.set(commit, list);
+  }
+  return byCommit;
+}
+
+/** 仓库的所有引用（分支 / 标签 / 远程），供「按 ref 筛选」下拉与 ref 徽章用。 */
+export async function listRefs(
+  root: string,
+): Promise<{ refs: Array<GitRefName & { commit: string }>; headBranch: string | null } | null> {
+  const out = await git(root, ['for-each-ref', '--format=%(objectname)\x02%(refname)']);
+  if (out === null) return null;
+  const headBranch = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD']))?.trim() || null;
+  const refs: Array<GitRefName & { commit: string }> = [];
+  for (const raw of out.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (!line) continue;
+    const sep = line.indexOf('\x02');
+    if (sep <= 0) continue;
+    const commit = line.slice(0, sep).trim();
+    const parsed = parseRefName(line.slice(sep + 1));
+    if (!commit || !parsed) continue;
+    refs.push({ ...parsed, commit, isHead: parsed.type === 'branch' && parsed.name === headBranch });
+  }
+  return { refs, headBranch };
+}
+
+// ---------------------------------------------------------------- 单提交改动 / 详情
+
+/** 单条提交改动的一个文件（展开提交看 change list 用）。 */
+export interface CommitChange {
+  status: 'M' | 'A' | 'D' | 'R';
+  path: string;
+  from?: string;
+  added: number | null;
+  removed: number | null;
+  binary: boolean;
+}
+
+/**
+ * 某条提交改动的文件清单（含状态 + 增删行）。
+ * 用 `git diff-tree -r <rev>` 分别拿 name-status 与 numstat —— 两者对同一提交输出的文件顺序一致，
+ * 按序号配对即可拿到每个文件的 `status/path/from + added/removed/binary`。
+ * rev 先过白名单；失败返回 null。
+ */
+export async function commitChanges(root: string, rev: string): Promise<CommitChange[] | null> {
+  if (!isValidRev(rev)) return null;
+  const nameOut = await git(root, ['diff-tree', '--no-commit-id', '--name-status', '-r', rev.trim()]);
+  if (nameOut === null) return null;
+  const numOut = await git(root, ['diff-tree', '--no-commit-id', '--numstat', '-r', rev.trim()]);
+  return parseCommitChanges(nameOut, numOut ?? '');
+}
+
+function parseCommitChanges(nameOut: string, numOut: string): CommitChange[] {
+  const names = nameOut.split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean);
+  const nums = numOut.split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean);
+  const result: CommitChange[] = [];
+  for (let i = 0; i < names.length; i++) {
+    const cells = names[i].split('\t');
+    const code = (cells[0] ?? '').charAt(0).toUpperCase();
+    if (code !== 'M' && code !== 'A' && code !== 'D' && code !== 'R' && code !== 'C') continue;
+    const status: 'M' | 'A' | 'D' | 'R' = code === 'R' ? 'R' : code === 'C' ? 'A' : (code as 'M' | 'A' | 'D');
+    const from = status === 'R' ? (cells[1] ?? undefined) : undefined;
+    const target = status === 'R' ? cells[2] : cells[1];
+    if (!target) continue;
+    // numstat 同序号行：`added\tremoved\tfile`（二进制为 `-\t-\tfile`）
+    const numCells = (nums[i] ?? '').split('\t');
+    let added: number | null = null;
+    let removed: number | null = null;
+    let binary = false;
+    if (numCells.length >= 2) {
+      if (numCells[0] === '-' || numCells[1] === '-') binary = true;
+      else {
+        const a = Number(numCells[0]);
+        const r = Number(numCells[1]);
+        if (Number.isFinite(a) && Number.isFinite(r)) {
+          added = a;
+          removed = r;
+        }
+      }
+    }
+    result.push({ status, path: target.replace(/\\/g, '/'), ...(from ? { from } : {}), added, removed, binary });
+  }
+  return result;
+}
+
+/**
+ * `git show -s --format=...`：单条提交的详情（message 全文 + 作者 + 邮箱 + 父提交 + stats）。
+ * 只读；rev 非法 / 不存在返回 null。
+ */
+export async function commitInfo(root: string, rev: string): Promise<{
+  rev: string;
+  shortRev: string;
+  at: number;
+  author: string;
+  email: string;
+  summary: string;
+  body: string;
+  parentIds: string[];
+  refs: GitRefName[];
+  stats: { files: number; added: number | null; removed: number | null };
+} | null> {
+  if (!isValidRev(rev)) return null;
+  // %s = subject（单行）、%b = body（多行，放最后）；\x02 分格，message 里理论上不含 \x02
+  const out = await git(root, [
+    'show',
+    '-s',
+    '--format=%H\x02%h\x02%P\x02%ct\x02%an\x02%ae\x02%s\x02%b',
+    rev.trim(),
+  ]);
+  if (out === null || !out.trim()) return null;
+  // `git diff-tree --shortstat -r`：只给这棵树的增删统计，不带 diff 正文
+  const shortOut = await git(root, ['diff-tree', '--shortstat', '--no-commit-id', '-r', rev.trim()]);
+  const refs = await refMap(root);
+
+  // subject 是一行，body 从第一个换行起；把第一行用 \x02 切出前七段 + body 第一行，body 剩余行从换行后取。
+  const nl = out.indexOf('\n');
+  const headLine = (nl >= 0 ? out.slice(0, nl) : out).replace(/\r$/, '');
+  const restBody = nl >= 0 ? out.slice(nl + 1) : '';
+  // 切成 7+ 段：rev/sh/par/ct/an/ae/s/body第一行（%s\x02%b 里 %b 的首行与 subject 同在一行，用 \x02 隔开）
+  const seg = headLine.split('\x02');
+  if (seg.length < 7) return null;
+  const revOut = seg[0];
+  const shortRev = seg[1];
+  const parentIds = seg[2].trim() ? seg[2].trim().split(/ +/) : [];
+  const at = Number(seg[3]) * 1000;
+  const author = seg[4];
+  const email = seg[5];
+  const summary = seg[6];
+  // body 第一行 = seg[7..]（subject 不跨 \x02，body 首行其后），再接第二行起的剩余行；去掉多余空行。
+  const bodyFirst = seg.slice(7).join('\x02').trim();
+  const body = [bodyFirst, restBody].filter((s) => s.trim()).join('\n').trim();
+  const stats = parseShortstat(shortOut);
+  return {
+    rev: revOut,
+    shortRev,
+    at: Number.isFinite(at) ? at : 0,
+    author,
+    email,
+    summary,
+    body,
+    parentIds,
+    refs: refs?.get(revOut) ?? [],
+    stats,
+  };
+}
+
+/** 从 `git show --shortstat` 输出解析 `N files changed, X insertions(+), Y deletions(-)`。 */
+function parseShortstat(out: string | null): { files: number; added: number | null; removed: number | null } {
+  if (!out) return { files: 0, added: null, removed: null };
+  const files = out.match(/(\d+) files? changed/);
+  const added = out.match(/(\d+) insertions?/);
+  const removed = out.match(/(\d+) deletions?/);
+  return {
+    files: files ? Number(files[1]) : 0,
+    added: added ? Number(added[1]) : null,
+    removed: removed ? Number(removed[1]) : null,
+  };
+}
+
 // ---------------------------------------------------------------- 历史版本正文
 
 /**
@@ -346,4 +604,20 @@ export async function showFile(root: string, rev: string, relPath: string): Prom
   const rel = insideRel(root, relPath);
   if (!rel) return null;
   return git(root, ['show', `${rev.trim()}:${rel}`]);
+}
+
+/**
+ * `git diff <base> <rev> -- <path>`：两个提交之间某个文件的差异文本（commits 视图点文件看 diff 用）。
+ * 通常 base = rev 的父提交。rev / base / path 都先过校验；不可用返回 null。
+ */
+export async function commitFileDiff(
+  root: string,
+  base: string,
+  rev: string,
+  relPath: string,
+): Promise<string | null> {
+  if (!isValidRev(base) || !isValidRev(rev)) return null;
+  const rel = insideRel(root, relPath);
+  if (!rel) return null;
+  return git(root, ['diff', '--unified=3', base.trim(), rev.trim(), '--', rel]);
 }

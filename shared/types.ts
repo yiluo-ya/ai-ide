@@ -1194,6 +1194,81 @@ export interface FileHistoryResult {
   reason?: string;
 }
 
+/** 一个 git 引用（分支 / 标签）挂在某条提交上的徽章信息。 */
+export interface GitRefName {
+  name: string;
+  type: 'branch' | 'tag' | 'remote';
+  /** 是否是当前 HEAD 指向的引用。 */
+  isHead: boolean;
+}
+
+/** 仓库级提交历史的一项（SCM commits 视图，2026-10-09）。 */
+export interface RepoLogEntry {
+  rev: string;
+  /** 短 sha（git 的 %h，通常 7 位）。 */
+  shortRev: string;
+  /** 提交时间（毫秒）。 */
+  at: number;
+  author: string;
+  summary: string;
+  /** 父提交 sha（graph 泳道用；根提交为空数组）。 */
+  parentIds: string[];
+  /** 挂在这条提交上的分支 / 标签（列表视图的 ref 徽章）。 */
+  refs: GitRefName[];
+}
+
+/** repoLog 的结果：提交 + 每种 ref 的完整清单（供「按 ref 筛选」用）。 */
+export interface RepoLogResult {
+  commits: RepoLogEntry[];
+  /** 非 git 仓库 / 没装 git 时为 'no-git'。 */
+  reason?: string;
+}
+
+/** 单条提交改动的文件（commit 展开看 change list 用）。 */
+export interface CommitChange {
+  status: 'M' | 'A' | 'D' | 'R';
+  path: string;
+  /** 重命名 / 复制时的原路径。 */
+  from?: string;
+  added: number | null;
+  removed: number | null;
+  binary: boolean;
+}
+
+/** 单条提交的详情（hover / 详情面板用）。 */
+export interface CommitInfo {
+  rev: string;
+  shortRev: string;
+  at: number;
+  author: string;
+  email: string;
+  /** 提交标题（message 第一行）。 */
+  summary: string;
+  /** 提交正文（message 第二行起，可能为空）。 */
+  body: string;
+  parentIds: string[];
+  refs: GitRefName[];
+  /** 该提交的增删统计。 */
+  stats: { files: number; added: number | null; removed: number | null };
+}
+
+/** 提交历史视图的写操作（2026-10-09）：全部对外可见 / 改工作区，路由层强制 `?confirm=1`。 */
+export type GitHistoryWriteAction =
+  | 'checkout'
+  | 'cherry-pick'
+  | 'create-branch'
+  | 'create-tag'
+  | 'delete-branch'
+  | 'delete-tag';
+
+export interface GitHistoryWriteRequest {
+  action: GitHistoryWriteAction;
+  /** action 需要目标提交时（checkout / cherry-pick）。 */
+  rev?: string;
+  /** action 需要名字时（建 / 删分支或标签）。 */
+  name?: string;
+}
+
 /** `GET /api/projects/:id/git-show` 的结果（G7.5）：历史版本正文（只读，不落盘）。 */
 export interface GitShowResult {
   file: string;
