@@ -178,6 +178,14 @@ interface Props {
   editable?: boolean;
   /** FR-0008：正文变化（停手 1 s 由 App 自动落盘）。 */
   onChange?: (text: string) => void;
+  /**
+   * FR-0008：“把 content 灌进 model”的显式信号（打开文件 / 用磁盘版本重载时 +1）。
+   *
+   * **不能直接用 `content` 做依赖**：保存成功后 store 也会更新 `content`，
+   * 一旦用它当依赖，保存回执到达时就会拿旧快照 `setValue()` 覆盖编辑器，
+   * 把期间敲进去的字回退掉（并清空 undo 栈）。编辑期的真相只能是 model 本身。
+   */
+  contentToken?: number;
 }
 
 export function Editor({
@@ -200,6 +208,7 @@ export function Editor({
   onOpenHistory,
   editable = false,
   onChange,
+  contentToken = 0,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -225,6 +234,9 @@ export function Editor({
   /** FR-0008：可编辑开关（同上，用 ref 读最新值）。 */
   const editableRef = useRef(editable);
   editableRef.current = editable;
+  /** FR-0008：正文用 ref 读 —— 它不该出现在同步 effect 的依赖里（见 contentToken 说明）。 */
+  const contentRef = useRef(content);
+  contentRef.current = content;
   /** G7.5：本窗格是历史版本快照（不是磁盘上的真实文件）。 */
   const historical = Boolean(file && historyRev);
   const historicalRef = useRef(historical);
@@ -428,13 +440,15 @@ export function Editor({
     }
     // G7.5：历史版本用独立的 model uri（不是 `wcr://`，不会覆盖磁盘上同一路径的 model）
     const uri = historyRev ? historyModelUriFor(historyRev, file) : modelUriFor(file);
-    const model = acquireModel(uri.toString(), uri, content, lang);
+    // 只在「换文件」或「显式重载（contentToken）」时把 store 的内容同步进 model；
+    // 自动保存后 store 的 content 也会变，但 effect 不因它而跑 —— 否则会回退用户正在敲的字。
+    const model = acquireModel(uri.toString(), uri, contentRef.current, lang);
     if (editor.getModel() !== model) editor.setModel(model);
     if (historicalRef.current) return; // 历史版本不当作「打开过的文件」上报
     // S7：换文件必发（行号随后由光标事件跟随）
     const pos = editor.getPosition();
     reportCaret({ file, line: pos?.lineNumber ?? 1, col: pos?.column ?? 1 });
-  }, [file, lang, content, historyRev]);
+  }, [file, lang, historyRev, contentToken]);
 
   // 语义着色：本项目符号提亮、外部依赖/标准库压暗
   useEffect(() => {

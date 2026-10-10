@@ -169,6 +169,11 @@ interface State {
   fileMtimeMs: number | null;
   /** 「未改动」的正文基准：打开文件时的内容，或最近一次保存成功的内容。 */
   savedText: string;
+  /**
+   * FR-0008：需要把 `fileContent` 灌进编辑器 model 的信号（打开文件 / 重载时 +1）。
+   * 编辑器不监听 `fileContent` 本身 —— 否则保存回写会覆盖用户正在敲的字。
+   */
+  contentToken: number;
   /** 保存状态（编辑器右上角那行小字的来源）。 */
   saveStatus: SaveStatus;
   saveError: string | null;
@@ -255,6 +260,14 @@ const lastWrites = new Map<string, { text: string; mtimeMs: number }>();
 /** 我们自己刚删掉的路径：后端删完会回推 file-deleted，那一下不该再弹「文件已不在磁盘上」。 */
 const localDeletes = new Map<string, number>();
 const LOCAL_DELETE_WINDOW_MS = 10_000;
+/**
+ * 是否有保存正在飞：**同一文件永远不并发发两个 PUT**。
+ *
+ * 第二个请求带的 `baseMtimeMs` 还是上一次保存之前的，等它到后端时磁盘已经被
+ * 自己上一次写入改过 → 被判成「外部改动」而 409，用户会看见一个莫名其妙的冲突弹窗。
+ * 串行之后，每次保存都基于上一次回执里的新 mtime。
+ */
+let saveInFlight = false;
 
 /** 这个变更是不是「我刚写完」引起的：是的话不该反过来重载编辑器。 */
 function isSelfWrite(file: string): boolean {
@@ -499,6 +512,7 @@ export const useStore = create<State>((set, get) => ({
   highlightsToken: 0,
   fileMtimeMs: null,
   savedText: '',
+  contentToken: 0,
   saveStatus: 'idle',
   saveError: null,
   conflict: null,
@@ -565,6 +579,7 @@ export const useStore = create<State>((set, get) => ({
       highlightsToken: 0,
       fileMtimeMs: null,
       savedText: '',
+      contentToken: 0,
       saveStatus: 'idle',
       saveError: null,
       conflict: null,
@@ -708,6 +723,8 @@ export const useStore = create<State>((set, get) => ({
         fileLoading: false,
         savedText: fresh,
         fileMtimeMs: res.mtimeMs,
+        // 打开 / 重载：这是「把正文灌进编辑器 model」的唯一时机之一
+        contentToken: get().contentToken + 1,
         saveStatus: pending == null ? 'idle' : 'pending',
         saveError: null,
         reveal: {
@@ -1045,6 +1062,9 @@ export const useStore = create<State>((set, get) => ({
     if (!id || !openFile) return;
     const text = unsavedEdits.get(openFile);
     if (text == null || text === get().savedText) return;
+    // 上一次还在飞：等它的回执（会按 stillDirty 再排一次），现在发只会撞出假冲突
+    if (saveInFlight) return;
+    saveInFlight = true;
     set({ saveStatus: 'saving', saveError: null });
     try {
       const res = await api.saveFile(id, openFile, text, get().fileMtimeMs);
@@ -1053,7 +1073,9 @@ export const useStore = create<State>((set, get) => ({
       selfWriteFile = openFile;
       lastWrites.set(openFile, { text, mtimeMs: res.mtimeMs });
       if (get().openFile !== openFile) return; // 期间已切走：内容已在盘上，不再动界面
-      const stillDirty = unsavedEdits.get(openFile) !== text;
+      // 「还有没有更新的正文没落盘」：条目已被更新的保存清掉 → 说明已经干净了
+      const pending = unsavedEdits.get(openFile);
+      const stillDirty = pending != null && pending !== text;
       if (!stillDirty) unsavedEdits.delete(openFile);
       set({
         fileContent: text,
@@ -1063,7 +1085,7 @@ export const useStore = create<State>((set, get) => ({
         saveError: null,
         conflict: null,
       });
-      if (stillDirty && saveTimer == null) scheduleSave();
+      if (stillDirty) scheduleSave(); // 期间又敲了字：基于新 mtime 再存一次
     } catch (e) {
       if (e instanceof ApiRequestError && e.status === 409) {
         const detail = e.body as FileConflictDetail | null;
@@ -1100,6 +1122,8 @@ export const useStore = create<State>((set, get) => ({
           fileContent: res.text,
           savedText: res.text,
           fileMtimeMs: res.mtimeMs,
+          // 用户选了「用磁盘上的」：必须显式重载，否则文件（未变）不会触发同步
+          contentToken: get().contentToken + 1,
           saveStatus: 'idle',
           saveError: null,
         });
@@ -1118,7 +1142,8 @@ export const useStore = create<State>((set, get) => ({
       selfWriteFile = file;
       lastWrites.set(file, { text, mtimeMs: res.mtimeMs });
       if (get().openFile !== file) return;
-      const stillDirty = unsavedEdits.get(file) !== text;
+      const pending = unsavedEdits.get(file);
+      const stillDirty = pending != null && pending !== text;
       if (!stillDirty) unsavedEdits.delete(file);
       set({
         fileContent: text,
@@ -1131,6 +1156,8 @@ export const useStore = create<State>((set, get) => ({
       const message = e instanceof Error ? e.message : String(e);
       set({ saveStatus: 'error', saveError: message });
       showToast(translate('editor.saveFailed', { message }), false);
+    } finally {
+      saveInFlight = false;
     }
   },
 

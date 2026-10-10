@@ -864,6 +864,7 @@ export default function App() {
                     file={store.openFile}
                     lang={store.fileLang}
                     content={store.fileContent}
+                    contentToken={store.contentToken}
                     reveal={store.reveal}
                     highlightsToken={store.highlightsToken}
                     onCursor={(line, col) => setCursor({ line, col })}
