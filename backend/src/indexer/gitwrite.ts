@@ -91,3 +91,73 @@ export async function gitCommit(root: string, message: string): Promise<GitRunRe
 export const gitPull = (root: string): Promise<GitRunResult> => run(root, ['pull', '--ff-only']);
 
 export const gitPush = (root: string): Promise<GitRunResult> => run(root, ['push']);
+
+// ---------------------------------------------------------------- 提交历史视图的写操作（2026-10-09）
+
+/** rev 白名单：与 gitread.isValidRev 同一套，杜绝任意字符串进 git 参数。 */
+const REV_RE = /^(?:[0-9a-f]{4,40}|HEAD(?:~\d+)?)$/i;
+/** 分支 / 标签名白名单：git 允许的名字字符子集（字母数字 . _ - /），并排除危险前缀与 `..`。 */
+const REF_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+
+function badRev(rev: string | undefined): string | null {
+  if (!rev || !REV_RE.test(rev.trim())) return '非法提交 sha';
+  return null;
+}
+
+function badRefName(name: string | undefined): string | null {
+  if (!name?.trim()) return '名字不能为空';
+  const n = name.trim();
+  if (!REF_NAME_RE.test(n)) return '名字只能包含字母、数字、` . _ - / `，且不能以特殊字符开头';
+  if (n.startsWith('-') || n === 'HEAD' || n.includes('..') || n.includes('@{') || n.includes(' ')) {
+    return '非法名字';
+  }
+  if (n.length > 200) return '名字太长了（上限 200 字）';
+  return null;
+}
+
+/**
+ * 切到某个提交或分支 / 标签（`git checkout <target>`）。
+ * target 通过「rev 白名单」或「ref 名白名单」其一即可（提交 sha 走 detached，分支名走正常切分支）。
+ * 对外可见且改动工作区，路由层已强制 `?confirm=1`。
+ */
+export const gitCheckout = (root: string, target: string): Promise<GitRunResult> => {
+  const t = target.trim();
+  if (!t) return Promise.resolve({ ok: false, code: null, stdout: '', stderr: '', summary: '目标不能为空' });
+  const isRev = REV_RE.test(t);
+  const isRef = REF_NAME_RE.test(t) && !t.startsWith('-') && t !== 'HEAD' && !t.includes('..') && !t.includes('@{');
+  if (!isRev && !isRef) {
+    return Promise.resolve({ ok: false, code: null, stdout: '', stderr: '', summary: '非法的提交 sha 或名字' });
+  }
+  return run(root, ['checkout', t]);
+};
+
+/** cherry-pick 某条提交。会改动工作区，路由层已强制 `?confirm=1`。 */
+export const gitCherryPick = (root: string, rev: string): Promise<GitRunResult> => {
+  const err = badRev(rev);
+  if (err) return Promise.resolve({ ok: false, code: null, stdout: '', stderr: '', summary: err });
+  return run(root, ['cherry-pick', rev.trim()]);
+};
+
+export const gitCreateBranch = (root: string, name: string): Promise<GitRunResult> => {
+  const err = badRefName(name);
+  if (err) return Promise.resolve({ ok: false, code: null, stdout: '', stderr: '', summary: err });
+  return run(root, ['branch', name.trim()]);
+};
+
+export const gitCreateTag = (root: string, name: string): Promise<GitRunResult> => {
+  const err = badRefName(name);
+  if (err) return Promise.resolve({ ok: false, code: null, stdout: '', stderr: '', summary: err });
+  return run(root, ['tag', name.trim()]);
+};
+
+export const gitDeleteBranch = (root: string, name: string): Promise<GitRunResult> => {
+  const err = badRefName(name);
+  if (err) return Promise.resolve({ ok: false, code: null, stdout: '', stderr: '', summary: err });
+  return run(root, ['branch', '-D', name.trim()]);
+};
+
+export const gitDeleteTag = (root: string, name: string): Promise<GitRunResult> => {
+  const err = badRefName(name);
+  if (err) return Promise.resolve({ ok: false, code: null, stdout: '', stderr: '', summary: err });
+  return run(root, ['tag', '-d', name.trim()]);
+};
