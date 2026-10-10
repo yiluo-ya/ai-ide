@@ -175,6 +175,29 @@ function lineSymbolIndex(
     });
   }
   const { defsByScope, importsByScope } = buildScopeMaps(definitions, []);
+
+  // 行式引用（可选，见 LanguageSpec.lineRefs）：关键字后面的对象名 → RefRecord，
+  // 于是行式语言（SQL）也能进跳定义 / 查引用 / 语义着色。声明自身的位置不算引用。
+  const references: RefRecord[] = [];
+  for (const ref of spec.lineRefs?.(source) ?? []) {
+    if (!ref.name) continue;
+    const endCol = ref.endCol ?? ref.col + ref.name.length;
+    const overlapsDecl = definitions.some(
+      (d) =>
+        d.nameRange.start.line === ref.line &&
+        ref.col < d.nameRange.end.col &&
+        d.nameRange.start.col < endCol,
+    );
+    if (overlapsDecl) continue;
+    references.push({
+      name: ref.name,
+      kind: 'identifier',
+      file: relPath,
+      range: { start: { line: ref.line, col: ref.col }, end: { line: ref.line, col: endCol } },
+      scopeId: fileScopeId,
+      text: ref.text ?? ref.name,
+    });
+  }
   const lastLine = lines.length;
   const scopes = new Map<string, ScopeRecord>([
     [
@@ -200,7 +223,7 @@ function lineSymbolIndex(
       tree: null,
       scopes,
       definitions,
-      references: [],
+      references,
       imports: [],
       literals: [],
       defsByScope,

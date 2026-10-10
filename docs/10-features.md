@@ -166,6 +166,9 @@
 查找引用、Hover、跳不动时的人话解释、密度条、签名压平）、三档交付（预览级 / 索引级 / 全功能级）、
 自测清单与反面清单，见 [`08-language-plugin-spec.md`](08-language-plugin-spec.md)。
 独立仓库 `wcr-lang-cpp` 里的 C / C++ 插件是全功能档的参考实现。
+行式扫描的语言（Dockerfile / INI / SQL）里，SQL 额外做了 `lineRefs`：`FROM` / `JOIN` / `INTO` /
+`UPDATE` / `TABLE` … 后面的对象名会被当成引用，于是 SQL 的库对象（表 / 视图 / 索引）**也能跳定义、查引用、
+悬停出定义位置**（名字口径同 PostgreSQL：未加引号折叠小写，加引号按字面），跨 `.sql` 文件在库内全局可见。
 
 ## 底座（性能 / 可靠性）
 

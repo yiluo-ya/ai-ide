@@ -129,7 +129,10 @@ below:
 | tree-sitter AST | Python, TypeScript (`typescript` / `tsx` / `javascript` / `jsx`), Go, Java, Rust, Shell (Bash grammar), JSON, YAML, TOML, Markdown, CSS (`css` / `scss` / `less`), HTML | `.py`, `.ts/.tsx/.js/.jsx/.mjs/.cjs`, `.go`, `.java`, `.rs`, `.sh/.bash/.zsh`, `.json/.jsonc`, `.yml/.yaml`, `.toml`, `.md`, `.css/.scss/.less`, `.html/.htm` |
 | Line scan `lineSymbols` (no tree-sitter grammar available) | Dockerfile, INI / ENV, SQL | `Dockerfile`/`Containerfile`, `.ini/.cfg/.conf/.properties/.env`, `.sql` |
 
-Shell additionally supports function / variable jumps and `source` dependencies. **Package
+Shell additionally supports function / variable jumps and `source` dependencies. SQL objects (tables /
+views / indexes) are jumpable too: object names after `FROM` / `JOIN` / `INTO` / `UPDATE` / `TABLE` …
+count as references, so go-to-definition / find-references / hover work (and `CREATE` names feed the
+outline); resolution is library-wide across `.sql` files. **Package
 dependency / build manifest files** (`go.mod`/`go.sum`, `requirements*.txt`, `Pipfile`,
 `poetry.lock`/`uv.lock`, `pom.xml`/`*.csproj`, `build.gradle`/`*.kts`/`*.sbt`,
 `Gemfile`/`*.gemspec`/`*.podspec`, `mix.exs`, `Package.swift`, `Cargo.lock`/`composer.lock`/

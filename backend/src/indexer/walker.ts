@@ -81,6 +81,23 @@ export interface LineSymbol {
   detail?: string | null;
 }
 
+/**
+ * 行式格式扫出的一个「按名字引用」的位置（配套 `LanguageSpec.lineRefs`）。
+ * 行式格式没有语法树，只能靠关键字（FROM / JOIN / INTO …）定位对象名出现的位置；
+ * parser 把它转成 RefRecord，于是行式语言也能进跳定义 / 查引用 / 语义着色（见 sql.ts）。
+ */
+export interface LineRef {
+  name: string;
+  /** 1-based 行号。 */
+  line: number;
+  /** 1-based 列（UTF-16 code unit）。 */
+  col: number;
+  /** 名字结束列（不含）；缺省按名字长度算。 */
+  endCol?: number;
+  /** 源码原文（缺省取 name）。 */
+  text?: string;
+}
+
 export interface LanguageSpec {
   id: LangId;
   label: string;
@@ -92,6 +109,11 @@ export interface LanguageSpec {
   grammar?: unknown;
   /** 行式格式的符号扫描（与 grammar 二选一）。 */
   lineSymbols?: (source: string) => LineSymbol[];
+  /**
+   * 行式格式的引用扫描（可选）：有它，行式语言也能有跳定义 / 查引用。
+   * 名字按原文给出（大小写口径由语言自己决定，见 sql.ts）。
+   */
+  lineRefs?: (source: string) => LineRef[];
   /** node.type → 作用域规则。 */
   scopes: Record<string, ScopeRule>;
   /** node.type → 处理器（返回 true 表示已完全处理，不再自动遍历子节点）。 */

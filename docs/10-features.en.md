@@ -201,6 +201,10 @@ colour dot, outline, symbol search, go-to-definition, find-references, hover, ho
 explanations, density bar, signature flattening), three tiers, and a self-check list, all
 specified in [`08-language-plugin-spec.md`](08-language-plugin-spec.md). The C / C++
 plugin in the separate `wcr-lang-cpp` repo is the full-featured reference implementation.
+Among the line-scan languages (Dockerfile / INI / SQL), SQL also supplies `lineRefs`: object names
+after `FROM` / `JOIN` / `INTO` / `UPDATE` / `TABLE` … count as references, so its database objects
+(tables / views / indexes) are **go-to-definition, find-references and hover jumpable** (PostgreSQL naming:
+unquoted identifiers fold to lower case, quoted ones keep their case); resolution is library-wide across `.sql` files.
 
 ## Platform (performance / reliability)
 

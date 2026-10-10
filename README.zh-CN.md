@@ -121,7 +121,9 @@ docker run --rm -p 8787:8787 -v D:/code:/work:ro web-code-reader
 | tree-sitter AST | Python、TypeScript（`typescript` / `tsx` / `javascript` / `jsx`）、Go、Java、Rust、Shell（Bash 语法）、JSON、YAML、TOML、Markdown、CSS（`css` / `scss` / `less`）、HTML | `.py`、`.ts/.tsx/.js/.jsx/.mjs/.cjs`、`.go`、`.java`、`.rs`、`.sh/.bash/.zsh`、`.json/.jsonc`、`.yml/.yaml`、`.toml`、`.md`、`.css/.scss/.less`、`.html/.htm` |
 | 行式扫描 `lineSymbols`（无 tree-sitter 语法包） | Dockerfile、INI / ENV、SQL | `Dockerfile`/`Containerfile`、`.ini/.cfg/.conf/.properties/.env`、`.sql` |
 
-Shell 另有函数 / 变量跳转与 `source` 依赖。**包依赖 / 构建清单**（`go.mod`/`go.sum`、
+Shell 另有函数 / 变量跳转与 `source` 依赖。SQL 的库对象（表 / 视图 / 索引）也有跳转：
+`FROM` / `JOIN` / `INTO` / `UPDATE` / `TABLE` … 后面的对象名算引用，可跳定义 / 查引用 / 悬停出定义位置
+（`CREATE` 声明的对象名进大纲），跨 `.sql` 文件在库内全局可见。**包依赖 / 构建清单**（`go.mod`/`go.sum`、
 `requirements*.txt`、`Pipfile`、`poetry.lock`/`uv.lock`、`pom.xml`/`*.csproj`、`build.gradle`/`*.kts`/`*.sbt`、
 `Gemfile`/`*.gemspec`/`*.podspec`、`mix.exs`、`Package.swift`、`Cargo.lock`/`composer.lock`/`pubspec.lock`、
 `.npmrc`/`.yarnrc`、`Makefile`…）**只做高亮与预览**，不进符号索引、不进语言分布与阅读路线 ——

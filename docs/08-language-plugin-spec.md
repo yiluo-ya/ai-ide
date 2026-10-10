@@ -19,7 +19,7 @@
 | C2 | **文件树色点** | 左侧文件树 | `spec.color`（或 `meta.color`） | 该语言的文件左侧有明显色点 |
 | C3 | **文件大纲** | `Ctrl/Cmd+Shift+O` | `spec.scopes` + `spec.handlers`（或 `spec.lineSymbols`） | 列出函数 / 类 / 结构等，层级正确 |
 | C4 | **符号搜索** | `Ctrl/Cmd+T` | 同 C3（顶层符号） | 能搜到该语言文件里的顶层定义，跳过去定位准确 |
-| C5 | **跳转到定义** | `F12` / `Ctrl+Click` | `spec.handlers` + `spec.identifierTypes` + `spec.resolveModule` | 从调用点跳到定义处；跨文件也要能跳 |
+| C5 | **跳转到定义** | `F12` / `Ctrl+Click` | `spec.handlers` + `spec.identifierTypes` + `spec.resolveModule`（行式语言用 `spec.lineRefs`） | 从调用点跳到定义处；跨文件也要能跳 |
 | C6 | **查找引用** | `Shift+F12` | 同 C5（引用提取） | 列出项目内所有引用点，含跨文件 |
 | C7 | **Hover** | 鼠标悬停 | 同 C5（定义）+ `spec.literalTypes` / `valueContainers` / `indexAccess` | 悬停符号给出签名与出处；悬停字面量给出绑定值 |
 | C8 | **不可跳转时的解释** | 同上触发失败 | `spec.builtins` / `resolveModule` 返回 `null` | 提示条区分「外部依赖 / 解析不了 / 索引中」，不出现「什么都没发生」 |
@@ -147,6 +147,7 @@ export const plugin: LanguagePlugin = {
 |---|---|---|
 | `id` / `label` / `extensions` | 必需 | 语言身份与文件识别（`filenames` 用于无扩展名文件） |
 | `grammar` **或** `lineSymbols` | 二选一 | AST 解析 / 行式扫描（无可用语法包时） |
+| `lineRefs` | 行式语言可选 | 行式扫描的引用提取：只写了 `lineSymbols` 的语言也能上 C5–C7（参考 `sql.ts`） |
 | `scopes` / `handlers` / `identifierTypes` | 索引级必需 | 作用域与定义 / 引用提取（C3–C6） |
 | `resolveModule` | 跨文件跳转必需 | 模块说明符 → 候选文件；`null` = 外部依赖（C5/C6/C8） |
 | `commentPrefixes` | 建议 | 密度条（C9） |
@@ -267,6 +268,6 @@ npm --prefix <阅读器> test         # 2) 阅读器侧回归不受影响
 |---|---|
 | `backend/src/languages/go.ts` | 跨包跳转（`resolveModule` + `fileMeta` + `siblings`）的完整写法 |
 | `backend/src/languages/python.ts` | `signatureStyle: 'colon'` + 入口识别 + 子模块回退 |
-| `backend/src/languages/sql.ts` | 无语法包时的 `lineSymbols` 行式扫描 |
+| `backend/src/languages/sql.ts` | 无语法包时的行式扫描：`lineSymbols` 提定义 + `lineRefs` 提引用（关键词后面的对象名），于是 SQL 也有跳定义 / 查引用 / Hover |
 | `tmp/langdir/demo-lang/` | 最小可跑插件（行式扫描 + 元数据），端到端验证脚本 `tmp/p3verify.mjs` |
 | **C / C++ 插件（独立仓库示例）** | 全功能档参考实现：`D:/01_code/02_work_code/wcr-lang-cpp/index.ts`（一个包出两门语言、`#include` → 星号导入、namespace `localDefs: false`、内置符号表）；验收脚本 `tmp/cppverify.mjs`（C1–C10）与 `tmp/cppui.mjs`（C1 的前端验证） |
