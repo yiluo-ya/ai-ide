@@ -7,9 +7,9 @@
  *   UI 交互归 `npm run test:ui`）。
  */
 import { describe, expect, it } from 'vitest';
-import type { GitChangeEntry, ReadmapResult } from '../../shared/types';
+import type { GitChangeEntry, GitChangesResult, ReadmapResult, RepoLogEntry } from '../../shared/types';
 import { buildSnapshot, snapshotAge } from './readSnapshot';
-import { statusMeta } from './changesState';
+import { sameChanges, sameCommits, statusMeta } from './changesState';
 import { blameAt, shortAuthor } from './blame';
 
 const readmap: ReadmapResult = {
@@ -67,6 +67,76 @@ describe('变更徽标 statusMeta', () => {
   });
 });
 
+/**
+ * 「拉回来的和现在是不是一回事」——决定要不要替换状态（2026-10-11）。
+ * 判错方向的代价不对称：把「没变」判成「变了」只是白重渲染一次（旧行为），
+ * 把「变了」判成「没变」则面板永远停在上一次的内容上 —— 所以这里钉死几个必须判「变了」的点。
+ */
+describe('sameChanges / sameCommits', () => {
+  const entriesResult = (over: Partial<GitChangesResult> = {}): GitChangesResult => ({
+    isRepo: true,
+    branch: 'main',
+    entries: [{ file: 'src/a.ts', status: 'modified', added: 1, removed: 2, binary: false, isTest: false }],
+    truncated: 0,
+    ...over,
+  });
+
+  const commit = (over: Partial<RepoLogEntry> = {}): RepoLogEntry => ({
+    rev: 'a'.repeat(40),
+    shortRev: 'aaaaaaa',
+    at: 1_700_000_000_000,
+    author: '张三',
+    summary: 'init',
+    parentIds: [],
+    refs: [{ name: 'main', type: 'branch', isHead: true }],
+    ...over,
+  });
+
+  it('内容一字不差（只是新对象）→ 判为没变', () => {
+    expect(sameChanges(entriesResult(), entriesResult())).toBe(true);
+    expect(sameCommits([commit()], [commit()])).toBe(true);
+  });
+
+  it('变更清单：条数 / 状态 / 行数 / 原路径变了都算变', () => {
+    expect(sameChanges(entriesResult(), entriesResult({ entries: [] }))).toBe(false);
+    expect(
+      sameChanges(
+        entriesResult(),
+        entriesResult({
+          entries: [{ file: 'src/a.ts', status: 'added', added: 1, removed: 2, binary: false, isTest: false }],
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      sameChanges(
+        entriesResult(),
+        entriesResult({
+          entries: [{ file: 'src/a.ts', status: 'modified', added: 9, removed: 2, binary: false, isTest: false }],
+        }),
+      ),
+    ).toBe(false);
+    expect(sameChanges(entriesResult(), entriesResult({ branch: 'dev' }))).toBe(false);
+  });
+
+  it('提交历史：rev / 摘要 / refs / 父提交变了都算变', () => {
+    expect(sameCommits([commit()], [commit({ summary: 'feat: x' })])).toBe(false);
+    expect(sameCommits([commit()], [commit({ rev: 'b'.repeat(40), shortRev: 'bbbbbbb' })])).toBe(false);
+    expect(sameCommits([commit()], [commit({ refs: [] })])).toBe(false);
+    expect(sameCommits([commit()], [commit({ refs: [{ name: 'main', type: 'branch', isHead: false }] })])).toBe(false);
+    expect(sameCommits([commit()], [commit({ parentIds: ['c'.repeat(40)] })])).toBe(false);
+    expect(sameCommits([commit(), commit({ rev: 'b'.repeat(40) })], [commit({ rev: 'b'.repeat(40) }), commit()])).toBe(
+      false,
+    );
+  });
+
+  it('还没拉过（null / 空）时不会误判成「没变」', () => {
+    expect(sameChanges(null, entriesResult())).toBe(false);
+    expect(sameChanges(entriesResult(), null)).toBe(false);
+    expect(sameChanges(null, null)).toBe(true);
+    expect(sameCommits([], [commit()])).toBe(false);
+  });
+});
+
 describe('blame 的一行摘要', () => {
   it('作者短名过长时截断；找不到那一行返回 null（不猜）', () => {
     expect(shortAuthor('  张三  ')).toBe('张三');
@@ -75,9 +145,7 @@ describe('blame 的一行摘要', () => {
 
     const result = {
       file: 'src/a.ts',
-      lines: [
-        { line: 2, rev: 'r'.repeat(40), author: '张三', email: 'z@x', at: 1, summary: 'init' },
-      ],
+      lines: [{ line: 2, rev: 'r'.repeat(40), author: '张三', email: 'z@x', at: 1, summary: 'init' }],
     };
     expect(blameAt(result, 2)?.author).toBe('张三');
     expect(blameAt(result, 3)).toBeNull();
