@@ -34,6 +34,11 @@
   Windows only — other platforms fail loudly). Plain text editing only — no completion, diagnostics,
   formatting, or quick fixes; the split pane and historical snapshots stay read-only.
   **Works in share mode too** (unlike the four `git` write actions in Changes, which are local-only)
+- **File operations** (2026-10-10, see `FR/FR-0009-fr.md`): right-click a directory or file in the
+  file tree to **New file / New folder / Rename / Move to… / Duplicate…**, plus **Copy / Cut →
+  Paste here** and **drag & drop onto a folder** to move; right-clicking empty space in the tree
+  targets the project root. Renaming or moving **the file you have open** carries the tab, the editor
+  and the position memory along with it; an existing target is always refused (never overwritten).
 - Around the editor: file summary bar (exports / dependencies / dependents + commit history),
   a three-band density bar (code / comment / blank, click to jump), per-line blame view
   (`Ctrl/Cmd+Alt+B`), read-only diff overlay (working tree vs HEAD or a given rev)
