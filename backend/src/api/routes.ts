@@ -42,6 +42,7 @@ import type {
   ProjectTimeline,
   RegisterProjectRequest,
   RepoLogResult,
+  SearchMatch,
   SearchOptions,
   SearchResult,
 } from '../types';
@@ -735,7 +736,8 @@ export function createApp(
       return fail(c, 500, 'delete_failed', result.message);
     }
     // 删完就让索引立刻收敛（watcher 收不到 unlinkDir，目录删除否则会在树里留幽灵目录）
-    await project.onFileDeleted(rel).catch(() => undefined);
+    // 标成 api 来源：这是本页操作的结果，前端不该把它当「外部删除」（FR-0009 同款口径）
+    await project.withOrigin('api', () => project.onFileDeleted(rel)).catch(() => undefined);
     return c.json({ ok: true, path: rel, trashed: true });
   });
 
@@ -759,7 +761,7 @@ export function createApp(
     if ('status' in guard) return fail(c, guard.status, guard.error, guard.message);
     const result = await createFileEntry(guard.abs, body?.text ?? '');
     if (!result.ok) return fail(c, fsFailStatus(result.error), result.error, result.message);
-    await syncAfterWrite(project);
+    await project.withOrigin('api', () => syncAfterWrite(project));
     return c.json({ ok: true, path: rel, isDir: false, size: result.size, mtimeMs: result.mtimeMs });
   });
 
@@ -775,7 +777,7 @@ export function createApp(
     if ('status' in guard) return fail(c, guard.status, guard.error, guard.message);
     const result = await createDirEntry(guard.abs);
     if (!result.ok) return fail(c, fsFailStatus(result.error), result.error, result.message);
-    await syncAfterWrite(project);
+    await project.withOrigin('api', () => syncAfterWrite(project));
     return c.json({ ok: true, path: rel, isDir: true, size: 0, mtimeMs: 0 });
   });
 
@@ -806,7 +808,7 @@ export function createApp(
     if ('status' in toGuard) return fail(c, toGuard.status, toGuard.error, toGuard.message);
     const result = await renameEntry(fromGuard.abs, toGuard.abs);
     if (!result.ok) return fail(c, fsFailStatus(result.error), result.error, result.message);
-    await syncAfterWrite(project);
+    await project.withOrigin('api', () => syncAfterWrite(project));
     return c.json({ ok: true, from, to, isDir: result.isDir });
   });
 
@@ -835,7 +837,7 @@ export function createApp(
     if ('status' in toGuard) return fail(c, toGuard.status, toGuard.error, toGuard.message);
     const result = await copyEntry(fromGuard.abs, toGuard.abs);
     if (!result.ok) return fail(c, fsFailStatus(result.error), result.error, result.message);
-    await syncAfterWrite(project);
+    await project.withOrigin('api', () => syncAfterWrite(project));
     return c.json({ ok: true, from, to, isDir: result.isDir });
   });
 
@@ -1398,13 +1400,34 @@ export function createApp(
     const abort = new AbortController();
     return streamSSE(c, async (stream) => {
       stream.onAbort(() => abort.abort());
+      /**
+       * 合并小批：结果仍按文件产出，但每 ~60ms 才写一次 SSE ——
+       * 大仓搜索动辄上千个命中文件，逐文件写会让 SSE 与前端被几千个小包打满。
+       */
+      const CHUNK_FLUSH_MS = 60;
+      const pending: SearchMatch[] = [];
+      let pendingTruncated = false;
+      let chunkTimer: NodeJS.Timeout | null = null;
+      const flushChunks = () => {
+        if (chunkTimer) {
+          clearTimeout(chunkTimer);
+          chunkTimer = null;
+        }
+        if (!pending.length) return;
+        const batch = pending.splice(0, pending.length);
+        void stream.writeSSE({
+          event: 'chunk',
+          data: JSON.stringify({ matches: batch.map((m) => ({ ...m, isTest: isTestFile(m.file) })), truncated: pendingTruncated }),
+        });
+      };
       try {
         const result = await project.searchText(query, body?.options ?? {}, abort.signal, (matches, truncated) => {
-          void stream.writeSSE({
-            event: 'chunk',
-            data: JSON.stringify({ matches: matches.map((m) => ({ ...m, isTest: isTestFile(m.file) })), truncated }),
-          });
+          pending.push(...matches);
+          if (truncated) pendingTruncated = true;
+          if (chunkTimer) return;
+          chunkTimer = setTimeout(flushChunks, CHUNK_FLUSH_MS);
         });
+        flushChunks();
         await stream.writeSSE({
           event: 'done',
           data: JSON.stringify({

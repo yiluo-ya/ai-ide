@@ -64,6 +64,17 @@
   background: var(--row-hover);
 }
 
+/* N-δ：命中导航的「当前命中」（与搜索面板同一游标） */
+.fs-hit.current {
+  background: var(--row-active);
+}
+
+.fs-cursor {
+  margin-left: 8px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .fs-line {
   flex: none;
   min-width: 30px;

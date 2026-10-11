@@ -19,6 +19,7 @@ import { useGuideStore } from './guideState';
 import { translate } from './i18n';
 import { flushSnapshot, scheduleSnapshotWrite } from './readSnapshot';
 import { formatLineRange, formatSnippet, type SnippetInput } from './share';
+import type { IndexChange } from '../../shared/types';
 
 export interface RevealRequest {
   file: string;
@@ -46,6 +47,18 @@ export interface SearchHit {
   /** 该文件是测试文件（N11 过滤用，后端标注）。 */
   isTest?: boolean;
   matches: Array<{ line: number; col: number; endCol: number; lineText: string }>;
+}
+
+/**
+ * 命中展平（顺序 = `searchHits` 里文件与行出现的顺序）：F3 导航与「第 k / 共 n」共用同一份顺序，
+ * 免得两处各算一套、序号对不上。
+ */
+export function flatSearchHits(hits: SearchHit[]): Array<{ file: string; line: number; col: number }> {
+  const flat: Array<{ file: string; line: number; col: number }> = [];
+  for (const hit of hits) {
+    for (const m of hit.matches) flat.push({ file: hit.file, line: m.line, col: m.col });
+  }
+  return flat;
 }
 
 /** 打开过的标签（N19）：上限 8，同文件合并、LRU 淘汰。 */
@@ -125,6 +138,11 @@ interface State {
   searchHits: SearchHit[];
   searchBusy: boolean;
   searchTruncated: boolean;
+  /**
+   * 命中导航游标：当前命中在 `flatSearchHits(searchHits)` 里的下标（-1 = 还没导航过）。
+   * 点列表里某一条也会同步它，所以按 F3 时是从「你刚才看的那条」继续走。
+   */
+  searchCursor: number;
   /** 常驻引用面板（N4）。 */
   references: RefsState | null;
   referencesBusy: boolean;
@@ -193,6 +211,9 @@ interface State {
   refreshSymbols: () => Promise<void>;
   runSearch: (query: string, options: Record<string, unknown>) => Promise<void>;
   clearSearch: () => void;
+  /** F3 / Shift+F3：在命中之间前后走（到底环绕）。 */
+  stepSearchHit: (delta: 1 | -1) => void;
+  setSearchCursor: (index: number) => void;
   loadReferences: (file: string, line: number, col: number) => Promise<void>;
   loadCalls: (file: string, line: number, col: number) => Promise<void>;
   setCallDirection: (direction: CallDirection) => void;
@@ -274,10 +295,10 @@ const LOCAL_DELETE_WINDOW_MS = 10_000;
 /**
  * FR-0009：我们自己刚**改名 / 移动走**的旧路径。
  *
- * 后端写完后会 `verify()` 对账，把旧路径当删除推一条 `file-deleted` —— 而那条消息是
- * 异步（SSE）到的，很可能在我们 `openFileAt(新路径)` **之后**才到，于是刚跟随重开的
- * 编辑器又被当成「文件被删了」清空（实测现象：重命名打开中的文件后编辑器一片空白）。
- * 落一条窗口，让这段窗口内的删除事件不当作外部删除。
+ * 两条删除事件路径都要防：
+ * ① 写接口收敛索引时后端直接推的删除——现在带 `origin: 'api'`，前端按来源直接短路（见下）；
+ * ② watcher 兜底（chokidar 之后才发现旧路径消失）——那条没有来源标记，只能靠这张窗口表认领。
+ * 不认领的后果：刚跟随重开的编辑器又被当成「文件被删了」清空（实测现象：一片空白）。
  */
 const localMoves = new Map<string, number>();
 const LOCAL_MOVE_WINDOW_MS = 10_000;
@@ -339,6 +360,8 @@ export function showToast(text: string | null, ok = true) {
 }
 /** N12：正在进行的搜索请求（新一次搜索 / 停止按钮会中止它）。 */
 let searchAbort: AbortController | null = null;
+/** 搜索结果的渲染节流（ms）：结果仍边出边看，但不必每个文件都重渲染一次列表。 */
+const SEARCH_FLUSH_MS = 100;
 
 // -------------------------------------------- 本机持久化（N13 / Q4：不写被读目录）
 
@@ -535,6 +558,7 @@ export const useStore = create<State>((set, get) => ({
   searchHits: [],
   searchBusy: false,
   searchTruncated: false,
+  searchCursor: -1,
   references: null,
   referencesBusy: false,
   calls: null,
@@ -649,16 +673,27 @@ export const useStore = create<State>((set, get) => ({
             // 若那一次撞在扫描窗口里拿到空树 / 半棵树，用户会一直盯着空白面板不自动恢复。
             void get().loadTree();
           }
-        } else if (event.type === 'file-changed' || event.type === 'file-deleted') {
+        } else if (event.type === 'changes') {
+          // 一批变更（一次 watcher flush 或一次写接口对账）：树只刷一次、着色只失效一次
+          const payload = event as { origin?: string; changes?: IndexChange[] };
+          const changes = payload.changes ?? [];
+          if (!changes.length) return;
           void get().loadTree();
-          set((s) => ({ highlightsToken: s.highlightsToken + 1 }));
-          const changed = typeof event.file === 'string' ? event.file : null;
-          if (!changed || changed !== get().openFile) return;
-          if (event.type === 'file-deleted') {
-            // 本地刚改名 / 移动走：旧路径的删除事件是我们自己造成的，跟随逻辑已经处理完了
-            const movedAt = localMoves.get(changed);
+          if (changes.some((c) => c.kind === 'changed')) {
+            set((s) => ({ highlightsToken: s.highlightsToken + 1 }));
+          }
+          const open = get().openFile;
+          if (!open) return;
+          const mine = changes.find((c) => c.file === open);
+          if (!mine) return;
+          if (mine.kind === 'deleted') {
+            // 本页写接口（删除 / 改名 / 移动）收敛索引时也会推删除：对应的交互自己会给编辑器收尾，
+            // 这里不再当「外部删除」清空（FR-0009 的根因修复，不再只靠时间窗认领）
+            if (payload.origin === 'api') return;
+            // watcher 兜底路径：本地刚改名 / 移动走的旧路径（跟随逻辑已经处理完了）
+            const movedAt = localMoves.get(open);
             if (movedAt != null && Date.now() - movedAt <= LOCAL_MOVE_WINDOW_MS) {
-              localMoves.delete(changed);
+              localMoves.delete(open);
               return;
             }
             // 文件被（外部）删了：编辑器里再留着就是幽灵内容
@@ -666,8 +701,8 @@ export const useStore = create<State>((set, get) => ({
               window.clearTimeout(saveTimer);
               saveTimer = null;
             }
-            unsavedEdits.delete(changed);
-            lastWrites.delete(changed);
+            unsavedEdits.delete(open);
+            lastWrites.delete(open);
             set({
               openFile: null,
               fileContent: '',
@@ -678,17 +713,17 @@ export const useStore = create<State>((set, get) => ({
               symbols: [],
             });
             // 自己发起的删除已经给过「已移到回收站」的回执，不再叠一句
-            const at = localDeletes.get(changed);
+            const at = localDeletes.get(open);
             if (at == null || Date.now() - at > LOCAL_DELETE_WINDOW_MS) {
-              showToast(translate('editor.goneOnDisk', { file: changed }), false);
+              showToast(translate('editor.goneOnDisk', { file: open }), false);
             }
-          } else if (isSelfWrite(changed)) {
+          } else if (isSelfWrite(open)) {
             // 自己刚保存触发的变更：磁盘上就是自己刚写的内容，重载只会打断编辑（清 undo、跳光标）
-          } else if (unsavedEdits.has(changed) || get().fileContent !== get().savedText) {
+          } else if (unsavedEdits.has(open) || get().fileContent !== get().savedText) {
             // 本地有没落盘的改动，磁盘又被外部改了：不覆盖，交给用户决定（FR-0008 决策 5）
-            set({ conflict: { file: changed, diskMtimeMs: null } });
+            set({ conflict: { file: open, diskMtimeMs: null } });
           } else {
-            void get().openFileAt(changed);
+            void get().openFileAt(open);
           }
         }
       });
@@ -916,17 +951,32 @@ export const useStore = create<State>((set, get) => ({
   async runSearch(query, options) {
     const id = get().projectId;
     if (!id || !query.trim()) {
-      set({ searchHits: [], searchTruncated: false });
+      set({ searchHits: [], searchTruncated: false, searchCursor: -1 });
       return;
     }
     // N12：新一次搜索左掉上一次未完成的请求
     searchAbort?.abort();
     searchAbort = new AbortController();
     const signal = searchAbort.signal;
-    set({ searchBusy: true, searchHits: [], searchTruncated: false });
+    set({ searchBusy: true, searchHits: [], searchTruncated: false, searchCursor: -1 });
     // N12：结果边出边看——每个文件分组到达就拼进列表（同文件追加）
+    // 渲染节流：大仓搜索时上千个文件分组，逐个 set 会卡住主线程
     const grouped = new Map<string, SearchHit>();
-    const flush = () => set({ searchHits: [...grouped.values()] });
+    let flushTimer: number | null = null;
+    const flushNow = () => {
+      if (flushTimer != null) {
+        window.clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      set({ searchHits: [...grouped.values()] });
+    };
+    const flush = () => {
+      if (flushTimer != null) return;
+      flushTimer = window.setTimeout(() => {
+        flushTimer = null;
+        set({ searchHits: [...grouped.values()] });
+      }, SEARCH_FLUSH_MS);
+    };
     try {
       const summary = await api.searchStream(
         id,
@@ -951,10 +1001,12 @@ export const useStore = create<State>((set, get) => ({
         signal,
       );
       set({ searchTruncated: summary.truncated, searchBusy: false });
+      flushNow();
       rememberSearch(id, query);
       set({ searchHistory: readSearchHistory(id) });
     } catch (e) {
       // 主动取消不算错误（已收到的结果保留，用户可以接着看）
+      flushNow();
       if (signal.aborted) set({ searchBusy: false });
       else set({ searchBusy: false, error: e instanceof Error ? e.message : String(e) });
     }
@@ -965,6 +1017,25 @@ export const useStore = create<State>((set, get) => ({
     searchAbort?.abort();
     searchAbort = null;
     set({ searchBusy: false });
+  },
+
+  /**
+   * N-δ：命中导航（F3 / Shift+F3）——按展开顺序在命中之间前后走，到底后环绕。
+   * 还没导航过（-1）时：F3 从第一条开始，Shift+F3 从最后一条开始。
+   */
+  stepSearchHit(delta) {
+    const flat = flatSearchHits(get().searchHits);
+    if (!flat.length) return;
+    const cur = get().searchCursor;
+    const next = cur < 0 ? (delta > 0 ? 0 : flat.length - 1) : (cur + delta + flat.length) % flat.length;
+    set({ searchCursor: next });
+    const hit = flat[next];
+    void get().openFileAt(hit.file, hit.line, hit.col);
+  },
+
+  /** 点列表里某一条时同步游标（之后按 F3 就从这一条继续）。 */
+  setSearchCursor(index) {
+    set({ searchCursor: index });
   },
 
   /** N14：设置搜索范围（目录前缀）。 */
@@ -1039,7 +1110,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   clearSearch() {
-    set({ searchHits: [], searchTruncated: false });
+    set({ searchHits: [], searchTruncated: false, searchCursor: -1 });
   },
 
   /** 常驻引用面板：查当前光标的引用（N4，含声明）。 */

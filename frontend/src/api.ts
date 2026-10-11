@@ -466,7 +466,7 @@ export function subscribeEvents(
       /* 忽略坏事件 */
     }
   };
-  for (const type of ['status', 'file-changed', 'file-deleted', 'index-ready']) {
+  for (const type of ['status', 'changes', 'index-ready']) {
     source.addEventListener(type, handler as EventListener);
   }
   return () => source.close();

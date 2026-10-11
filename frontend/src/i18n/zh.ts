@@ -255,6 +255,13 @@ export const zh: Record<string, string> = {
   'diff.unavailable': '这个差异读不到（{reason}）。',
   'diff.error': '读取差异失败：{message}',
   'diff.truncated': '差异过长，只显示了前面一部分。',
+  // 2026-10-11 结构化跳转（与 DiffPanel 的 hunk 计数 / 上一处下一处一一对应）
+  'diff.count': '第 {k} / 共 {n} 处变更',
+  'diff.prev': '上一处 ⌃',
+  'diff.next': '下一处 ⌄',
+  'diff.prevTitle': '上一处变更（Shift+F3）',
+  'diff.nextTitle': '下一处变更（F3）',
+  'diff.keysHint': 'F3 下一处 · Shift+F3 上一处',
 
   'summary.title': '摘要',
   'summary.exported': '导出 {n} 个符号',
@@ -835,6 +842,8 @@ export const zh: Record<string, string> = {
   'side.searching': '搜索中…（可随时停止）',
   'side.hitsSummary': '{total} 处命中，分布在 {files} 个文件',
   'side.hitsShown': '（显示 {n} 个）',
+  'side.hitCursor': '第 {k} / 共 {n} 处',
+  'side.nextHitTitle': '下一个命中（F3）· 上一个（Shift+F3）',
   'side.startHint': '按 Enter 或点「搜索」开始',
   'side.noHits': '无命中',
   'side.truncated': '（已截断，请缩小范围）',

@@ -427,6 +427,15 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
+      // N-δ：命中导航 —— 有搜索结果时 F3 / Shift+F3 在命中之间前后走（没结果就不抢这个键）
+      if (e.key === 'F3' && !mod && !e.altKey) {
+        const s = useStore.getState();
+        if (s.searchHits.length) {
+          e.preventDefault();
+          s.stepSearchHit(e.shiftKey ? -1 : 1);
+        }
+        return;
+      }
       if (mod && e.altKey && key === 'b') {
         // G7.3：切换「整文件 blame 视图」；无 git → 只在状态栏轻提示一句，不弹红
         e.preventDefault();
@@ -1265,6 +1274,7 @@ export default function App() {
         projectId={store.projectId}
         tree={store.tree}
         recent={recentFiles}
+        currentFile={store.openFile}
         onClose={() => setQuick(null)}
         onOpenFile={jump}
       />

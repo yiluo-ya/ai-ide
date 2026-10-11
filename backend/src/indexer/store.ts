@@ -4,6 +4,7 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type {
   FileNode,
+  IndexChange,
   IndexEvent,
   IndexStatus,
   LangId,
@@ -53,6 +54,11 @@ const MIN_PARALLEL_FILES = 8;
 const IO_CONCURRENCY = 16;
 /** 快照写入防抖（增量变更后合并写盘，P4）。 */
 const SNAPSHOT_DEBOUNCE_MS = 3000;
+/**
+ * 变更事件合并窗口（ms）：一次对账 / 一批 watcher 事件里的多条变更合成一条 SSE。
+ * 取 30ms——比 watcher 自己的 300ms 防抖小一个量级，不改变「改完很快看到」的手感。
+ */
+const CHANGE_FLUSH_MS = 30;
 
 /** 包清单类文件：变更后需要重读项目元信息。 */
 const META_FILES = new Set(['package.json', 'go.mod', 'pyproject.toml', 'pom.xml', 'Cargo.toml']);
@@ -165,6 +171,11 @@ export class ProjectIndex {
   /** 进行中的扫描：并发调用复用同一次，避免重复读盘与互相覆盖（见 scan()）。 */
   private scanInFlight: Promise<void> | null = null;
   private listeners = new Set<(e: IndexEvent) => void>();
+  /** 待推送的变更批：同一文件在一个窗口内合并（deleted 优先），窗口结束合成一条 'changes'。 */
+  private readonly pendingChanges = new Map<string, { kind: 'changed' | 'deleted'; origin: 'watch' | 'api' }>();
+  private changesTimer: NodeJS.Timeout | null = null;
+  /** 记变更时用的来源；写接口用 `withOrigin('api', ...)` 包住收敛过程。 */
+  private changeOrigin: 'watch' | 'api' = 'watch';
 
   constructor(
     id: string,
@@ -194,6 +205,52 @@ export class ProjectIndex {
       } catch {
         /* 事件消费者异常不影响索引 */
       }
+    }
+  }
+
+  /**
+   * 以指定来源执行一段索引收敛：期间记录的变更都标成该来源。
+   * 写接口（routes）用它把「本页操作引起的收敛」与「外部变化」分开（FR-0009）。
+   */
+  async withOrigin<T>(origin: 'watch' | 'api', fn: () => Promise<T>): Promise<T> {
+    const prev = this.changeOrigin;
+    this.changeOrigin = origin;
+    try {
+      return await fn();
+    } finally {
+      this.changeOrigin = prev;
+    }
+  }
+
+  /**
+   * 记一条待推送变更（不立即 emit）。
+   * 同一文件在一个窗口内只留一条：后到的 changed 不会盖掉已记下的 deleted
+   * （删除后再出现的写入要重新走一次 onFileChanged，那条会带 changed 语义进来）。
+   */
+  private recordChange(file: string, kind: 'changed' | 'deleted') {
+    const prev = this.pendingChanges.get(file);
+    if (prev?.kind === 'deleted' && kind === 'changed') return;
+    this.pendingChanges.set(file, { kind, origin: this.changeOrigin });
+    if (this.changesTimer) return;
+    this.changesTimer = setTimeout(() => {
+      this.changesTimer = null;
+      this.flushChanges();
+    }, CHANGE_FLUSH_MS);
+    this.changesTimer.unref?.();
+  }
+
+  /** 窗口结束：按来源分组发出 'changes'（同一批里混了两种来源就发两条）。 */
+  private flushChanges() {
+    if (!this.pendingChanges.size) return;
+    const byOrigin = new Map<'watch' | 'api', IndexChange[]>();
+    for (const [file, c] of this.pendingChanges) {
+      const list = byOrigin.get(c.origin) ?? [];
+      list.push({ file, kind: c.kind });
+      byOrigin.set(c.origin, list);
+    }
+    this.pendingChanges.clear();
+    for (const [origin, changes] of byOrigin) {
+      this.emit({ type: 'changes', origin, version: this.indexVersion, changes });
     }
   }
 
@@ -889,7 +946,7 @@ export class ProjectIndex {
       this.skipLog.delete(rel);
       this.rebuildClassMap();
       this.indexVersion++;
-      this.emit({ type: 'file-changed', file: rel });
+      this.recordChange(rel, 'changed');
       this.schedulePersist();
       return;
     }
@@ -899,7 +956,7 @@ export class ProjectIndex {
       this.skipLog.delete(rel);
       const entry = this.entries.get(rel);
       if (entry) entry.mtimeMs = Date.now();
-      this.emit({ type: 'file-changed', file: rel });
+      this.recordChange(rel, 'changed');
       this.schedulePersist();
       return;
     }
@@ -921,7 +978,7 @@ export class ProjectIndex {
     this.status.filesIndexed = this.files.size;
     this.status.filesTotal = Math.max(this.status.filesTotal, this.files.size);
     this.status.indexedAt = Date.now();
-    this.emit({ type: 'file-changed', file: rel });
+    this.recordChange(rel, 'changed');
     this.schedulePersist();
   }
 
@@ -948,7 +1005,7 @@ export class ProjectIndex {
     this.rebuildClassMap();
     this.indexVersion++;
     this.status.filesIndexed = this.files.size;
-    this.emit({ type: 'file-deleted', file: rel });
+    this.recordChange(rel, 'deleted');
     this.schedulePersist();
   }
 
@@ -1061,6 +1118,9 @@ export class ProjectIndex {
   dispose(): void {
     if (this.persistTimer) clearTimeout(this.persistTimer);
     this.persistTimer = null;
+    if (this.changesTimer) clearTimeout(this.changesTimer);
+    this.changesTimer = null;
+    this.pendingChanges.clear();
   }
 
   /**

@@ -6,6 +6,8 @@
  *    项目相关的键（搜索历史 / 位置 / 书签 / map-marks）仍归 state.ts / mapState.ts 自己管。
  * 2) 读取一律容错：坏 JSON、越界数字、未知枚举都回落默认，绝不让一条脏数据把界面卡住。
  * 3) 展示层只认 CSS 变量与 `data-theme`（applyPrefs），组件订阅 subscribePrefs。
+ * 4) 结构带版本号：字段口径变了就加一条 MIGRATIONS + 把 PREFS_VERSION 加一，
+ *    老数据在 readStored() 里逐级迁移后回写（见 MIGRATIONS）。
  */
 
 import { useSyncExternalStore } from 'react';
@@ -15,6 +17,8 @@ export type ThemeMode = 'dark' | 'light' | 'system';
 export type Locale = 'zh' | 'en';
 
 export interface Prefs {
+  /** 结构版本：读存量数据时用它选迁移链的起点（见 MIGRATIONS）。 */
+  version: number;
   theme: ThemeMode;
   fontSize: number;
   sidebarWidth: number;
@@ -34,6 +38,8 @@ export interface Prefs {
 }
 
 export const PREFS_KEY = 'wcr:prefs';
+/** 当前偏好结构版本：以后改字段口径（改名 / 改语义 / 删字段）就加一，并在 MIGRATIONS 补一条。 */
+export const PREFS_VERSION = 1;
 export const FONT_SIZE_MIN = 12;
 export const FONT_SIZE_MAX = 18;
 export const SIDEBAR_MIN = 240;
@@ -42,6 +48,7 @@ export const SIDEBAR_MAX = 560;
 export const TAB_SIZES = [2, 4, 8] as const;
 
 export const DEFAULT_PREFS: Prefs = {
+  version: PREFS_VERSION,
   theme: 'dark',
   fontSize: 13,
   sidebarWidth: 320,
@@ -63,13 +70,24 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
   return Math.min(max, Math.max(min, Math.round(n)));
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 解析 version 字段：非负整数；缺失 / 非法回落 fallback（迁移用 0，收敛已有数据用当前版本）。 */
+function normalizeVersion(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+}
+
 /** 把任意来源的原始值收敛成合法偏好（容错读的唯一入口）。 */
 function coerce(raw: unknown): Prefs {
-  const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const src = isPlainObject(raw) ? raw : {};
   const theme: ThemeMode =
     src.theme === 'light' || src.theme === 'dark' || src.theme === 'system' ? src.theme : DEFAULT_PREFS.theme;
   const locale: Locale = src.locale === 'en' ? 'en' : 'zh';
   return {
+    version: normalizeVersion(src.version, PREFS_VERSION),
     theme,
     locale,
     fontSize: clampInt(src.fontSize, FONT_SIZE_MIN, FONT_SIZE_MAX, DEFAULT_PREFS.fontSize),
@@ -83,14 +101,74 @@ function coerce(raw: unknown): Prefs {
   };
 }
 
-function readStored(): Prefs {
+/**
+ * 迁移链：键 = 「从哪个版本升」，值 = 把该版本的原始数据搬到下一版。
+ *
+ * 纪律：以后改字段口径（改名 / 改语义 / 删字段）就在这里加一条，并把 PREFS_VERSION 加一。
+ * 例（升到 v2 时）：
+ *   MIGRATIONS[1] = (raw) => { const o = raw as Record<string, unknown>; return { ...o, fontSize: o.editorFontSize }; };
+ * 迁移函数只管搬字段，类型收敛仍归 coerce()；抛异常由 migrate() 兜成默认值。
+ */
+const MIGRATIONS: Record<number, (raw: unknown) => unknown> = {
+  // v0 → v1：没有 version 键的存量数据，字段口径与 v1 一致，原样保留（坏数据换成默认值）。
+  0: (raw) => (isPlainObject(raw) ? raw : { ...DEFAULT_PREFS }),
+};
+
+/** 存量数据声明的版本：缺失 / 非法按 0（迁移链起点）处理。 */
+function storedVersionOf(raw: unknown): number {
+  return isPlainObject(raw) ? normalizeVersion(raw.version, 0) : 0;
+}
+
+/**
+ * 把存量数据升到当前版本：从数据声明的版本起逐级跑 MIGRATIONS，末尾补上 version。
+ * 已是最新（或来自更高版本，可能是被新版写过）则原样返回且 changed=false，不触发回写。
+ */
+function migrate(raw: unknown): { data: unknown; changed: boolean } {
+  let version = storedVersionOf(raw);
+  if (version >= PREFS_VERSION) return { data: raw, changed: false };
+  let data: unknown = raw;
+  while (version < PREFS_VERSION) {
+    const step = MIGRATIONS[version];
+    if (step) {
+      try {
+        data = step(data);
+      } catch {
+        data = { ...DEFAULT_PREFS };
+        break;
+      }
+    }
+    version += 1;
+  }
+  const base = isPlainObject(data) ? data : { ...DEFAULT_PREFS };
+  return { data: { ...base, version: PREFS_VERSION }, changed: true };
+}
+
+/** 把偏好写回 localStorage（失败忽略：隐私模式 / 配额满不该打断阅读）。 */
+function writeBack(data: unknown): void {
   try {
-    const raw = window.localStorage.getItem(PREFS_KEY);
-    if (!raw) return { ...DEFAULT_PREFS };
-    return coerce(JSON.parse(raw) as unknown);
+    window.localStorage.setItem(PREFS_KEY, JSON.stringify(data));
+  } catch {
+    /* 忽略 */
+  }
+}
+
+function readStored(): Prefs {
+  let raw: string | null = null;
+  try {
+    raw = window.localStorage.getItem(PREFS_KEY);
   } catch {
     return { ...DEFAULT_PREFS };
   }
+  if (!raw) return { ...DEFAULT_PREFS };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ...DEFAULT_PREFS }; // 坏 JSON：回落默认，不回写（别拿垃圾盖掉可能还能救的数据）
+  }
+  const { data, changed } = migrate(parsed);
+  if (changed) writeBack(data);
+  return coerce(data);
 }
 
 let current: Prefs = readStored();
@@ -145,11 +223,7 @@ function notify(): void {
 /** 合并保存一个 patch：收敛 → 落盘 → 应用 → 通知订阅者。 */
 export function savePrefs(patch: Partial<Prefs>): Prefs {
   current = coerce({ ...current, ...patch });
-  try {
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify(current));
-  } catch {
-    /* 隐私模式 / 配额满：本次只用内存值，不打断阅读 */
-  }
+  writeBack(current);
   applyPrefs(current);
   notify();
   return current;

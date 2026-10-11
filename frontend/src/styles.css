@@ -1074,6 +1074,17 @@ kbd {
   background: var(--row-hover);
 }
 
+/* N-δ：命中导航的「当前命中」（F3 / Shift+F3 或点击列表同步） */
+.search-hit.current {
+  background: var(--row-active);
+}
+
+.hit-cursor {
+  margin-left: 8px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .line-num {
   flex: none;
   min-width: 34px;

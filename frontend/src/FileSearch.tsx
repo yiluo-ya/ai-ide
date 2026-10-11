@@ -7,7 +7,7 @@
  * 独立的「搜索」面板保留原样，收在侧栏「更多 ▾」里（要历史 / 目录筛选 / 全屏时用那个）。
  */
 import { useEffect, useState } from 'react';
-import { useStore } from './state';
+import { flatSearchHits, useStore } from './state';
 import { useI18n } from './i18n';
 import './filesearch.css';
 
@@ -29,6 +29,9 @@ export function FileSearch({
   const hits = useStore((s) => s.searchHits);
   const busy = useStore((s) => s.searchBusy);
   const truncated = useStore((s) => s.searchTruncated);
+  // N-δ：命中导航游标（F3 / Shift+F3 与搜索面板共用同一份）
+  const cursor = useStore((s) => s.searchCursor);
+  const setSearchCursor = useStore((s) => s.setSearchCursor);
   /** 已经发出去检索的那个词；null = 还没搜（输入不足长或刚清空）。 */
   const [searched, setSearched] = useState<string | null>(null);
   const trimmed = query.trim();
@@ -50,6 +53,15 @@ export function FileSearch({
 
   const total = hits.reduce((n, h) => n + h.matches.length, 0);
   const shown = hits.slice(0, MAX_FILES);
+  // 命中序号 / 高亮与搜索面板同一口径（展平顺序 + 同一个游标）
+  const flat = flatSearchHits(hits);
+  const indexOf = new Map<string, number>();
+  flat.forEach((h, i) => {
+    const key = `${h.file}:${h.line}:${h.col}`;
+    if (!indexOf.has(key)) indexOf.set(key, i);
+  });
+  const currentKey =
+    cursor >= 0 && flat[cursor] ? `${flat[cursor].file}:${flat[cursor].line}:${flat[cursor].col}` : null;
 
   return (
     <div className="file-search">
@@ -58,6 +70,11 @@ export function FileSearch({
           <span>
             {busy ? t('search.busy') : total === 0 ? t('search.noHit') : t('search.hits', { total, files: hits.length })}
             {truncated && !busy && t('search.truncated')}
+            {currentKey && !busy && (
+              <span className="fs-cursor" title={t('side.nextHitTitle')}>
+                {t('side.hitCursor', { k: cursor + 1, n: total })}
+              </span>
+            )}
           </span>
           {busy && (
             <button className="btn ghost small" onClick={() => useStore.getState().cancelSearch()} title={t('search.stopTitle')}>
@@ -73,17 +90,24 @@ export function FileSearch({
                 <span className="fs-more">+{hit.matches.length - MAX_HITS_PER_FILE}</span>
               )}
             </div>
-            {hit.matches.slice(0, MAX_HITS_PER_FILE).map((m, i) => (
-              <button
-                key={`${m.line}:${m.col}:${i}`}
-                className="fs-hit"
-                title={`${hit.file}:${m.line}:${m.col}`}
-                onClick={() => onOpen(hit.file, m.line, m.col)}
-              >
-                <span className="fs-line">{m.line}</span>
-                <span className="fs-text">{m.lineText.trim().slice(0, 120)}</span>
-              </button>
-            ))}
+            {hit.matches.slice(0, MAX_HITS_PER_FILE).map((m, i) => {
+              const key = `${hit.file}:${m.line}:${m.col}`;
+              return (
+                <button
+                  key={`${key}:${i}`}
+                  className={`fs-hit${key === currentKey ? ' current' : ''}`}
+                  title={key}
+                  onClick={() => {
+                    const idx = indexOf.get(key);
+                    if (idx != null) setSearchCursor(idx);
+                    onOpen(hit.file, m.line, m.col);
+                  }}
+                >
+                  <span className="fs-line">{m.line}</span>
+                  <span className="fs-text">{m.lineText.trim().slice(0, 120)}</span>
+                </button>
+              );
+            })}
           </div>
         ))}
         {!busy && hits.length > MAX_FILES && (

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * prefs（P24 / Q14）：容错读 + 单键写 + 主题解析。
+ * prefs（P24 / Q14）：容错读 + 单键写 + 主题解析 + 版本迁移。
  *
  * prefs.ts 在模块顶层读一次 localStorage，所以每个用例都 `vi.resetModules()` 后重新 import，
- * 才能验证「存量数据 → 首次读取」的回落行为。
+ * 才能验证「存量数据 → 首次读取」的回落 / 迁移行为。
  */
 async function loadPrefsModule() {
   return await import('./prefs');
@@ -35,10 +35,11 @@ describe('prefs', () => {
     expect(loadPrefs()).toEqual(DEFAULT_PREFS);
   });
 
-  it('坏 JSON 回落默认值而不抛异常', async () => {
+  it('坏 JSON 回落默认值而不抛异常，也不回写（不覆盖可能还能救的原文）', async () => {
     window.localStorage.setItem('wcr:prefs', '{ not json');
     const { loadPrefs, DEFAULT_PREFS } = await loadPrefsModule();
     expect(loadPrefs()).toEqual(DEFAULT_PREFS);
+    expect(window.localStorage.getItem('wcr:prefs')).toBe('{ not json');
   });
 
   it('合法值生效；越界数字与未知枚举被收敛', async () => {
@@ -46,8 +47,9 @@ describe('prefs', () => {
       'wcr:prefs',
       JSON.stringify({ theme: 'light', fontSize: 99, sidebarWidth: -5, locale: 'fr' }),
     );
-    const { loadPrefs } = await loadPrefsModule();
+    const { loadPrefs, PREFS_VERSION } = await loadPrefsModule();
     expect(loadPrefs()).toEqual({
+      version: PREFS_VERSION,
       theme: 'light',
       fontSize: 18,
       sidebarWidth: 240,
@@ -82,10 +84,11 @@ describe('prefs', () => {
     expect(mod.loadPrefs().fontSize).toBe(12); // Number(null) = 0 → 夹到下限
   });
 
-  it('存的是数组 / 字符串等非对象值时也回落默认', async () => {
+  it('存的是数组 / 字符串等非对象值时回落默认，并作为 v0 数据迁移回写', async () => {
     window.localStorage.setItem('wcr:prefs', JSON.stringify(['light', 20]));
-    const { loadPrefs, DEFAULT_PREFS } = await loadPrefsModule();
+    const { loadPrefs, DEFAULT_PREFS, PREFS_KEY } = await loadPrefsModule();
     expect(loadPrefs()).toEqual(DEFAULT_PREFS);
+    expect(JSON.parse(window.localStorage.getItem(PREFS_KEY) ?? 'null')).toEqual(DEFAULT_PREFS);
   });
 
   it('savePrefs 只合并 patch，其它字段不动，并只写一个 localStorage 键', async () => {
@@ -155,5 +158,72 @@ describe('prefs', () => {
     off();
     savePrefs({ fontSize: 15 });
     expect(seen).toEqual([14]);
+  });
+
+  // ---- 版本迁移（Prefs.version / MIGRATIONS）----
+
+  it('无 version 的存量数据按 0 迁移到当前版本，并回写 localStorage', async () => {
+    window.localStorage.setItem('wcr:prefs', JSON.stringify({ theme: 'light', fontSize: 16 }));
+    const { loadPrefs, PREFS_VERSION, PREFS_KEY } = await loadPrefsModule();
+
+    expect(loadPrefs().version).toBe(PREFS_VERSION);
+    expect(loadPrefs().theme).toBe('light'); // 迁移不动老字段
+    const stored = JSON.parse(window.localStorage.getItem(PREFS_KEY) ?? 'null');
+    expect(stored).toMatchObject({ version: PREFS_VERSION, theme: 'light', fontSize: 16 });
+  });
+
+  it('已是最新版本的数据不再迁移，也不回写 localStorage', async () => {
+    const { PREFS_VERSION } = await loadPrefsModule();
+    vi.resetModules();
+    // unknownField 只存在于 raw 里，一旦被回写就会被 coerce 丢掉 —— 拿它当「是否回写」的探针
+    const stored = { version: PREFS_VERSION, theme: 'light', unknownField: 'keep-me' };
+    window.localStorage.setItem('wcr:prefs', JSON.stringify(stored));
+
+    const { loadPrefs } = await loadPrefsModule();
+    expect(loadPrefs().version).toBe(PREFS_VERSION);
+    expect(loadPrefs().theme).toBe('light');
+    expect(JSON.parse(window.localStorage.getItem('wcr:prefs') ?? 'null')).toEqual(stored);
+  });
+
+  it('比当前版本更新的数据原样读取（不降级、不重写）', async () => {
+    const stored = { version: 99, theme: 'light', unknownField: 'x' };
+    window.localStorage.setItem('wcr:prefs', JSON.stringify(stored));
+
+    const { loadPrefs } = await loadPrefsModule();
+    expect(loadPrefs().theme).toBe('light');
+    expect(JSON.parse(window.localStorage.getItem('wcr:prefs') ?? 'null')).toEqual(stored);
+  });
+
+  it('字段类型全不对的存量数据迁移后仍回落默认（coerce 兜住）', async () => {
+    window.localStorage.setItem(
+      'wcr:prefs',
+      JSON.stringify({ theme: 42, fontSize: {}, wrap: 'yes', tabSize: 'big', minimap: 'no' }),
+    );
+    const { loadPrefs, DEFAULT_PREFS } = await loadPrefsModule();
+    expect(loadPrefs()).toEqual(DEFAULT_PREFS);
+  });
+
+  it('迁移后 coerce 仍能补齐缺失字段（老数据只存了一个 theme）', async () => {
+    window.localStorage.setItem('wcr:prefs', JSON.stringify({ theme: 'light' }));
+    const { loadPrefs, DEFAULT_PREFS, PREFS_VERSION } = await loadPrefsModule();
+    expect(loadPrefs()).toEqual({ ...DEFAULT_PREFS, theme: 'light' });
+    expect(loadPrefs().version).toBe(PREFS_VERSION);
+  });
+
+  it('迁移回写失败（配额满 / 隐私模式）不抛异常，内存值仍是迁移后的结果', async () => {
+    window.localStorage.setItem('wcr:prefs', JSON.stringify({ theme: 'light' })); // 无 version → 会尝试回写
+    let attempts = 0;
+    const setItem = vi.spyOn(window.Storage.prototype, 'setItem').mockImplementation(() => {
+      attempts += 1;
+      throw new Error('QuotaExceededError');
+    });
+    try {
+      const { loadPrefs, PREFS_VERSION } = await loadPrefsModule();
+      expect(attempts).toBe(1); // 确实尝试过回写
+      expect(loadPrefs().version).toBe(PREFS_VERSION);
+      expect(loadPrefs().theme).toBe('light');
+    } finally {
+      setItem.mockRestore();
+    }
   });
 });

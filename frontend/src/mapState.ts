@@ -11,6 +11,7 @@ import { translate } from './i18n';
 import { mapApi } from './mapApi';
 import { loadMarks, setIgnored, subscribeMarks } from './marks';
 import type { HotMetric, ProjectOverview, ProjectTimeline } from './mapApi';
+import type { IndexChange } from '../../shared/types';
 
 // 标记类型与读写已抽到 marks.ts（向导与地图共用），这里只做类型转出，保持对外 API 不变
 export type { Marks } from './marks';
@@ -123,17 +124,24 @@ function watchEvents(
 ): void {
   stopWatching();
   stopEvents = subscribeEvents(projectId, (event) => {
-    if (event.type !== 'file-changed' && event.type !== 'file-deleted') return;
-    const file = typeof event.file === 'string' ? event.file : null;
-    if (file && get().projectId === projectId) {
-      set({ pulse: { ...get().pulse, [file]: Date.now() } });
+    if (event.type !== 'changes') return;
+    // 一批变更：给其中每个「内容有变」的文件打脉冲标记（删除的不打）
+    const changes = (event as { changes?: IndexChange[] }).changes ?? [];
+    if (!changes.length) return;
+    const pulses: Record<string, number> = {};
+    for (const change of changes) {
+      if (change.kind !== 'changed') continue;
+      pulses[change.file] = Date.now();
       const timer = setTimeout(() => {
         pulseTimers.delete(timer);
         const next = { ...get().pulse };
-        delete next[file];
+        delete next[change.file];
         set({ pulse: next });
       }, PULSE_MS);
       pulseTimers.add(timer);
+    }
+    if (Object.keys(pulses).length && get().projectId === projectId) {
+      set({ pulse: { ...get().pulse, ...pulses } });
     }
     if (reloadTimer) clearTimeout(reloadTimer);
     reloadTimer = setTimeout(() => void get().load(projectId), 500);

@@ -799,6 +799,27 @@
   color: var(--fg-dim);
 }
 
+/* 结构化跳转工具条（2026-10-11）：变更计数 + 上一处 / 下一处 */
+.diff-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+
+.diff-count {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-keys {
+  color: var(--fg-dim);
+  opacity: 0.8;
+}
+
 .diff-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -843,6 +864,11 @@
 
 .diff-line.ctx {
   color: var(--fg);
+}
+
+/* 当前定位到的 hunk：左侧一道强调条，不动增 / 删行各自的语义底色 */
+.diff-line.hunk-current {
+  box-shadow: inset 2px 0 0 var(--accent-2);
 }
 
 .diff-foot {

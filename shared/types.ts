@@ -518,11 +518,27 @@ export interface ApiError {
   message: string;
 }
 
-/** SSE 推送事件（/api/projects/:id/events）。 */
+/** 批量事件里的一条文件变更。 */
+export interface IndexChange {
+  file: string;
+  /** changed = 条目/内容有变；deleted = 该路径（含整棵子树）已从索引移除。 */
+  kind: 'changed' | 'deleted';
+}
+
+/**
+ * SSE 推送事件（/api/projects/:id/events）。
+ *
+ * 2026-10-11：文件变更由「逐文件一条 file-changed / file-deleted」改成**按批**推送
+ * `changes` —— 一次 watcher flush、一次写接口的对账，前端只刷一次树、只失效一次着色
+ * （此前一个 git checkout 能让前端收到成百上千条事件，每条都触发一次拉树）。
+ *
+ * `origin` 标明这批变更的来路：`api` = 本进程写接口（新建 / 改名 / 移动 / 复制 / 删除）
+ * 收敛索引时产生；`watch` = 文件监听或后台对账发现的外部变化。前端据此区分「自己的操作」
+ * 与「外部改动」（FR-0009：改名后旧路径的删除事件不该清空已跟随到新路径的编辑器）。
+ */
 export type IndexEvent =
   | { type: 'status'; status: IndexStatus }
-  | { type: 'file-changed'; file: string }
-  | { type: 'file-deleted'; file: string }
+  | { type: 'changes'; origin: 'watch' | 'api'; version: number; changes: IndexChange[] }
   | { type: 'index-ready'; status: IndexStatus };
 
 /** 2026-10-10：编辑器保存（`PUT /api/projects/:id/file`）成功后的回执。 */

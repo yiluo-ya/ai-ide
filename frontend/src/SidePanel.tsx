@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SymbolInfo } from './api';
 import type { RefsState, SearchHit } from './state';
+import { flatSearchHits, useStore } from './state';
 import type { TypeNode } from '../../shared/types';
 import { useI18n } from './i18n';
 
@@ -501,6 +502,21 @@ export function SearchPanel({
     return out;
   }, [shown]);
 
+  // N-δ：命中导航（F3 / Shift+F3）——序号与高亮都读 state 里同一个游标
+  const cursor = useStore((s) => s.searchCursor);
+  const setSearchCursor = useStore((s) => s.setSearchCursor);
+  const flatHits = useMemo(() => flatSearchHits(hits), [hits]);
+  const hitIndex = useMemo(() => {
+    const index = new Map<string, number>();
+    flatHits.forEach((h, i) => {
+      const key = `${h.file}:${h.line}:${h.col}`;
+      if (!index.has(key)) index.set(key, i);
+    });
+    return index;
+  }, [flatHits]);
+  const isCurrent = (file: string, line: number, col: number) =>
+    cursor >= 0 && flatHits[cursor]?.file === file && flatHits[cursor]?.line === line && flatHits[cursor]?.col === col;
+
   const submit = () =>
     onSearch(text, {
       regex,
@@ -631,6 +647,11 @@ export function SearchPanel({
                 ? t('side.noHits')
                 : ''}
         {truncated && <span className="warn">{t('side.truncated')}</span>}
+        {cursor >= 0 && total > 0 && (
+          <span className="hit-cursor" title={t('side.nextHitTitle')}>
+            {t('side.hitCursor', { k: cursor + 1, n: total })}
+          </span>
+        )}
       </div>
       <div className="search-results">
         {byDir.map((dir) => (
@@ -644,8 +665,12 @@ export function SearchPanel({
                 {group.matches.map((m, i) => (
                   <div
                     key={`${m.line}:${m.col}:${i}`}
-                    className="search-hit"
-                    onClick={() => onOpen(group.file, m.line, m.col)}
+                    className={`search-hit${isCurrent(group.file, m.line, m.col) ? ' current' : ''}`}
+                    onClick={() => {
+                      const idx = hitIndex.get(`${group.file}:${m.line}:${m.col}`);
+                      if (idx != null) setSearchCursor(idx);
+                      onOpen(group.file, m.line, m.col);
+                    }}
                     title={t('side.lineTitle', { line: m.line })}
                   >
                     <span className="line-num">{m.line}</span>

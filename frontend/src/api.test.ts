@@ -133,7 +133,7 @@ describe('api', () => {
 
     const seen: string[] = [];
     const off = subscribeEvents('p1', (e) => seen.push(e.type));
-    expect([...handlers.keys()]).toEqual(['status', 'file-changed', 'file-deleted', 'index-ready']);
+    expect([...handlers.keys()]).toEqual(['status', 'changes', 'index-ready']);
 
     handlers.get('status')?.({ data: JSON.stringify({ type: 'status' }) } as MessageEvent);
     expect(seen).toEqual(['status']);
