@@ -8,7 +8,9 @@
  * 3) 写入带 `baseMtimeMs` 冲突检测：磁盘在编辑期间被外部改过就拒绝写，把决定权交回用户。
  */
 import { execFile } from 'node:child_process';
+import { constants as fsConstants } from 'node:fs';
 import fsp from 'node:fs/promises';
+import path from 'node:path';
 
 /** 单次写入上限 5 MB：手改不可能这么大，超过多半是事故。 */
 export const MAX_WRITE_BYTES = 5 * 1024 * 1024;
@@ -116,4 +118,139 @@ function runPowerShell(script: string, target: string): Promise<void> {
 
 function firstLine(text: string): string {
   return (text.split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? text).slice(0, 300);
+}
+
+// ------------------------------------------------- 新建 / 重命名 / 移动 / 复制（FR-0009）
+
+/** Windows 保留设备名：这些名字（含带扩展名，如 `con.txt`）在 Win32 上建不出来。 */
+const WINDOWS_RESERVED = new Set([
+  'CON',
+  'PRN',
+  'AUX',
+  'NUL',
+  ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`),
+]);
+
+/**
+ * 路径最后一段（名字）是否可用：空 / `.` / `..` / 非法字符 / 首尾空白 / 结尾点 / 保留名一律拒绝。
+ * 路径的其余部分由路由层的 `resolveInside` 与忽略规则负责。
+ */
+export function isValidEntryName(name: string): boolean {
+  if (!name || name === '.' || name === '..') return false;
+  if (name !== name.trim()) return false;
+  // 控制字符与 Windows 禁用字符（正则在服务端一次性判完，避免不同平台行为不一）
+  // eslint-disable-next-line no-control-regex
+  if (/[<>:"/\\|?*\u0000-\u001f]/.test(name)) return false;
+  if (name.endsWith('.')) return false;
+  return !WINDOWS_RESERVED.has(name.split('.')[0].toUpperCase());
+}
+
+function errCode(e: unknown): string {
+  return (e as NodeJS.ErrnoException)?.code ?? '';
+}
+
+async function exists(abs: string): Promise<boolean> {
+  try {
+    await fsp.stat(abs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type CreateOutcome =
+  | { ok: true; size: number; mtimeMs: number }
+  | { ok: false; error: 'exists' | 'no_parent' | 'failed'; message: string };
+
+/** 新建文件（独占创建：已存在就是 `exists`，绝不覆盖）。`text` 缺省为空文件。 */
+export async function createFileEntry(abs: string, text = ''): Promise<CreateOutcome> {
+  try {
+    await fsp.writeFile(abs, text, { encoding: 'utf8', flag: 'wx' });
+  } catch (e) {
+    const code = errCode(e);
+    if (code === 'EEXIST') return { ok: false, error: 'exists', message: `已存在同名文件或目录：${abs}` };
+    if (code === 'ENOENT') return { ok: false, error: 'no_parent', message: `上级目录不存在：${path.dirname(abs)}` };
+    return { ok: false, error: 'failed', message: `新建文件失败：${firstLine((e as Error).message)}` };
+  }
+  const st = await fsp.stat(abs);
+  return { ok: true, size: st.size, mtimeMs: st.mtimeMs };
+}
+
+/** 新建目录（`recursive`：`a/b/c` 的中间层一并建出；已存在就是 `exists`）。 */
+export async function createDirEntry(abs: string): Promise<CreateOutcome> {
+  if (await exists(abs)) return { ok: false, error: 'exists', message: `已存在同名文件或目录：${abs}` };
+  try {
+    await fsp.mkdir(abs, { recursive: true });
+  } catch (e) {
+    const code = errCode(e);
+    if (code === 'EEXIST') return { ok: false, error: 'exists', message: `已存在同名文件或目录：${abs}` };
+    if (code === 'ENOENT') return { ok: false, error: 'no_parent', message: `上级目录不存在：${path.dirname(abs)}` };
+    return { ok: false, error: 'failed', message: `新建目录失败：${firstLine((e as Error).message)}` };
+  }
+  return { ok: true, size: 0, mtimeMs: 0 };
+}
+
+export type MoveOutcome =
+  | { ok: true; from: string; to: string; isDir: boolean }
+  | { ok: false; error: 'not_found' | 'exists' | 'no_parent' | 'locked' | 'failed'; message: string };
+
+/**
+ * 重命名 / 移动（磁盘层是同一个 `rename`；跨目录移动也走这里）。
+ *
+ * 两条与 FR-0008 一致的安全约定：
+ * 1) 目标已存在就拒绝（不覆盖）—— 例外是 Windows 上的**大小写改名**（`a.ts` → `A.ts`）；
+ * 2) 目录改名撞上句柄占用（Windows 上 TGitCache 之类）如实报 `locked`，不静默回退搬移。
+ */
+export async function renameEntry(absFrom: string, absTo: string): Promise<MoveOutcome> {
+  let st;
+  try {
+    st = await fsp.stat(absFrom);
+  } catch {
+    return { ok: false, error: 'not_found', message: `路径不存在：${absFrom}` };
+  }
+  const caseOnly = process.platform === 'win32' && absFrom.toLowerCase() === absTo.toLowerCase();
+  if (!caseOnly && (await exists(absTo))) {
+    return { ok: false, error: 'exists', message: `目标已存在：${absTo}` };
+  }
+  try {
+    await fsp.rename(absFrom, absTo);
+  } catch (e) {
+    const code = errCode(e);
+    if (code === 'EPERM' || code === 'EACCES' || code === 'EBUSY') {
+      return {
+        ok: false,
+        error: 'locked',
+        message: `目标被其它进程占用（Windows 上目录改名常见）：${firstLine((e as Error).message)}`,
+      };
+    }
+    if (code === 'ENOENT') return { ok: false, error: 'no_parent', message: `目标上级目录不存在：${path.dirname(absTo)}` };
+    if (code === 'ENOTEMPTY' || code === 'EEXIST') return { ok: false, error: 'exists', message: `目标已存在：${absTo}` };
+    return { ok: false, error: 'failed', message: `重命名失败：${firstLine((e as Error).message)}` };
+  }
+  return { ok: true, from: absFrom, to: absTo, isDir: st.isDirectory() };
+}
+
+/** 复制一份（文件直接拷，目录连整棵子树）；目标已存在就拒绝，不覆盖。 */
+export async function copyEntry(absFrom: string, absTo: string): Promise<MoveOutcome> {
+  let st;
+  try {
+    st = await fsp.stat(absFrom);
+  } catch {
+    return { ok: false, error: 'not_found', message: `路径不存在：${absFrom}` };
+  }
+  if (await exists(absTo)) return { ok: false, error: 'exists', message: `目标已存在：${absTo}` };
+  try {
+    if (st.isDirectory()) {
+      await fsp.cp(absFrom, absTo, { recursive: true, errorOnExist: true, force: false });
+    } else {
+      await fsp.copyFile(absFrom, absTo, fsConstants.COPYFILE_EXCL);
+    }
+  } catch (e) {
+    const code = errCode(e);
+    if (code === 'EEXIST') return { ok: false, error: 'exists', message: `目标已存在：${absTo}` };
+    if (code === 'ENOENT') return { ok: false, error: 'no_parent', message: `目标上级目录不存在：${path.dirname(absTo)}` };
+    return { ok: false, error: 'failed', message: `复制失败：${firstLine((e as Error).message)}` };
+  }
+  return { ok: true, from: absFrom, to: absTo, isDir: st.isDirectory() };
 }

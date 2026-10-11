@@ -175,6 +175,70 @@ export default function App() {
     path?: string;
     isDir?: boolean;
   } | null>(null);
+  /**
+   * FR-0009：新建 / 重命名 / 移动 / 复制一份 的参数收集（共用一个输入弹窗）。
+   * 这里只管收集与拼路径，磁盘动作全部交给 store（索引跟随与提示也在那边）。
+   */
+  const [fsPrompt, setFsPrompt] = useState<FsPrompt | null>(null);
+  const [fsValue, setFsValue] = useState('');
+  const fsInputRef = useRef<HTMLInputElement>(null);
+  // Dialog 挂载后会 focus 浮层容器（子组件 effect 先跑），所以在父 effect 里补一次聚焦
+  useEffect(() => {
+    if (fsPrompt) fsInputRef.current?.focus();
+  }, [fsPrompt]);
+
+  const openFsPrompt = (next: FsPrompt) => {
+    setFsPrompt(next);
+    if (next.kind === 'rename') setFsValue(next.path.split('/').pop() ?? next.path);
+    else if (next.kind === 'duplicate') setFsValue(duplicateEntryName(next.path));
+    else if (next.kind === 'move') setFsValue(next.path.split('/').slice(0, -1).join('/'));
+    else setFsValue('');
+  };
+
+  const submitFsPrompt = () => {
+    if (!fsPrompt) return;
+    // 名字里允许 `/`（新建可一路建中间目录）；首尾斜杠去掉，其余交给后端校验
+    const name = fsValue
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\/+|\/+$/g, '');
+    const s = useStore.getState();
+    if (fsPrompt.kind === 'newFile' || fsPrompt.kind === 'newDir') {
+      if (!name) return;
+      void s.createEntry(fsPrompt.dir, name, fsPrompt.kind === 'newDir');
+    } else if (fsPrompt.kind === 'move') {
+      const base = fsPrompt.path.split('/').pop() ?? fsPrompt.path;
+      void s.renameEntry(fsPrompt.path, name ? `${name}/${base}` : base);
+    } else {
+      // 重命名 / 复制一份：只换名字，不许带 `/`
+      if (!name || name.includes('/')) return;
+      const dir = fsPrompt.path.split('/').slice(0, -1).join('/');
+      const to = dir ? `${dir}/${name}` : name;
+      if (fsPrompt.kind === 'rename') void s.renameEntry(fsPrompt.path, to);
+      else void s.copyEntry(fsPrompt.path, to);
+    }
+    setFsPrompt(null);
+    setFsValue('');
+  };
+
+  /** FR-0009：拖拽移动（`toDir` 空串 = 项目根）。 */
+  const moveInto = (from: string, toDir: string) => {
+    const base = from.split('/').pop() ?? from;
+    const to = toDir ? `${toDir}/${base}` : base;
+    if (to !== from) void useStore.getState().renameEntry(from, to);
+  };
+
+  const fsPromptText = fsPrompt
+    ? fsPrompt.kind === 'newFile'
+      ? { title: t('prompt.newFileTitle'), label: t('prompt.nameLabel'), hint: t('prompt.newHint') }
+      : fsPrompt.kind === 'newDir'
+        ? { title: t('prompt.newDirTitle'), label: t('prompt.nameLabel'), hint: t('prompt.newHint') }
+        : fsPrompt.kind === 'rename'
+          ? { title: t('prompt.renameTitle'), label: t('prompt.renameLabel'), hint: null }
+          : fsPrompt.kind === 'duplicate'
+            ? { title: t('prompt.copyTitle'), label: t('prompt.copyLabel'), hint: null }
+            : { title: t('prompt.moveTitle'), label: t('prompt.moveLabel'), hint: t('prompt.moveHint') }
+    : null;
   /** 右侧常驻栏：默认展开（默认值来自设置），宽度可拖，可收起。 */
   const [changesDockOpen, setChangesDockOpen] = useState(() => loadPrefs().changesOpen);
   const [changesDockWidth, setChangesDockWidth] = useState(280);
@@ -673,6 +737,15 @@ export default function App() {
               onOpenAside={(file) => void useStore.getState().openInSecondary(file)}
               onCopy={(text) => useStore.getState().copyText(text)}
               onDelete={(path, isDir) => setConfirmAction({ kind: 'delete', path, isDir })}
+              onNewFile={(dir) => openFsPrompt({ kind: 'newFile', dir })}
+              onNewDir={(dir) => openFsPrompt({ kind: 'newDir', dir })}
+              onRename={(path) => openFsPrompt({ kind: 'rename', path })}
+              onMove={(path) => openFsPrompt({ kind: 'move', path })}
+              onDuplicate={(path) => openFsPrompt({ kind: 'duplicate', path })}
+              onClipboard={(op, path) => useStore.getState().setClipboard(op, path)}
+              onPaste={(dir) => void useStore.getState().pasteInto(dir)}
+              hasClipboard={store.clipboard != null}
+              onMoveDrop={moveInto}
             />
           </>
         );
@@ -1244,6 +1317,44 @@ export default function App() {
         </Dialog>
       )}
 
+      {/* FR-0009：新建 / 重命名 / 移动 / 复制一份 —— 一个输入框收参数（回车即提交） */}
+      {fsPrompt && fsPromptText && (
+        <Dialog title={fsPromptText.title} onClose={() => setFsPrompt(null)}>
+          <p className="fs-prompt-target">
+            {fsPrompt.kind === 'newFile' || fsPrompt.kind === 'newDir'
+              ? t('prompt.inDir', { dir: fsPrompt.dir || t('filetree.projectRoot') })
+              : fsPrompt.path}
+          </p>
+          <label className="fs-prompt-label" htmlFor="wcr-fs-input">
+            {fsPromptText.label}
+          </label>
+          <input
+            id="wcr-fs-input"
+            ref={fsInputRef}
+            className="fs-prompt-input"
+            value={fsValue}
+            spellCheck={false}
+            placeholder={fsPrompt.kind === 'move' ? t('prompt.movePlaceholder') : t('prompt.namePlaceholder')}
+            onChange={(e) => setFsValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submitFsPrompt();
+              }
+            }}
+          />
+          {fsPromptText.hint && <p className="fs-prompt-hint">{fsPromptText.hint}</p>}
+          <div className="confirm-actions">
+            <button className="btn ghost" onClick={() => setFsPrompt(null)}>
+              {t('common.cancel')}
+            </button>
+            <button className="btn" onClick={submitFsPrompt}>
+              {t('prompt.ok')}
+            </button>
+          </div>
+        </Dialog>
+      )}
+
       {/* FR-0008：保存冲突 —— 磁盘被外部改过，而本地还有没落盘的改动。
           Esc / 点遮罩 = 「稍后再说」：本地改动留着，不丢。 */}
       {store.conflict && (
@@ -1289,3 +1400,21 @@ export default function App() {
 
 // 让 Monaco 的编辑器实例在模块加载后即可用（provider 注册依赖它）
 void monaco;
+
+/**
+ * FR-0009：文件树上的参数收集弹窗要办的四种事（一个输入框复用）。
+ * 每个成员一个单字面量 `kind`，保证 TypeScript 能按它收窄出 `dir` / `path` 的存在性。
+ */
+type FsPrompt =
+  | { kind: 'newFile'; dir: string }
+  | { kind: 'newDir'; dir: string }
+  | { kind: 'rename'; path: string }
+  | { kind: 'duplicate'; path: string }
+  | { kind: 'move'; path: string };
+
+/** FR-0009：复制一份的默认名字（在扩展名前插 " copy"；隐藏文件不拆扩展名）。 */
+function duplicateEntryName(path: string): string {
+  const base = path.split('/').pop() ?? path;
+  const dot = base.lastIndexOf('.');
+  return dot > 0 ? `${base.slice(0, dot)} copy${base.slice(dot)}` : `${base} copy`;
+}

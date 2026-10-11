@@ -226,6 +226,17 @@ interface State {
   resolveConflict: (keep: 'mine' | 'disk' | 'later') => Promise<void>;
   /** FR-0008：删除文件 / 目录（移到系统回收站），失败如实提示。 */
   deleteEntry: (path: string) => Promise<void>;
+  /** FR-0009：新建文件 / 目录（`parentDir` 空串 = 项目根；`name` 可含 `/` 一并建中间目录）。 */
+  createEntry: (parentDir: string, name: string, isDir: boolean) => Promise<void>;
+  /** FR-0009：重命名 / 移动（`to` 是完整目标路径）；打开态、标签、位置记忆跟着搬。 */
+  renameEntry: (from: string, to: string) => Promise<void>;
+  /** FR-0009：复制一份（同目录或跨目录；源不动）。 */
+  copyEntry: (from: string, to: string) => Promise<void>;
+  /** FR-0009：剪贴板（前端内存态，不碰系统剪贴板）；null = 空。 */
+  clipboard: { op: 'copy' | 'cut'; path: string } | null;
+  setClipboard: (op: 'copy' | 'cut' | null, path?: string) => void;
+  /** FR-0009：把剪贴板里的条目放到 `dir` 下（沿用原名；重名由后端拒绝）。 */
+  pasteInto: (dir: string) => Promise<void>;
 }
 
 let unsubscribeEvents: (() => void) | null = null;
@@ -260,6 +271,16 @@ const lastWrites = new Map<string, { text: string; mtimeMs: number }>();
 /** 我们自己刚删掉的路径：后端删完会回推 file-deleted，那一下不该再弹「文件已不在磁盘上」。 */
 const localDeletes = new Map<string, number>();
 const LOCAL_DELETE_WINDOW_MS = 10_000;
+/**
+ * FR-0009：我们自己刚**改名 / 移动走**的旧路径。
+ *
+ * 后端写完后会 `verify()` 对账，把旧路径当删除推一条 `file-deleted` —— 而那条消息是
+ * 异步（SSE）到的，很可能在我们 `openFileAt(新路径)` **之后**才到，于是刚跟随重开的
+ * 编辑器又被当成「文件被删了」清空（实测现象：重命名打开中的文件后编辑器一片空白）。
+ * 落一条窗口，让这段窗口内的删除事件不当作外部删除。
+ */
+const localMoves = new Map<string, number>();
+const LOCAL_MOVE_WINDOW_MS = 10_000;
 /**
  * 是否有保存正在飞：**同一文件永远不并发发两个 PUT**。
  *
@@ -447,6 +468,33 @@ function writePositions(projectId: string, positions: Record<string, MemoryPosit
 }
 
 /**
+ * FR-0009：文件操作失败的文案。后端的 `error` 码比 message 更适合翻译，所以先按码分派；
+ * 认不出的码才回落到后端 message（不丢信息）。
+ */
+function fsErrorMessage(e: unknown): string {
+  if (e instanceof ApiRequestError) {
+    const body = e.body as { error?: string; message?: string } | null;
+    switch (body?.error) {
+      case 'exists':
+        return translate('editor.fsExists');
+      case 'locked':
+        return translate('editor.fsLocked');
+      case 'ignored_path':
+        return translate('editor.fsIgnored');
+      case 'invalid_name':
+        return translate('editor.fsInvalidName');
+      case 'into_self':
+        return translate('editor.fsIntoSelf');
+      case 'same_path':
+        return translate('editor.fsSameTarget');
+      default:
+        return body?.message ?? e.message;
+    }
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
  * 打开文件后把位置写进地址栏，便于把「文件+行」当链接分享（也是给宿主的深链格式）。
  * N18：程序化跳转用 pushState（浏览器后退键回到上一个阅读位置），
  * 历史导航自身（Alt+←/→ 与 popstate）用 replaceState，避免自激。同 URL 去重。
@@ -516,6 +564,7 @@ export const useStore = create<State>((set, get) => ({
   saveStatus: 'idle',
   saveError: null,
   conflict: null,
+  clipboard: null,
 
   async init() {
     const params = new URLSearchParams(window.location.search);
@@ -606,6 +655,12 @@ export const useStore = create<State>((set, get) => ({
           const changed = typeof event.file === 'string' ? event.file : null;
           if (!changed || changed !== get().openFile) return;
           if (event.type === 'file-deleted') {
+            // 本地刚改名 / 移动走：旧路径的删除事件是我们自己造成的，跟随逻辑已经处理完了
+            const movedAt = localMoves.get(changed);
+            if (movedAt != null && Date.now() - movedAt <= LOCAL_MOVE_WINDOW_MS) {
+              localMoves.delete(changed);
+              return;
+            }
             // 文件被（外部）删了：编辑器里再留着就是幽灵内容
             if (saveTimer != null) {
               window.clearTimeout(saveTimer);
@@ -1098,6 +1153,8 @@ export const useStore = create<State>((set, get) => ({
       const message = e instanceof Error ? e.message : String(e);
       set({ saveStatus: 'error', saveError: message });
       showToast(translate('editor.saveFailed', { message }), false);
+    } finally {
+      saveInFlight = false;
     }
   },
 
@@ -1156,8 +1213,6 @@ export const useStore = create<State>((set, get) => ({
       const message = e instanceof Error ? e.message : String(e);
       set({ saveStatus: 'error', saveError: message });
       showToast(translate('editor.saveFailed', { message }), false);
-    } finally {
-      saveInFlight = false;
     }
   },
 
@@ -1196,6 +1251,126 @@ export const useStore = create<State>((set, get) => ({
     }
     void get().loadTree();
     showToast(translate('editor.trashed', { path }), true);
+  },
+
+  /** FR-0009：新建文件 / 目录；文件建完直接打开（拿到 mtime 基准，可立即编辑）。 */
+  async createEntry(parentDir, name, isDir) {
+    const id = get().projectId;
+    if (!id || !name) return;
+    const rel = parentDir ? `${parentDir}/${name}` : name;
+    try {
+      if (isDir) await api.createDir(id, rel);
+      else await api.createFile(id, rel);
+    } catch (e) {
+      showToast(translate('editor.fsFailed', { message: fsErrorMessage(e) }), false);
+      return;
+    }
+    await get().loadTree();
+    showToast(translate(isDir ? 'editor.dirCreated' : 'editor.fileCreated', { path: rel }), true);
+    if (!isDir) await get().openFileAt(rel);
+  },
+
+  /**
+   * FR-0009：重命名 / 移动。
+   *
+   * 三件事一件不能少：
+   * 1) 先把没落盘的改动写掉 —— 否则那份内容会写向**旧路径**（已经不存在了）；
+   * 2) 把界面上所有以 `from` 为前缀的键搬到 `to`：未落盘正文 / 「刚写过」记录 / 位置记忆 / 标签 / 历史栈 / 分屏；
+   * 3) 打开着的文件跟着新路径重开一次（语言、着色、符号交给既有流程）。
+   */
+  async renameEntry(from, to) {
+    const id = get().projectId;
+    if (!id || !from || !to || from === to) return;
+    await get().flushSave();
+    // 先登记「这是本地改名」：后端对账回推的旧路径 file-deleted 不该把跟随后的编辑器清掉
+    localMoves.set(from, Date.now());
+    try {
+      await api.renameEntry(id, from, to);
+    } catch (e) {
+      localMoves.delete(from);
+      showToast(translate('editor.fsFailed', { message: fsErrorMessage(e) }), false);
+      return;
+    }
+    const mapPath = (p: string) => (p === from || p.startsWith(`${from}/`) ? to + p.slice(from.length) : p);
+    for (const [key, value] of [...unsavedEdits]) {
+      const next = mapPath(key);
+      if (next === key) continue;
+      unsavedEdits.delete(key);
+      unsavedEdits.set(next, value);
+    }
+    for (const [key, value] of [...lastWrites]) {
+      const next = mapPath(key);
+      if (next === key) continue;
+      lastWrites.delete(key);
+      lastWrites.set(next, value);
+    }
+    if (selfWriteFile) selfWriteFile = mapPath(selfWriteFile);
+    const st = get();
+    const positions: Record<string, MemoryPosition> = {};
+    for (const [key, value] of Object.entries(st.positions)) positions[mapPath(key)] = value;
+    writePositions(id, positions);
+    set({
+      positions,
+      tabs: st.tabs.map((t) => ({ ...t, file: mapPath(t.file) })),
+      history: st.history.map((h) => ({ ...h, file: mapPath(h.file) })),
+      secondary: st.secondary ? { ...st.secondary, file: mapPath(st.secondary.file) } : null,
+    });
+    const open = st.openFile;
+    const moved = open ? mapPath(open) : null;
+    await get().loadTree();
+    if (open && moved && moved !== open) {
+      // 光标回到改名前的同一行（位置记忆已按新键存好）
+      const memory = st.positions[open];
+      await get().openFileAt(moved, memory?.line, memory?.col);
+    }
+    showToast(translate('editor.moved', { from, to }), true);
+  },
+
+  /** FR-0009：复制一份（同目录或跨目录；源文件不动）。 */
+  async copyEntry(from, to) {
+    const id = get().projectId;
+    if (!id || !from || !to) return;
+    try {
+      await api.copyEntry(id, from, to);
+    } catch (e) {
+      showToast(translate('editor.fsFailed', { message: fsErrorMessage(e) }), false);
+      return;
+    }
+    await get().loadTree();
+    showToast(translate('editor.copied', { to }), true);
+  },
+
+  /** FR-0009：剪贴板（前端内存态，不碰系统剪贴板）。传 null 清空。 */
+  setClipboard(op, path) {
+    if (!op || !path) {
+      set({ clipboard: null });
+      showToast(translate('editor.clipboardCleared'), true);
+      return;
+    }
+    set({ clipboard: { op, path } });
+    showToast(translate(op === 'cut' ? 'editor.cutToClipboard' : 'editor.copiedToClipboard', { path }), true);
+  },
+
+  /** FR-0009：把剪贴板里的条目放到 `dir` 下（沿用原名；重名由后端拒绝）。 */
+  async pasteInto(dir) {
+    const clip = get().clipboard;
+    if (!clip) return;
+    const name = clip.path.split('/').pop() ?? clip.path;
+    const to = dir ? `${dir}/${name}` : name;
+    if (to === clip.path) {
+      showToast(translate('editor.fsSameTarget'), false);
+      return;
+    }
+    if (to.startsWith(`${clip.path}/`)) {
+      showToast(translate('editor.fsIntoSelf'), false);
+      return;
+    }
+    if (clip.op === 'cut') {
+      await get().renameEntry(clip.path, to);
+      set({ clipboard: null });
+      return;
+    }
+    await get().copyEntry(clip.path, to);
   },
 
   setError(message) {

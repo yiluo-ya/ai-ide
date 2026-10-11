@@ -19,6 +19,8 @@ import type {
   FileDiffResult,
   FileNode,
   FindReferencesRequest,
+  FsCreateResult,
+  FsMoveResult,
   GitChangesResult,
   GitHistoryWriteRequest,
   GitRefName,
@@ -272,6 +274,37 @@ export const api = {
   deleteEntry: (id: string, path: string) =>
     request<DeleteEntryResult>(`/projects/${id}/file?path=${encodeURIComponent(path)}`, {
       method: 'DELETE',
+    }),
+
+  /**
+   * FR-0009（2026-10-10）：新建文件。`text` 缺省 = 空文件；名字已存在 → 409 `exists`。
+   * `path` 里带 `/` 时中间目录会一并建出（与 VSCode 一致）。
+   */
+  createFile: (id: string, path: string, text?: string) =>
+    request<FsCreateResult>(`/projects/${id}/file`, {
+      method: 'POST',
+      body: JSON.stringify({ path, text }),
+    }),
+
+  /** FR-0009：新建目录（`a/b` 这类多级路径中间层一并建出）。 */
+  createDir: (id: string, path: string) =>
+    request<FsCreateResult>(`/projects/${id}/dir`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+
+  /** FR-0009：重命名 / 移动（`to` 是完整目标路径；目标已存在 → 409）。 */
+  renameEntry: (id: string, from: string, to: string) =>
+    request<FsMoveResult>(`/projects/${id}/rename`, {
+      method: 'POST',
+      body: JSON.stringify({ from, to }),
+    }),
+
+  /** FR-0009：复制一份（文件 / 目录都支持，目录带整棵子树）。 */
+  copyEntry: (id: string, from: string, to: string) =>
+    request<FsMoveResult>(`/projects/${id}/copy`, {
+      method: 'POST',
+      body: JSON.stringify({ from, to }),
     }),
 
   gotoDefinition: (id: string, file: string, line: number, col: number) =>

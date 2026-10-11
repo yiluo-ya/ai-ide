@@ -541,6 +541,27 @@ export interface DeleteEntryResult {
   trashed: true;
 }
 
+/** 2026-10-10（FR-0009）：新建文件 / 目录（`POST /file` · `POST /dir`）成功后的回执。 */
+export interface FsCreateResult {
+  ok: true;
+  /** 新建出来的相对路径（多级新建时是完整路径）。 */
+  path: string;
+  /** true = 目录，false = 文件。 */
+  isDir: boolean;
+  size: number;
+  mtimeMs: number;
+}
+
+/** 2026-10-10（FR-0009）：重命名 / 移动 / 复制（`POST /rename` · `POST /copy`）成功后的回执。 */
+export interface FsMoveResult {
+  ok: true;
+  from: string;
+  to: string;
+  isDir: boolean;
+  /** 源与目标相同（前端拼出来的空操作，后端直接回执，不动磁盘）。 */
+  unchanged?: boolean;
+}
+
 /** 保存冲突时（409）后端随 `ApiError` 一并给出的磁盘现状。 */
 export interface FileConflictDetail {
   mtimeMs: number | null;

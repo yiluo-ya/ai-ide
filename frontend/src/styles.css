@@ -1505,6 +1505,63 @@ mark {
 /* 文件树右键菜单里的删除（危险动作） */
 .tree-menu button.danger { color: var(--danger); }
 
+/* ---------------------------------------------------------------- FR-0009：新建 / 重命名 / 移动 / 复制 */
+
+/* 菜单里的分组线（新建 / 改名 / 剪贴板 / 删除各自成组，选项多了才找得着） */
+.tree-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+
+/* 拖拽移动：悬停的目录（含树容器的空白 = 项目根）高亮，明确告诉用户会放到哪 */
+.tree-row.drop-target,
+.file-tree.drop-target {
+  background: var(--row-active);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  border-radius: var(--r-sm);
+}
+
+/* 名字 / 目标目录输入弹窗 */
+.fs-prompt-target {
+  margin: 0 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+}
+
+.fs-prompt-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--fs-sm);
+}
+
+.fs-prompt-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-3);
+  color: var(--fg);
+  font-size: var(--fs-sm);
+}
+
+.fs-prompt-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.fs-prompt-hint {
+  margin: 0 0 14px;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+}
+
 /* ---------------------------------------------------------------- 快速打开 */
 
 .quickopen-backdrop {

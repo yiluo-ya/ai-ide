@@ -58,7 +58,16 @@ import {
 import { buildOverview, isTestFile } from '../indexer/insight';
 import { callHierarchy, implementationsOf, typeHierarchy } from '../indexer/callgraph';
 import { buildGraph, dependentsOf, dirDependentsOf } from '../indexer/graph';
-import { trashEntry, writeProjectFile } from '../indexer/fswrite';
+import {
+  copyEntry,
+  createDirEntry,
+  createFileEntry,
+  isValidEntryName,
+  MAX_WRITE_BYTES,
+  renameEntry,
+  trashEntry,
+  writeProjectFile,
+} from '../indexer/fswrite';
 import { buildRoutes } from '../indexer/guide';
 import { fileSummary } from '../indexer/summary';
 import { buildTimeline, DEFAULT_RECENT_WINDOW_MS, hostLinesFor, markHostOrigins } from '../indexer/timeline';
@@ -167,6 +176,11 @@ export function createApp(
       projectStatus: 'GET /api/projects/:id/status',
       fileTree: 'GET /api/projects/:id/files',
       fileText: 'GET /api/projects/:id/file?path=<rel path>',
+      // FR-0009：文件树的新建 / 重命名（含移动）/ 复制
+      fileCreate: 'POST /api/projects/:id/file { path, text? }',
+      dirCreate: 'POST /api/projects/:id/dir { path }',
+      entryRename: 'POST /api/projects/:id/rename { from, to }',
+      entryCopy: 'POST /api/projects/:id/copy { from, to }',
       gotoDefinition: 'POST /api/projects/:id/goto-definition { file, line, col }',
       findReferences: 'POST /api/projects/:id/find-references { file, line, col, includeDeclaration? }',
       documentSymbols: 'GET /api/projects/:id/document-symbols?file=<rel path>',
@@ -723,6 +737,106 @@ export function createApp(
     // 删完就让索引立刻收敛（watcher 收不到 unlinkDir，目录删除否则会在树里留幽灵目录）
     await project.onFileDeleted(rel).catch(() => undefined);
     return c.json({ ok: true, path: rel, trashed: true });
+  });
+
+  // ---------------------------------------------- 新建 / 重命名 / 移动 / 复制（FR-0009）
+
+  /**
+   * 2026-10-10 用户要求：文件树能新建文件。名字独占创建（不覆盖已存在）；
+   * 带 `/` 时中间目录由 `fswrite` 按需要创建（与 VSCode 一致）。
+   */
+  app.post('/api/projects/:id/file', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = await readJson<{ path?: string; text?: string }>(c);
+    const pathArg = normalizeEntryPath(body?.path);
+    if (!pathArg.ok) return badPath(c, pathArg, 'path');
+    const rel = pathArg.rel;
+    if (typeof body?.text === 'string' && Buffer.byteLength(body.text, 'utf8') > MAX_WRITE_BYTES) {
+      return fail(c, 413, 'file_too_large', `内容超过 ${MAX_WRITE_BYTES / 1024 / 1024} MB，拒绝写入`);
+    }
+    const guard = guardEntry(project, rel, false);
+    if ('status' in guard) return fail(c, guard.status, guard.error, guard.message);
+    const result = await createFileEntry(guard.abs, body?.text ?? '');
+    if (!result.ok) return fail(c, fsFailStatus(result.error), result.error, result.message);
+    await syncAfterWrite(project);
+    return c.json({ ok: true, path: rel, isDir: false, size: result.size, mtimeMs: result.mtimeMs });
+  });
+
+  /** 2026-10-10 用户要求：新建目录（`a/b` 这类多级路径一并建出）。 */
+  app.post('/api/projects/:id/dir', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = await readJson<{ path?: string }>(c);
+    const pathArg = normalizeEntryPath(body?.path);
+    if (!pathArg.ok) return badPath(c, pathArg, 'path');
+    const rel = pathArg.rel;
+    const guard = guardEntry(project, rel, true);
+    if ('status' in guard) return fail(c, guard.status, guard.error, guard.message);
+    const result = await createDirEntry(guard.abs);
+    if (!result.ok) return fail(c, fsFailStatus(result.error), result.error, result.message);
+    await syncAfterWrite(project);
+    return c.json({ ok: true, path: rel, isDir: true, size: 0, mtimeMs: 0 });
+  });
+
+  /**
+   * 2026-10-10 用户要求：重命名 / 移动（磁盘层同一个 rename，`to` 是完整目标路径）。
+   * 目标已存在 → 409（不覆盖）；移进自己的子树 → 400；项目根不可动。
+   */
+  app.post('/api/projects/:id/rename', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = await readJson<{ from?: string; to?: string }>(c);
+    const fromArg = normalizeEntryPath(body?.from);
+    if (!fromArg.ok) return badPath(c, fromArg, 'from');
+    const toArg = normalizeEntryPath(body?.to);
+    if (!toArg.ok) return badPath(c, toArg, 'to');
+    const from = fromArg.rel;
+    const to = toArg.rel;
+    if (from === to) return c.json({ ok: true, from, to, isDir: false, unchanged: true });
+    const fromGuard = guardEntry(project, from, false);
+    if ('status' in fromGuard) return fail(c, fromGuard.status, fromGuard.error, fromGuard.message);
+    const srcStat = await fsp.stat(fromGuard.abs).catch(() => null);
+    if (!srcStat) return fail(c, 404, 'not_found', `路径不存在：${from}`);
+    const isDir = srcStat.isDirectory();
+    if (to === from || to.startsWith(`${from}/`)) {
+      return fail(c, 400, 'into_self', '不能把目录移进它自己（或它的子目录）');
+    }
+    const toGuard = guardEntry(project, to, isDir);
+    if ('status' in toGuard) return fail(c, toGuard.status, toGuard.error, toGuard.message);
+    const result = await renameEntry(fromGuard.abs, toGuard.abs);
+    if (!result.ok) return fail(c, fsFailStatus(result.error), result.error, result.message);
+    await syncAfterWrite(project);
+    return c.json({ ok: true, from, to, isDir: result.isDir });
+  });
+
+  /** 2026-10-10 用户要求：复制一份（文件与目录都支持，目录带整棵子树）。 */
+  app.post('/api/projects/:id/copy', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = await readJson<{ from?: string; to?: string }>(c);
+    const fromArg = normalizeEntryPath(body?.from);
+    if (!fromArg.ok) return badPath(c, fromArg, 'from');
+    const toArg = normalizeEntryPath(body?.to);
+    if (!toArg.ok) return badPath(c, toArg, 'to');
+    const from = fromArg.rel;
+    const to = toArg.rel;
+    // 复制到自身：说清楚是「同一个路径」，别退化成 into_self 那句「不能移进自己的子目录」
+    if (to === from) return fail(c, 400, 'same_path', '源和目标相同，无需复制');
+    const fromGuard = guardEntry(project, from, false);
+    if ('status' in fromGuard) return fail(c, fromGuard.status, fromGuard.error, fromGuard.message);
+    const srcStat = await fsp.stat(fromGuard.abs).catch(() => null);
+    if (!srcStat) return fail(c, 404, 'not_found', `路径不存在：${from}`);
+    const isDir = srcStat.isDirectory();
+    if (to.startsWith(`${from}/`)) {
+      return fail(c, 400, 'into_self', '不能把目录复制到它自己的子树里');
+    }
+    const toGuard = guardEntry(project, to, isDir);
+    if ('status' in toGuard) return fail(c, toGuard.status, toGuard.error, toGuard.message);
+    const result = await copyEntry(fromGuard.abs, toGuard.abs);
+    if (!result.ok) return fail(c, fsFailStatus(result.error), result.error, result.message);
+    await syncAfterWrite(project);
+    return c.json({ ok: true, from, to, isDir: result.isDir });
   });
 
   // ---------------------------------------------------------------- 项目地图
@@ -1491,4 +1605,79 @@ async function readJson<T>(c: Context): Promise<T | null> {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------- FR-0009 文件操作辅助
+
+/**
+ * 规范化用户输入的相对路径：统一分隔符、去掉空段与 `./`。
+ * 越界（`..`）与空路径分开报：前者是安全问题（400 `path_escape`），后者是参数缺失。
+ */
+function normalizeEntryPath(
+  raw: string | undefined,
+): { ok: true; rel: string } | { ok: false; error: 'bad_request' | 'path_escape' } {
+  const s = (raw ?? '').trim().replace(/\\/g, '/');
+  if (!s) return { ok: false, error: 'bad_request' };
+  // 逐段看：`..` 直接当作越界（不静默丢弃 —— 那样会把 `../a/b` 悄悄变成 `a/b`）
+  if (s.split('/').some((p) => p === '..')) return { ok: false, error: 'path_escape' };
+  const parts = s.split('/').filter((p) => p && p !== '.');
+  if (!parts.length) return { ok: false, error: 'bad_request' };
+  return { ok: true, rel: parts.join('/') };
+}
+
+/** 把 `normalizeEntryPath` 的失败转成错误响应。 */
+function badPath(c: Context, r: { error: 'bad_request' | 'path_escape' }, what: string) {
+  return r.error === 'path_escape'
+    ? fail(c, 400, 'path_escape', '路径越界')
+    : fail(c, 400, 'bad_request', `${what} is required`);
+}
+
+/**
+ * 新建 / 改名 / 复制的路径守卫：名字合法 → 越界 → 忽略路径（逐段查，忽略规则只看最后一段）。
+ * 通过时给出绝对路径；否则给出要回的错误体。
+ */
+function guardEntry(
+  project: { resolveInside(rel: string): string | null; ignoresPath(rel: string, isDir?: boolean): boolean },
+  rel: string,
+  isDir: boolean,
+): { abs: string } | { status: 400; error: string; message: string } {
+  const name = rel.split('/').filter(Boolean).pop() ?? '';
+  if (!isValidEntryName(name)) {
+    return { status: 400, error: 'invalid_name', message: `名字不可用（非法字符 / 保留名 / 首尾空白）：${name}` };
+  }
+  const abs = project.resolveInside(rel);
+  if (!abs) return { status: 400, error: 'path_escape', message: '路径越界' };
+  const parts = rel.split('/').filter(Boolean);
+  let prefix = '';
+  for (let i = 0; i < parts.length; i++) {
+    prefix = prefix ? `${prefix}/${parts[i]}` : parts[i];
+    const last = i === parts.length - 1;
+    if (project.ignoresPath(prefix, last ? isDir : true)) {
+      return { status: 400, error: 'ignored_path', message: `这是被忽略的路径，不支持写入：${prefix}` };
+    }
+  }
+  return { abs };
+}
+
+/** fswrite 的失败原因 → HTTP 状态：重名与占用是 409（可改个名字重试）。 */
+function fsFailStatus(error: string): 400 | 404 | 409 | 500 {
+  if (error === 'not_found') return 404;
+  if (error === 'exists' || error === 'locked') return 409;
+  if (error === 'no_parent') return 400;
+  return 500;
+}
+
+/**
+ * 写操作后收敛索引：能对账就对账（重扫一次把「源删 + 目标增」一并接进索引）；
+ * 索引正在跑时 `verify` 会跳过，退化为重扫刷新文件树，内容索引交给 watcher 兜底。
+ */
+async function syncAfterWrite(project: {
+  verify(): Promise<{ healed: boolean }>;
+  scan(): Promise<void>;
+}): Promise<void> {
+  const healed = await project
+    .verify()
+    .then((r) => r.healed)
+    .catch(() => false);
+  if (!healed) await project.scan().catch(() => undefined);
 }
