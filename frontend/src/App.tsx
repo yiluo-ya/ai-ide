@@ -31,6 +31,7 @@ import { SettingsPanel } from './SettingsPanel';
 import { ModelDialog } from './ModelDialog';
 import { Welcome } from './Welcome';
 import { SIDEBAR_MAX, SIDEBAR_MIN, loadPrefs, savePrefs } from './prefs';
+import { eventToGesture, resolveAction, sidePanelModifier } from './keymap';
 import { monaco, setProviderContext } from './monaco-setup';
 import { listenPopState, showFlash, showToast, useStore } from './state';
 import { ShareMenu } from './ShareMenu';
@@ -427,6 +428,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
+      const keymap = loadPrefs().keymap;
       // N-δ：命中导航 —— 有搜索结果时 F3 / Shift+F3 在命中之间前后走（没结果就不抢这个键）
       if (e.key === 'F3' && !mod && !e.altKey) {
         const s = useStore.getState();
@@ -466,50 +468,71 @@ export default function App() {
           .catch(() => showFlash(translate('blame.unavailable')));
         return;
       }
-      if (mod && !e.altKey && key === ',') {
-        e.preventDefault();
-        setSettingsOpen(true);
-        return;
-      }
-      if (mod && !e.shiftKey && key === 'p') {
-        e.preventDefault();
-        setQuick('file');
-      } else if (mod && !e.shiftKey && key === 't') {
-        e.preventDefault();
-        setQuick('symbol');
-      } else if (mod && !e.shiftKey && /^[0-9]$/.test(key)) {
-        // N-δ：键盘可达 —— Ctrl/Cmd+1..4 = 左栏四个 tab（文件 / 大纲 / 搜索 / code会话），0 = 最后一个。
-        e.preventDefault();
-        // 面板搬走后 PANEL_TABS 会变短：越界时什么都不做（否则会 setTab(undefined)，看上去像面板空了）
-        const next = key === '0' ? PANEL_TABS[PANEL_TABS.length - 1] : PANEL_TABS[Number(key) - 1];
-        if (next) openPanel(next);
-      } else if (mod && e.shiftKey && key === 'f') {
-        e.preventDefault();
-        openPanel('search');
-        // 搜索框在左栏（活动栏「搜索」）：切换到该视图后才在，所以晚一拍聚焦
-        setTimeout(() => {
-          searchInputRef.current?.querySelector('input')?.focus();
-        }, 0);
-      } else if (mod && e.shiftKey && key === 'o') {
-        e.preventDefault();
-        openPanel('outline');
-      } else if (mod && e.shiftKey && key === 'e') {
-        e.preventDefault();
-        openPanel('files');
-      } else if (mod && e.shiftKey && key === 'r') {
-        // G3.4：继续阅读 —— 直达上次离开的文件与行列（没有断点就不抢这个键）
-        const last = useGuideStore.getState().readstate;
-        if (last) {
+      // 侧栏面板数字键：Ctrl/Cmd+1..9/0（vsCode）或 Alt+1..9/0（IDea）；0 = 最后一个。
+      if (/^[0-9]$/.test(key) && !e.shiftKey) {
+        const isSidePanel =
+          sidePanelModifier(keymap) === 'alt'
+            ? e.altKey && !e.ctrlKey && !e.metaKey
+            : (e.ctrlKey || e.metaKey) && !e.altKey;
+        if (isSidePanel) {
           e.preventDefault();
-          setMainView('auto');
-          void useStore.getState().openFileAt(last.file, last.line, last.col);
+          // 面板搬走后 PANEL_TABS 会变短：越界时什么都不做（否则会 setTab(undefined)，看上去像面板空了）
+          const next = key === '0' ? PANEL_TABS[PANEL_TABS.length - 1] : PANEL_TABS[Number(key) - 1];
+          if (next) openPanel(next);
+          return;
         }
-      } else if (e.altKey && e.key === 'ArrowLeft') {
-        e.preventDefault();
-        void useStore.getState().goBack();
-      } else if (e.altKey && e.key === 'ArrowRight') {
-        e.preventDefault();
-        void useStore.getState().goForward();
+      }
+      // 其余导航类快捷键走 keymap 表（打开文件 / 符号 / 设置 / 面板切换）。
+      const action = resolveAction(eventToGesture(e), keymap);
+      switch (action) {
+        case 'openFile':
+          e.preventDefault();
+          setQuick('file');
+          return;
+        case 'openSymbol':
+          e.preventDefault();
+          setQuick('symbol');
+          return;
+        case 'settings':
+          e.preventDefault();
+          setSettingsOpen(true);
+          return;
+        case 'searchPanel':
+          e.preventDefault();
+          openPanel('search');
+          // 搜索框在左栏（活动栏「搜索」）：切换到该视图后才在，所以晚一拍聚焦
+          setTimeout(() => {
+            searchInputRef.current?.querySelector('input')?.focus();
+          }, 0);
+          return;
+        case 'outlinePanel':
+          e.preventDefault();
+          openPanel('outline');
+          return;
+        case 'filesPanel':
+          e.preventDefault();
+          openPanel('files');
+          return;
+        case 'continueReading': {
+          // G3.4：继续阅读 —— 直达上次离开的文件与行列（没有断点就不抢这个键）
+          const last = useGuideStore.getState().readstate;
+          if (last) {
+            e.preventDefault();
+            setMainView('auto');
+            void useStore.getState().openFileAt(last.file, last.line, last.col);
+          }
+          return;
+        }
+        case 'back': // 后退/前进：绑键随 keymap 走（Alt+←/→ 或 Ctrl+Alt+←/→）
+          e.preventDefault();
+          void useStore.getState().goBack();
+          return;
+        case 'forward':
+          e.preventDefault();
+          void useStore.getState().goForward();
+          return;
+        default:
+          return;
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -915,7 +938,7 @@ export default function App() {
                 className="btn ghost"
                 disabled={!canBack}
                 onClick={() => void useStore.getState().goBack()}
-                title="Alt+←"
+                title={loadPrefs().keymap === 'idea' ? 'Ctrl+Alt+←' : 'Alt+←'}
               >
                 ←
               </button>
@@ -923,7 +946,7 @@ export default function App() {
                 className="btn ghost"
                 disabled={!canForward}
                 onClick={() => void useStore.getState().goForward()}
-                title="Alt+→"
+                title={loadPrefs().keymap === 'idea' ? 'Ctrl+Alt+→' : 'Alt+→'}
               >
                 →
               </button>

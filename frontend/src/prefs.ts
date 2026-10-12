@@ -12,6 +12,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { translate } from './i18n';
+import type { KeymapId } from './keymap';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export type Locale = 'zh' | 'en';
@@ -35,6 +36,8 @@ export interface Prefs {
   reduceMotion: boolean;
   /** 界面：右侧变更栏默认展开。 */
   changesOpen: boolean;
+  /** 键盘映射方案（VS Code / IDEA），默认 IDEA，见 keymap.ts。 */
+  keymap: KeymapId;
 }
 
 export const PREFS_KEY = 'wcr:prefs';
@@ -59,6 +62,7 @@ export const DEFAULT_PREFS: Prefs = {
   whitespace: false,
   reduceMotion: false,
   changesOpen: true,
+  keymap: 'idea',
 };
 
 type Listener = (prefs: Prefs) => void;
@@ -98,6 +102,7 @@ function coerce(raw: unknown): Prefs {
     whitespace: src.whitespace === true,
     reduceMotion: src.reduceMotion === true,
     changesOpen: src.changesOpen !== false,
+    keymap: src.keymap === 'vscode' ? 'vscode' : 'idea',
   };
 }
 

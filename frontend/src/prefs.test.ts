@@ -60,6 +60,7 @@ describe('prefs', () => {
       whitespace: false,
       reduceMotion: false,
       changesOpen: true,
+      keymap: 'idea',
     });
   });
 

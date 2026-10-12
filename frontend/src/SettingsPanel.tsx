@@ -21,8 +21,10 @@ import {
   usePrefs,
   type ThemeMode,
 } from './prefs';
+import type { KeymapId } from './keymap';
 
 const THEMES: ThemeMode[] = ['dark', 'light', 'system'];
+const KEYMAPS: KeymapId[] = ['idea', 'vscode'];
 
 const THEME_KEY: Record<ThemeMode, string> = {
   dark: 'settings.themeDark',
@@ -38,21 +40,39 @@ const AGENT_SOURCE_KEY: Record<AgentRuntimeStatus['pi']['source'], string> = {
   path: 'settings.agentSourcePath',
 };
 
-/** 键位说明表（与顶栏「?」同一份口径，改这里时两处一起改）。 */
-const SHORTCUTS: Array<{ keys: string; label: string }> = [
-  { keys: 'F12 / Ctrl+F12', label: 'topbar.shortcutGotoDef' },
-  { keys: 'Shift+F12', label: 'topbar.shortcutFindRefs' },
-  { keys: 'Ctrl/Cmd+P', label: 'topbar.shortcutFileSearch' },
-  { keys: 'Ctrl/Cmd+T', label: 'topbar.shortcutSymbolSearch' },
-  { keys: 'Ctrl/Cmd+Shift+F', label: 'topbar.shortcutProjectSearch' },
-  { keys: 'Ctrl/Cmd+Shift+O', label: 'topbar.shortcutOutline' },
-  { keys: 'Ctrl/Cmd+1..9', label: 'topbar.shortcutSidePanels' },
-  { keys: 'Ctrl/Cmd+0', label: 'topbar.shortcutAnnotations' },
-  { keys: 'Alt+← / Alt+→', label: 'topbar.shortcutBackForward' },
-  { keys: 'Ctrl/Cmd+G', label: 'topbar.shortcutGotoLine' },
-  { keys: 'Ctrl/Cmd+F', label: 'topbar.shortcutFileSearchIn' },
-  { keys: 'Ctrl/Cmd+,', label: 'topbar.shortcutSettings' },
-];
+/** 键位说明表：随 keymap 方案切换而换键位文案（与 App 全局 keydown 同一份口径，见 keymap.ts）。 */
+function shortcutsFor(keymap: KeymapId): Array<{ keys: string; label: string }> {
+  if (keymap === 'idea') {
+    return [
+      { keys: 'Ctrl+B / Ctrl+Alt+B', label: 'topbar.shortcutGotoDef' },
+      { keys: 'Alt+F7', label: 'topbar.shortcutFindRefs' },
+      { keys: 'Ctrl+Shift+N', label: 'topbar.shortcutFileSearch' },
+      { keys: 'Ctrl+Alt+Shift+N', label: 'topbar.shortcutSymbolSearch' },
+      { keys: 'Ctrl+Shift+F', label: 'topbar.shortcutProjectSearch' },
+      { keys: 'Ctrl+Alt+O', label: 'topbar.shortcutOutline' },
+      { keys: 'Alt+1..9', label: 'topbar.shortcutSidePanels' },
+      { keys: 'Alt+0', label: 'topbar.shortcutAnnotations' },
+      { keys: 'Ctrl+Alt+← / Ctrl+Alt+→', label: 'topbar.shortcutBackForward' },
+      { keys: 'Ctrl+G', label: 'topbar.shortcutGotoLine' },
+      { keys: 'Ctrl+F', label: 'topbar.shortcutFileSearchIn' },
+      { keys: 'Ctrl+Alt+S', label: 'topbar.shortcutSettings' },
+    ];
+  }
+  return [
+    { keys: 'F12 / Ctrl+F12', label: 'topbar.shortcutGotoDef' },
+    { keys: 'Shift+F12', label: 'topbar.shortcutFindRefs' },
+    { keys: 'Ctrl/Cmd+P', label: 'topbar.shortcutFileSearch' },
+    { keys: 'Ctrl/Cmd+T', label: 'topbar.shortcutSymbolSearch' },
+    { keys: 'Ctrl/Cmd+Shift+F', label: 'topbar.shortcutProjectSearch' },
+    { keys: 'Ctrl/Cmd+Shift+O', label: 'topbar.shortcutOutline' },
+    { keys: 'Ctrl/Cmd+1..9', label: 'topbar.shortcutSidePanels' },
+    { keys: 'Ctrl/Cmd+0', label: 'topbar.shortcutAnnotations' },
+    { keys: 'Alt+← / Alt+→', label: 'topbar.shortcutBackForward' },
+    { keys: 'Ctrl/Cmd+G', label: 'topbar.shortcutGotoLine' },
+    { keys: 'Ctrl/Cmd+F', label: 'topbar.shortcutFileSearchIn' },
+    { keys: 'Ctrl/Cmd+,', label: 'topbar.shortcutSettings' },
+  ];
+}
 
 /** 原生 checkbox 开关（label 包住，点文字也能切）。 */
 function Toggle({
@@ -83,6 +103,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const fontSizeId = useId();
   const localeId = useId();
   const sidebarId = useId();
+  const keymapId = useId();
   const wrapId = useId();
   const minimapId = useId();
   const whitespaceId = useId();
@@ -246,6 +267,24 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         </select>
       </div>
 
+      <div className="settings-row">
+        <label className="settings-label" htmlFor={keymapId}>
+          {t('settings.keymap')}
+        </label>
+        <select
+          id={keymapId}
+          className="project-select"
+          value={prefs.keymap}
+          onChange={(e) => savePrefs({ keymap: e.target.value === 'vscode' ? 'vscode' : 'idea' })}
+        >
+          {KEYMAPS.map((km) => (
+            <option key={km} value={km}>
+              {t(`settings.keymap${km === 'idea' ? 'Idea' : 'Vscode'}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <h3 className="wcr-section-title">{t('settings.editor')}</h3>
       <Toggle id={wrapId} label={t('settings.wrap')} checked={prefs.wrap} onChange={(v) => savePrefs({ wrap: v })} />
 
@@ -368,7 +407,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       <details className="settings-shortcuts">
         <summary>{t('settings.shortcuts')}</summary>
         <ul>
-          {SHORTCUTS.map((s) => (
+          {shortcutsFor(prefs.keymap).map((s) => (
             <li key={s.keys}>
               <span className="settings-keys">{s.keys}</span>
               {t(s.label)}
