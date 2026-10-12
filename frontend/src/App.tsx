@@ -745,6 +745,7 @@ export default function App() {
               decor={decor}
               onOpenAside={(file) => void useStore.getState().openInSecondary(file)}
               onCopy={(text) => useStore.getState().copyText(text)}
+              projectRoot={store.project?.root}
               onDelete={(path, isDir) => setConfirmAction({ kind: 'delete', path, isDir })}
               onNewFile={(dir) => openFsPrompt({ kind: 'newFile', dir })}
               onNewDir={(dir) => openFsPrompt({ kind: 'newDir', dir })}

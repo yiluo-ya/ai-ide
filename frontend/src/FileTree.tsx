@@ -2,7 +2,8 @@
 import { useMemo, useRef, useState } from 'react';
 import type { FileOrigin } from '../../shared/types';
 import type { FileNode } from './api';
-import { langDotStyle } from './languages';
+import { langColor } from './languages';
+import { FileIcon } from './common/fileicon/FileIcon';
 import { heatLevel } from './mapState';
 import { translate, useI18n } from './i18n';
 import './filetree.css';
@@ -35,6 +36,8 @@ interface Props {
   onOpenAside?: (file: string) => void;
   /** 右键菜单「复制路径 / 复制文件名」：写剪贴板 + 状态栏反馈（由 App 注入）。 */
   onCopy?: (text: string) => void;
+  /** 项目根绝对路径（用于「复制路径」输出全路径而非项目相对路径）。 */
+  projectRoot?: string;
   /** FR-0008：右键菜单「删除」（文件与目录都有）；App 负责二次确认与调后端。 */
   onDelete?: (path: string, isDir: boolean) => void;
   /** FR-0009：新建文件 / 文件夹（`dir` 是目标目录，空串 = 项目根）。 */
@@ -253,7 +256,12 @@ function TreeNode({
           onDragLeave={() => dnd.clearTarget(tail.path)}
           onDrop={dnd.dropOn(tail.path)}
         >
-          <span className={`chevron ${open ? 'open' : ''}`}>▸</span>
+          <span className={`chevron ${open ? 'open' : ''}`} aria-hidden>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M6 4l4 4-4 4V4z" />
+            </svg>
+          </span>
+          <FileIcon fileName={tail.name} isDirectory size={16} />
           <span className="tree-name">
             <Highlight text={label} term={filter} />
           </span>
@@ -300,8 +308,7 @@ function TreeNode({
       onDragStart={dnd.dragStart(node.path)}
       onDragEnd={dnd.dragEnd}
     >
-      {/* 色点颜色来自后端语言元数据（07-languages-plugin），不再按 lang-* 类名硬编码 */}
-      <span className="lang-dot" style={langDotStyle(node.lang)} />
+      <FileIcon fileName={node.name} size={16} color={langColor(node.lang ?? '')} />
       <span className="tree-name">
         <Highlight text={node.name} term={filter} />
       </span>
@@ -318,6 +325,7 @@ export function FileTree({
   decor,
   onOpenAside,
   onCopy,
+  projectRoot,
   onDelete,
   onNewFile,
   onNewDir,
@@ -409,7 +417,10 @@ export function FileTree({
     <div
       className={`file-tree${dropTarget === '' ? ' drop-target' : ''}`}
       onContextMenu={(e) => {
-        // 空白处右键 = 对项目根操作（新建在根目录 / 粘贴到根目录）
+        // 空白处右键 = 对项目根操作（新建在根目录 / 粘贴到根目录）。
+        // 只有事件直接落在容器自身（而非任何行/缝隙冒泡上来）才当「项目根」，
+        // 否则目录/文件行之间的缝隙右击会误触发成项目根菜单。
+        if (e.target !== e.currentTarget) return;
         e.preventDefault();
         setMenu({ path: '', isDir: true, x: e.clientX, y: e.clientY });
       }}
@@ -559,7 +570,10 @@ export function FileTree({
                 <button
                   role="menuitem"
                   onClick={() => {
-                    onCopy?.(menu.path);
+                    const abs = projectRoot
+                      ? projectRoot.replace(/\/+$/, '') + '/' + menu.path
+                      : menu.path;
+                    onCopy?.(abs);
                     setMenu(null);
                   }}
                 >
