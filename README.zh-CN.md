@@ -92,6 +92,9 @@ docker run --rm -p 8787:8787 -v D:/code:/work:ro web-code-reader
 | `READER_PERSIST` | 开 | `0` 关闭索引快照持久化 |
 | `READER_PARSE_WORKERS` | `min(4, max(2, cpus-1))` | 并行解析 worker 数，`0` = 串行 |
 | `READER_VERIFY_MS` | `600000` | 索引对账间隔，`<=0` 关闭 |
+| `READER_MAX_ACTIVE_PROJECTS` | `2` | 同时保留「已建索引」的项目数上限，超出时按最近访问淘汰最旧的；`0` = 不限 |
+| `READER_IDLE_RELEASE_MS` | `60000` | 项目空闲多久后释放其内存索引（快照仍在磁盘，再访问即恢复）；`0` 关闭空闲释放 |
+| `READER_SWEEP_MS` | `15000` | 自动回收巡检间隔，`0` 关闭自动回收 |
 | `READER_IGNORE_BUILTIN` | 开 | `0` 关闭内置忽略黑名单 |
 | `READER_USER_IGNORE` | `~/.ide/ignore-user.txt` | 全局自定义忽略规则文件 |
 | `READER_CORS_ORIGIN` | `*` | CORS 白名单，逗号分隔 |

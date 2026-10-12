@@ -100,6 +100,9 @@ volume holding only the project list, index snapshots and command plans.
 | `READER_PERSIST` | on | `0` disables index snapshot persistence |
 | `READER_PARSE_WORKERS` | `min(4, max(2, cpus-1))` | Number of parse workers; `0` = serial |
 | `READER_VERIFY_MS` | `600000` | Index reconciliation interval; `<=0` disables |
+| `READER_MAX_ACTIVE_PROJECTS` | `2` | Max projects kept indexed at once; the least recently used is evicted when exceeded; `0` = unlimited |
+| `READER_IDLE_RELEASE_MS` | `60000` | Release a project's in-memory index after this long idle (snapshots stay on disk; the next access rebuilds it); `0` disables idle release |
+| `READER_SWEEP_MS` | `15000` | Idle-eviction sweep interval; `0` disables automatic eviction |
 | `READER_IGNORE_BUILTIN` | on | `0` disables the built-in ignore blacklist |
 | `READER_USER_IGNORE` | `~/.ide/ignore-user.txt` | Global custom ignore-rule file |
 | `READER_CORS_ORIGIN` | `*` | CORS allow-list, comma separated |

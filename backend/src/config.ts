@@ -61,6 +61,33 @@ export function parseVerifyIntervalMs(raw: string | undefined): number {
 
 export const VERIFY_INTERVAL_MS = parseVerifyIntervalMs(process.env.READER_VERIFY_MS);
 
+// ------------------------------------------------ 内存索引自动回收（2026-10-12）
+
+/**
+ * 同时保留「已建索引」的项目上限（`0` = 不限，只按空闲释放）。默认 2：当前项目 + 上一个。
+ * 超出时按最近访问时间淘汰最旧的（不受空闲宽限约束），避免多个项目的符号索引长期常驻内存。
+ */
+export function parseMaxActiveProjects(raw: string | undefined): number {
+  const n = Number(raw ?? 2);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 2;
+}
+
+/** 空闲多久释放该项目的内存索引（毫秒，`0` = 关闭空闲释放）。默认 60 秒。 */
+export function parseIdleReleaseMs(raw: string | undefined): number {
+  const n = Number(raw ?? 60_000);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** 回收巡检间隔（毫秒，`0` = 关闭自动回收）。默认 15 秒。 */
+export function parseSweepMs(raw: string | undefined): number {
+  const n = Number(raw ?? 15_000);
+  return Number.isFinite(n) && n >= 0 ? n : 15_000;
+}
+
+export const MAX_ACTIVE_PROJECTS = parseMaxActiveProjects(process.env.READER_MAX_ACTIVE_PROJECTS);
+export const IDLE_RELEASE_MS = parseIdleReleaseMs(process.env.READER_IDLE_RELEASE_MS);
+export const RELEASE_SWEEP_MS = parseSweepMs(process.env.READER_SWEEP_MS);
+
 /**
  * P5：并行解析 worker 数。`READER_PARSE_WORKERS=0` 强制串行；
  * 默认 `min(4, max(2, cpus-1))`（Q9）。worker 不可用时自动回落串行。

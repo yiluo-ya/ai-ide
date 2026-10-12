@@ -1553,19 +1553,25 @@ export function createApp(
       sseStreams.set(projectId, closers);
       closers.add(close);
       stream.onAbort(() => unsubscribe());
-      // ping 周期 15 秒，但按 500ms 切片等：dispose 最多 0.5 秒就能断开
-      while (!closed && !stream.aborted) {
-        let waited = 0;
-        while (waited < 15000 && !closed && !stream.aborted) {
-          await stream.sleep(500);
-          waited += 500;
+      // 有活跃 SSE 的项目不参与空闲回收（用户正看着，释放会让面板突然空）
+      registry.holdStream(projectId);
+      try {
+        // ping 周期 15 秒，但按 500ms 切片等：dispose 最多 0.5 秒就能断开
+        while (!closed && !stream.aborted) {
+          let waited = 0;
+          while (waited < 15000 && !closed && !stream.aborted) {
+            await stream.sleep(500);
+            waited += 500;
+          }
+          if (closed || stream.aborted) break;
+          await stream.writeSSE({ event: 'ping', data: '{}' });
         }
-        if (closed || stream.aborted) break;
-        await stream.writeSSE({ event: 'ping', data: '{}' });
+      } finally {
+        closers.delete(close);
+        if (closers.size === 0) sseStreams.delete(projectId);
+        unsubscribe();
+        registry.releaseStream(projectId);
       }
-      closers.delete(close);
-      if (closers.size === 0) sseStreams.delete(projectId);
-      unsubscribe();
     });
   });
 

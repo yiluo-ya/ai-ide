@@ -6,7 +6,14 @@ import type { ProjectInfo } from './types';
 import { ProjectIndex } from './indexer/store';
 import { snapshotDir, removeSnapshotDir } from './indexer/snapshot';
 import { ProjectWatcher } from './watcher';
-import { PARSE_WORKERS, PERSIST_ENABLED, VERIFY_INTERVAL_MS } from './config';
+import {
+  IDLE_RELEASE_MS,
+  MAX_ACTIVE_PROJECTS,
+  PARSE_WORKERS,
+  PERSIST_ENABLED,
+  RELEASE_SWEEP_MS,
+  VERIFY_INTERVAL_MS,
+} from './config';
 import { logInfo } from './log';
 
 /** 同一目录永远得到同一 id：宿主（如 xchen 项目列表）可自行推导。 */
@@ -26,6 +33,16 @@ interface PersistedProject {
   createdAt: number;
 }
 
+/** 内存索引自动回收的三个参数（默认取 config；测试用小值注入，不必改 env）。 */
+export interface RegistryOptions {
+  /** 同时保留的已索引项目上限（`0` = 不限）。 */
+  maxActiveProjects?: number;
+  /** 空闲多久释放内存索引（毫秒，`0` = 关闭空闲释放）。 */
+  idleReleaseMs?: number;
+  /** 巡检间隔（毫秒，`0` = 关闭自动回收）。 */
+  sweepMs?: number;
+}
+
 export class ProjectRegistry {
   private readonly projects = new Map<string, ProjectIndex>();
   private readonly watchers = new Map<string, ProjectWatcher>();
@@ -34,8 +51,24 @@ export class ProjectRegistry {
   private readonly verifyTimers = new Map<string, NodeJS.Timeout>();
   private readonly file: string;
 
-  constructor(private readonly dataDir: string) {
+  /** 最近一次访问时间（自动回收判据）。 */
+  private readonly lastAccess = new Map<string, number>();
+  /** 活跃 SSE 长连接的持有计数：有流向项目不参与回收（用户正看着）。 */
+  private readonly streamHolds = new Map<string, number>();
+  private readonly maxActiveProjects: number;
+  private readonly idleReleaseMs: number;
+  private readonly sweepMs: number;
+  private sweepTimer: NodeJS.Timeout | null = null;
+
+  constructor(private readonly dataDir: string, opts: RegistryOptions = {}) {
     this.file = path.join(dataDir, 'projects.json');
+    this.maxActiveProjects = opts.maxActiveProjects ?? MAX_ACTIVE_PROJECTS;
+    this.idleReleaseMs = opts.idleReleaseMs ?? IDLE_RELEASE_MS;
+    this.sweepMs = opts.sweepMs ?? RELEASE_SWEEP_MS;
+    if (this.sweepMs > 0) {
+      this.sweepTimer = setInterval(() => this.sweepIdle(), this.sweepMs);
+      this.sweepTimer.unref?.();
+    }
   }
 
   private newProject(id: string, name: string, root: string, createdAt: number): ProjectIndex {
@@ -52,7 +85,10 @@ export class ProjectRegistry {
 
   get(id: string): ProjectIndex | undefined {
     const project = this.projects.get(id);
-    if (project) this.ensureIndexing(project);
+    if (project) {
+      this.ensureIndexing(project);
+      this.lastAccess.set(id, Date.now());
+    }
     return project;
   }
 
@@ -85,6 +121,7 @@ export class ProjectRegistry {
     const existing = this.find(abs);
     if (existing) {
       this.ensureIndexing(existing);
+      this.lastAccess.set(existing.id, Date.now());
       return { project: existing, created: false };
     }
     const stat = await fsp.stat(abs).catch(() => null);
@@ -96,6 +133,7 @@ export class ProjectRegistry {
     this.projects.set(projectId, project);
     await this.save();
     this.ensureIndexing(project);
+    this.lastAccess.set(projectId, Date.now());
     return { project, created: true };
   }
 
@@ -123,6 +161,8 @@ export class ProjectRegistry {
     const project = this.projects.get(id);
     if (!project) return false;
     this.stopProject(id, project);
+    this.lastAccess.delete(id);
+    this.streamHolds.delete(id);
     await removeSnapshotDir(snapshotDir(this.dataDir, id));
     const removed = this.projects.delete(id);
     await this.save();
@@ -156,6 +196,68 @@ export class ProjectRegistry {
       indexed: (project?.status.filesIndexed ?? 0) > 0,
       filesIndexed: project?.status.filesIndexed ?? 0,
     };
+  }
+
+  // ---------------------------------------------- 内存索引自动回收（2026-10-12）
+
+  /**
+   * SSE 建连 / 断连时增减持有计数：有活跃流的项目在回收巡检里跳过，
+   * 否则用户正看着的面板会因为索引被释放而突然空掉。
+   */
+  holdStream(id: string): void {
+    this.streamHolds.set(id, (this.streamHolds.get(id) ?? 0) + 1);
+  }
+
+  releaseStream(id: string): void {
+    const left = (this.streamHolds.get(id) ?? 0) - 1;
+    if (left > 0) this.streamHolds.set(id, left);
+    else this.streamHolds.delete(id);
+  }
+
+  /** 能否回收：正在索引 / 有活跃 SSE 连接的项目要留着。 */
+  private canRelease(id: string): boolean {
+    const project = this.projects.get(id);
+    if (!project) return false;
+    if (project.status.indexing) return false;
+    if ((this.streamHolds.get(id) ?? 0) > 0) return false;
+    return true;
+  }
+
+  /**
+   * 回收巡检：把「空闲太久」或「超出活跃上限」的项目内存索引释放掉（`dispose` 语义）。
+   * 只丢内存，注册表条目与磁盘快照都不动 —— 再次访问时 `reindexAll()` 从快照恢复。
+   */
+  private sweepIdle(): void {
+    const now = Date.now();
+    const active = [...this.started].filter((id) => this.projects.has(id));
+    if (!active.length) return;
+    // 最久未访问的排前面：上限淘汰与空闲释放都从它开刀
+    const byAge = active
+      .map((id) => ({ id, at: this.lastAccess.get(id) ?? 0 }))
+      .sort((a, b) => a.at - b.at);
+    const victims: string[] = [];
+    if (this.idleReleaseMs > 0) {
+      for (const { id, at } of byAge) {
+        if (now - at >= this.idleReleaseMs && this.canRelease(id)) victims.push(id);
+      }
+    }
+    // 上限：即使所有项目都在被轮询（lastAccess 都很新），也要把最近访问之外的最旧者收掉
+    if (this.maxActiveProjects > 0) {
+      let over = active.length - victims.length - this.maxActiveProjects;
+      for (const { id } of byAge) {
+        if (over <= 0) break;
+        if (victims.includes(id) || !this.canRelease(id)) continue;
+        victims.push(id);
+        over--;
+      }
+    }
+    for (const id of victims) {
+      const project = this.projects.get(id);
+      if (!project) continue;
+      this.stopProject(id, project);
+      this.lastAccess.delete(id);
+      logInfo('project.index.released', { project: id, active: active.length - victims.length });
+    }
   }
 
   /** 停掉某个项目的监听 / 定时器 / 定时快照（不删列表项）。 */
@@ -200,6 +302,8 @@ export class ProjectRegistry {
   }
 
   closeAll() {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+    this.sweepTimer = null;
     for (const [id, project] of this.projects) this.stopProject(id, project);
   }
 }

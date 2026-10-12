@@ -38,7 +38,7 @@
 | S8b | Agent 工具：文件树 / 大纲 / 文本搜索 | agent 定位「入口是哪个文件」「哪几处处理请求」 | ✅ | 同上（`file_outline` / `search_text` / `read_file` / `list_projects` / `index_project`） | 同上 |
 | S9a | 内嵌宿主：拉起 | 宿主页面里嵌一个 iframe 就是阅读器，不需要独立窗口 | ✅ | iframe + 深链 URL + `wcr:open` | 宿主侧接入（见 README「接入」） |
 | S9b | 内嵌宿主：探活 | 宿主判断阅读器是否已启动，没起就提示或自动拉起 | ✅ | `GET /api/health`（含 `host` / `shareHint`）+ manifest 自述 | 端点已有，README 已写接入方式 |
-| S9c | 内嵌宿主：退出清理 | 宿主收起面板后不残留 watcher / SSE / 索引 | ✅ | 宿主发 `wcr:dispose` → `POST /api/projects/:id/dispose` → 回 `wcr:bye`；`GET …/resources` 可核对 | 约定：关 watcher、断 SSE、释放内存索引，**保留注册表条目**，磁盘不动 |
+| S9c | 内嵌宿主：退出清理 | 宿主收起面板后不残留 watcher / SSE / 索引 | ✅ | 宿主发 `wcr:dispose` → `POST /api/projects/:id/dispose` → 回 `wcr:bye`；`GET …/resources` 可核对 | 约定：关 watcher、断 SSE、释放内存索引，**保留注册表条目**，磁盘不动。另有**后台自动回收**：项目空闲 60s（`READER_IDLE_RELEASE_MS`）或超出活跃上限 2 个（`READER_MAX_ACTIVE_PROJECTS`）时按同一 dispose 语义释放内存索引（快照保留，再访问即恢复；有活跃 SSE 的项目不回收），宿主不发 `wcr:dispose` 也不会多项目长期常驻 |
 | S10 | 批注 / 讨论线程 | 读到某处留一句「这里有问题」，同事在同一条线上回 | ✗ | 2026-10-03 用户决定移除（`annotations.ts` / `AnnotationsPanel.tsx` 已删） | 只存本机就传不出去 —— 讨论改由 PR/MR 承担 |
 
 ## 3. 关键交互形态
