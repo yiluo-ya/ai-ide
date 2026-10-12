@@ -13,6 +13,7 @@
     "bench": "tsx bench/bench.ts"
   },
   "dependencies": {
+    "@derekstride/tree-sitter-sql": "^0.3.11",
     "@hono/node-server": "^1.14.0",
     "@tree-sitter-grammars/tree-sitter-markdown": "^0.3.2",
     "@tree-sitter-grammars/tree-sitter-toml": "^0.7.0",

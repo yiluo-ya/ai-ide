@@ -116,6 +116,7 @@ export function resolveName(
 ): Resolved | null {
   const fi = project.files.get(file);
   if (!fi) return null;
+  const fileScopeId = `${file}#s0`;
   let scope = fi.scopes.get(scopeId) ?? null;
   while (scope) {
     const defs = fi.defsByScope.get(scope.id)?.get(name);
@@ -132,6 +133,16 @@ export function resolveName(
       }
     }
     scope = scope.parent ? fi.scopes.get(scope.parent) ?? null : null;
+  }
+  // SQL CTE 裸列名回退：最终 SELECT 引用 `FROM t_final` 的列，
+  // 列定义在 CTE 的 namespace scope（file scope 的子作用域）里，
+  // scope 链向上找不到时，在所有 namespace scope 里查找。
+  if (fi.lang === 'sql') {
+    for (const [sid, scopeRec] of fi.scopes) {
+      if (scopeRec.kind !== 'namespace' || scopeRec.parent !== fileScopeId) continue;
+      const defs = fi.defsByScope.get(sid)?.get(name);
+      if (defs?.length) return { kind: 'def', file, def: defs[defs.length - 1] };
+    }
   }
   // 同包 / 同目录隐式可见（Go）
   const spec = specById(fi.lang);
@@ -199,8 +210,37 @@ export function resolveMember(
   const fi = project.files.get(target.file);
   if (!fi) return null;
   if (target.def.bodyScopeId) {
-    const defs = fi.defsByScope.get(target.def.bodyScopeId)?.get(name);
-    if (defs?.length) return { kind: 'def', file: target.file, def: defs[defs.length - 1] };
+    return resolveMemberInScope(project, fi, target.file, target.def.bodyScopeId, name, new Set());
+  }
+  return null;
+}
+
+/**
+ * SQL `SELECT * FROM (子查询) alias` 列穿透：
+ * CTE / 子查询用 `*` 透传列时，列定义落在 FROM 子查询别名的 body scope 里，
+ * 而非当前 body scope。这里递归穿透多层子查询别名 namespace 继续找（防环）。
+ */
+function resolveMemberInScope(
+  project: ProjectIndex,
+  fi: FileIndex,
+  file: string,
+  scopeId: string,
+  name: string,
+  seen: Set<string>,
+): Resolved | null {
+  if (seen.has(scopeId)) return null;
+  seen.add(scopeId);
+  const defs = fi.defsByScope.get(scopeId)?.get(name);
+  if (defs?.length) return { kind: 'def', file, def: defs[defs.length - 1] };
+  const scopeDefs = fi.defsByScope.get(scopeId);
+  if (!scopeDefs) return null;
+  for (const nsDefs of scopeDefs.values()) {
+    for (const nsDef of nsDefs) {
+      if (nsDef.kind === 'namespace' && nsDef.bodyScopeId) {
+        const inner = resolveMemberInScope(project, fi, file, nsDef.bodyScopeId, name, seen);
+        if (inner) return inner;
+      }
+    }
   }
   return null;
 }

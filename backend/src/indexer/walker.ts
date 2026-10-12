@@ -107,6 +107,11 @@ export interface LanguageSpec {
   filenames?: string[];
   /** tree-sitter 语法；行式格式（lineSymbols）不需要。 */
   grammar?: unknown;
+  /**
+   * 源码预处理（可选）：在 parse 前对 source 做等长替换，保留行号 / 列号对齐。
+   * 用于剥离 grammar 无法解析的方言语法（如 Hive LATERAL VIEW），避免 ERROR 节点干扰。
+   */
+  preprocess?: (source: string) => string;
   /** 行式格式的符号扫描（与 grammar 二选一）。 */
   lineSymbols?: (source: string) => LineSymbol[];
   /**

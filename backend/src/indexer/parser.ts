@@ -104,14 +104,16 @@ export function indexSource(
   // 行式格式（Dockerfile / ini / env / conf / SQL）：没有可用语法包，直接按行扫顶层符号
   if (spec.lineSymbols && !spec.grammar) return lineSymbolIndex(relPath, source, spec, stat);
 
+  // 预处理（等长替换，保留行号 / 列号对齐）：parse 用预处理后的，text/source 用原文
+  const parsedSource = spec.preprocess ? spec.preprocess(source) : source;
   const text = new SourceText(source);
   const topLevelOnly = opts.topLevelOnly === true;
   const budgetMs =
     opts.budgetMs === null ? null : opts.budgetMs ?? (stat.size >= PARSE_BUDGET_MIN_BYTES ? parseBudgetMs(stat.size) : null);
   const outcome =
     budgetMs === null
-      ? { tree: parseSource(source, spec), truncated: false }
-      : parseSourceBudgeted(source, spec, budgetMs);
+      ? { tree: parseSource(parsedSource, spec), truncated: false }
+      : parseSourceBudgeted(parsedSource, spec, budgetMs);
   const tree = outcome.tree;
   let error: string | null = null;
   if (tree && !outcome.truncated) {
