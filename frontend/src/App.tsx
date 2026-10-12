@@ -140,6 +140,8 @@ export default function App() {
   const [fileFilter, setFileFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFullscreen, setSearchFullscreen] = useState(false);
+  /** 标签右键菜单：记录鼠标位置（视口坐标）与目标文件；null = 不显示。 */
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; file: string } | null>(null);
   /** N19 分屏：第二窗格的文件内容（与主窗格共享 model 池）。 */
   const [secondaryDoc, setSecondaryDoc] = useState<{
     file: string;
@@ -640,6 +642,25 @@ export default function App() {
     void useStore.getState().openFileAt(file, line, col, endLine, endCol);
   };
 
+  /** 关闭一批标签后，若当前打开的文件也被关了，就跳到剩余的第一个标签（否则编辑区空着）。 */
+  const afterCloseTabs = (currentOpen: string) => {
+    const remaining = useStore.getState().tabs;
+    if (currentOpen && !remaining.some((t) => t.file === currentOpen) && remaining.length > 0) {
+      const next = remaining[0];
+      jump(next.file, next.line, next.col);
+    }
+  };
+
+  // Esc 收起标签右键菜单（与分享下拉的 Esc 行为一致）。
+  useEffect(() => {
+    if (!tabMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTabMenu(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [tabMenu]);
+
   /** W4 / G5.1：从编辑器右键或层级面板发起结构性解释（浮层）。 */
   const openExplain = (file: string, line: number, col: number) => {
     const id = useStore.getState().projectId;
@@ -912,7 +933,14 @@ export default function App() {
                   key={t.file}
                   className={`tab ${t.file === store.openFile ? 'active' : ''}`}
                   onClick={() => jump(t.file, t.line, t.col)}
-                  onAuxClick={() => void useStore.getState().openInSecondary(t.file)}
+                  onAuxClick={(e) => {
+                    // 只有中键才「在旁边打开」；右键走下面的 contextmenu，不误触发。
+                    if (e.button === 1) void useStore.getState().openInSecondary(t.file);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setTabMenu({ x: e.clientX, y: e.clientY, file: t.file });
+                  }}
                   title={translate('app.tabTooltip', { file: t.file, line: t.line })}
                 >
                   <span className="tab-name">{t.file.split('/').pop()}</span>
@@ -954,6 +982,55 @@ export default function App() {
               <ShareMenu cursor={cursor} searchQuery={searchQuery} />
             </div>
           </div>
+
+          {/* 标签右键菜单：固定定位在鼠标处，点别处 / Esc 收起。 */}
+          {tabMenu && (
+            <>
+              <div className="tab-menu-backdrop" onClick={() => setTabMenu(null)} />
+              <div className="tab-menu" style={{ left: tabMenu.x, top: tabMenu.y }}>
+                <button
+                  className="share-item"
+                  onClick={() => {
+                    useStore.getState().closeTab(tabMenu.file);
+                    afterCloseTabs(tabMenu.file);
+                    setTabMenu(null);
+                  }}
+                >
+                  {translate('app.tabClose')}
+                </button>
+                <button
+                  className="share-item"
+                  onClick={() => {
+                    useStore.getState().closeOthers(tabMenu.file);
+                    afterCloseTabs(tabMenu.file);
+                    setTabMenu(null);
+                  }}
+                >
+                  {translate('app.tabCloseOthers')}
+                </button>
+                <button
+                  className="share-item"
+                  onClick={() => {
+                    useStore.getState().closeRight(tabMenu.file);
+                    afterCloseTabs(tabMenu.file);
+                    setTabMenu(null);
+                  }}
+                >
+                  {translate('app.tabCloseRight')}
+                </button>
+                <button
+                  className="share-item"
+                  onClick={() => {
+                    useStore.getState().closeLeft(tabMenu.file);
+                    afterCloseTabs(tabMenu.file);
+                    setTabMenu(null);
+                  }}
+                >
+                  {translate('app.tabCloseLeft')}
+                </button>
+              </div>
+            </>
+          )}
 
           <div className="editor-wrap">
             {showMap ? (

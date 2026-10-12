@@ -228,6 +228,12 @@ interface State {
   openSecondaryText: (file: string, text: string, lang: string, rev: string) => void;
   closeSecondary: () => void;
   closeTab: (file: string) => void;
+  /** 标签右键：关掉除指定文件外的其余标签。 */
+  closeOthers: (file: string) => void;
+  /** 标签右键：关掉指定标签右侧的所有标签。 */
+  closeRight: (file: string) => void;
+  /** 标签右键：关掉指定标签左侧的所有标签。 */
+  closeLeft: (file: string) => void;
   /** N22：记录某文件的光标与滚动位置。 */
   rememberPosition: (file: string, position: MemoryPosition) => void;
   /** 判据 6：复制 `path:line:col` 到剪贴板，并在状态栏轻提示。 */
@@ -889,6 +895,24 @@ export const useStore = create<State>((set, get) => ({
 
   closeTab(file) {
     set({ tabs: get().tabs.filter((t) => t.file !== file) });
+  },
+
+  closeOthers(file) {
+    set({ tabs: get().tabs.filter((t) => t.file === file) });
+  },
+
+  closeRight(file) {
+    const tabs = get().tabs;
+    const idx = tabs.findIndex((t) => t.file === file);
+    if (idx < 0) return;
+    set({ tabs: tabs.slice(0, idx + 1) });
+  },
+
+  closeLeft(file) {
+    const tabs = get().tabs;
+    const idx = tabs.findIndex((t) => t.file === file);
+    if (idx < 0) return;
+    set({ tabs: tabs.slice(idx) });
   },
 
   /** N22：记录某文件的光标与滚动位置（切走 / 关闭页面前随时可写）。 */

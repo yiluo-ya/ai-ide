@@ -94,3 +94,21 @@
   color: var(--fg);
   font-size: var(--fs-xs);
 }
+
+/* 标签右键菜单：固定定位在鼠标处，复用 share-item 的菜单项视觉。 */
+.tab-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.tab-menu {
+  position: fixed;
+  z-index: 41;
+  min-width: 120px;
+  padding: 6px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elev-2);
+}
