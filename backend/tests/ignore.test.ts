@@ -97,6 +97,36 @@ test('ignore: node_modules / .git 是硬保护，任何 ! 都打不开', async (
   assert.equal(ig.ignoresPath('node_modules', true), true);
 });
 
+test('ignore: 内置文件名模式按 basename 命中（子目录里的 package-lock.json 也算）', async (t) => {
+  // 判定按 basename 而非完整路径：`^package-lock\.json$` 对 `x/package-lock.json` 也要命中。
+  // 2026-10-12 分桶改造时曾在这里判错（按 rel 匹配），此用例锁死口径。
+  const root = await makeRoot({ '.gitignore': ['!ignored-dir/'] });
+  t.after(() => fsp.rm(root, { recursive: true, force: true }));
+  const ig = await IgnoreMatcher.load(root);
+
+  assert.equal(ig.ignoresFile('package-lock.json'), true);
+  assert.equal(ig.ignoresFile('test/package-lock.json'), true);
+  assert.equal(ig.ignoresFile('a/b/c/package-lock.json'), true);
+  assert.equal(ig.ignoresFile('yarn.lock'), true);
+  assert.equal(ig.ignoresFile('src/pnpm-lock.yaml'), true);
+  assert.equal(ig.ignoresFile('package-lock.json.bak'), false, '内置模式是整名匹配');
+  assert.equal(ig.ignoresFile('src/logo.png'), true, '扩展名类内置模式在子目录同样生效');
+});
+
+test('ignore: 重复判定同一路径结果稳定（目录判定缓存不改变口径）', async (t) => {
+  const root = await makeRoot({ '.gitignore': ['build/', '*.log', '!keep.log'].join('\n') });
+  t.after(() => fsp.rm(root, { recursive: true, force: true }));
+  const ig = await IgnoreMatcher.load(root);
+
+  for (let i = 0; i < 3; i++) {
+    assert.equal(ig.ignoresDir('src/build', 'build'), true);
+    assert.equal(ig.ignoresFile('src/build'), false);
+    // 注意别用 `logs/`：`logs` 是内置忽略目录，祖先规则会先把整棵吃掉
+    assert.equal(ig.ignoresFile('app/keep.log'), false);
+    assert.equal(ig.ignoresFile('app/other.log'), true);
+  }
+});
+
 test('ignore: info() 给出 sources / 规则数 / ignored / overridden', async (t) => {
   const root = await makeRoot({
     '.gitignore': ['*.log', 'tmp/'].join('\n'),

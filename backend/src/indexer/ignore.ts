@@ -10,6 +10,12 @@
  *
  * 硬保护：`node_modules` 与 `.git` 是任何 `!` 都无法打开的两个名字（Q10）。
  * 规则文件只从项目根读取（不递归读子目录的 .gitignore）。
+ *
+ * 性能（2026-10-12）：判定曾经是「每条规则都跑一次 test」，单文件成本 ≈ 规则数 × 祖先层数。
+ * 在 godot（1.7 万文件、268 条规则）上实测 `ignoresFile` 占总扫描时间的 99%（39.8s / 40.1s）。
+ * 现在做两件事，语义逐条不变（见 tests/ignore.test.ts）：
+ * ① 分桶 —— 纯名字规则进 Map、`*.ext` 进后缀桶、锚定纯路径进字面桶，只有真 glob 才走正则；
+ * ② 目录判定缓存 —— 同一目录会被它下面每个文件反复问到，规则不变时结果就一样。
  */
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -82,13 +88,35 @@ export function setUserIgnoreRules(text: string): void {
   userRulesText = text;
 }
 
+/** 目录判定缓存的条数上限（超过后整体丢弃重算，避免长跑实例无限增长）。 */
+const MAX_DIR_CACHE = 100_000;
+
+/**
+ * 规则的快查类别：能在 O(1) 里判定的绝不走正则（大仓库扫描的主要成本就在这里）。
+ * - `name`：纯名字（无 `/`、无通配）→ 按 basename 直查；
+ * - `suffix`：`*.ext` / `*.a.ext` → 按文件名后缀直查；
+ * - `literal`：锚定的纯路径（含 `/`、无通配）→ 按 rel 精确查；
+ * - `regex`：真 glob（`**`、`?`、字符类…）→ 仍然逐条 test。
+ */
+type RuleKind = 'name' | 'suffix' | 'literal' | 'regex';
+
 interface IgnoreRule {
   negate: boolean;
   dirOnly: boolean;
   /** 规则来源文件（内置规则为 null）。 */
   source: string | null;
-  /** rel 为 POSIX 相对路径，name 为最后一段。 */
-  test(rel: string, name: string): boolean;
+  kind: RuleKind;
+  /** name → 文件名；suffix → 以 `.` 开头的后缀；literal → 完整 rel；regex → 空串。 */
+  key: string;
+  /** 仅 kind === 'regex' 时有效。 */
+  re: RegExp | null;
+  /**
+   * 仅 kind === 'regex' 时有效：对**完整 rel** 还是对 **basename** 做匹配。
+   * 内置文件名黑名单（如 `^package-lock\.json$`）是按 basename 判定的，`/x/package-lock.json` 也算。
+   */
+  matchOn: 'rel' | 'name';
+  /** 规则在整个序列里的序号：「最后命中者胜」用它比较，不必按序全扫。 */
+  ord: number;
 }
 
 interface Verdict {
@@ -104,6 +132,22 @@ function globBody(pattern: string): string {
     .replace(/\*/g, '[^/]*')
     .replace(/\?/g, '[^/]')
     .replace(/\u0000/g, '.*');
+}
+
+/**
+ * 给一条 pattern 挑最快的判定方式（等价性由 tests/ignore.test.ts 覆盖）。
+ * 注意 `*.log` 只有在**非锚定**时才等价于「文件名以 .log 结尾」：锚定的 `/*.log` 里 `*` 不跨 `/`。
+ */
+function classify(pattern: string, anchored: boolean): { kind: RuleKind; key: string; re: RegExp | null } {
+  const magic = /[*?[\]\\]/.test(pattern);
+  if (!magic && !anchored) return { kind: 'name', key: pattern, re: null };
+  if (!magic) return { kind: 'literal', key: pattern, re: null };
+  if (!anchored) {
+    const suffix = /^\*((?:\.[^*?[\]\\/]+)+)$/.exec(pattern);
+    if (suffix) return { kind: 'suffix', key: suffix[1], re: null };
+  }
+  const body = globBody(pattern);
+  return { kind: 'regex', key: '', re: new RegExp(anchored ? `^${body}$` : `(^|.*/)${body}$`) };
 }
 
 /** 把一份忽略文件解析成规则（顺序即优先级）。 */
@@ -124,9 +168,8 @@ function parseIgnoreFile(text: string, source: string): IgnoreRule[] {
     if (!pattern) continue;
     // 含分隔符的 pattern（含以 / 开头）按项目根锚定；纯名字匹配任意层级。
     const anchored = line.replace(/^!/, '').startsWith('/') || pattern.includes('/');
-    const body = globBody(pattern);
-    const re = new RegExp(anchored ? `^${body}$` : `(^|.*/)${body}$`);
-    out.push({ negate, dirOnly, source, test: (rel) => re.test(rel) });
+    const { kind, key, re } = classify(pattern, anchored);
+    out.push({ negate, dirOnly, source, kind, key, re, matchOn: 'rel', ord: 0 });
   }
   return out;
 }
@@ -142,9 +185,18 @@ export class IgnoreMatcher {
   private root = '';
   private readonly builtinEnabled: boolean;
 
+  /** 规则分桶（见文件头「性能」一节）：序号即优先级，取命中里 ord 最大的那条。 */
+  private byName = new Map<string, IgnoreRule[]>();
+  private bySuffix = new Map<string, IgnoreRule[]>();
+  private byLiteral = new Map<string, IgnoreRule[]>();
+  private regexRules: IgnoreRule[] = [];
+  /** 目录判定缓存：rel → 结果（规则不变即有效，reload 时清空）。 */
+  private readonly dirCache = new Map<string, Verdict>();
+
   constructor(builtin = IGNORE_BUILTIN) {
     this.builtinEnabled = builtin;
     this.pushBuiltin();
+    this.reindex();
   }
 
   static async load(root: string, builtin = IGNORE_BUILTIN): Promise<IgnoreMatcher> {
@@ -178,23 +230,55 @@ export class IgnoreMatcher {
       this.rules.push(...parsed);
       this.sources.push({ path: USER_RULES_SOURCE, rules: parsed.length });
     }
+    this.reindex();
   }
 
   private pushBuiltin() {
     if (!this.builtinEnabled) return;
     for (const name of IGNORED_DIRS) {
-      this.rules.push({ negate: false, dirOnly: true, source: null, test: (_rel, n) => n === name });
+      this.rules.push({
+        negate: false, dirOnly: true, source: null, kind: 'name', key: name, re: null, matchOn: 'name', ord: 0,
+      });
     }
+    // 内置文件名模式按 **basename** 判定（`^package-lock\.json$` 对 `x/package-lock.json` 也要命中）
     for (const re of IGNORED_FILE_PATTERNS) {
-      this.rules.push({ negate: false, dirOnly: false, source: null, test: (_rel, n) => re.test(n) });
+      this.rules.push({
+        negate: false, dirOnly: false, source: null, kind: 'regex', key: '', re, matchOn: 'name', ord: 0,
+      });
     }
+  }
+
+  /** 重建分桶与序号（规则集任何变化后都要调）。 */
+  private reindex() {
+    this.byName.clear();
+    this.bySuffix.clear();
+    this.byLiteral.clear();
+    this.regexRules = [];
+    this.dirCache.clear();
+    const push = (map: Map<string, IgnoreRule[]>, key: string, rule: IgnoreRule) => {
+      const list = map.get(key);
+      if (list) list.push(rule);
+      else map.set(key, [rule]);
+    };
+    this.rules.forEach((rule, ord) => {
+      rule.ord = ord;
+      if (rule.kind === 'name') push(this.byName, rule.key, rule);
+      else if (rule.kind === 'suffix') push(this.bySuffix, rule.key, rule);
+      else if (rule.kind === 'literal') push(this.byLiteral, rule.key, rule);
+      else this.regexRules.push(rule);
+    });
   }
 
   /** 目录是否忽略（rel 为目录相对路径，name 为最后一段）。 */
   ignoresDir(rel: string, name: string): boolean {
     if (HARD_PROTECTED.has(name)) return true;
+    // 同一目录会被它下面每个文件问到一次：首次算完就留下（父目录被忽略时整棵剪枝）
+    const cached = this.dirCache.get(rel);
+    if (cached) return cached.ignored;
     const verdict = this.decide(rel, name, true);
     if (verdict.overridden) this.noteOverridden(rel);
+    if (this.dirCache.size >= MAX_DIR_CACHE) this.dirCache.clear();
+    this.dirCache.set(rel, verdict);
     return verdict.ignored;
   }
 
@@ -208,7 +292,8 @@ export class IgnoreMatcher {
       const seg = parts[i];
       prefix = prefix ? `${prefix}/${seg}` : seg;
       if (HARD_PROTECTED.has(seg)) return true;
-      if (this.decide(prefix, seg, true).ignored) return true;
+      const cached = this.dirCache.get(prefix);
+      if (cached ? cached.ignored : this.ignoresDir(prefix, seg)) return true;
     }
     const verdict = this.decide(rel, name, false);
     if (verdict.overridden) this.noteOverridden(rel);
@@ -241,23 +326,45 @@ export class IgnoreMatcher {
     return this.root;
   }
 
+  /**
+   * 判定：取**最后一条命中的规则**（顺序即优先级）。
+   *
+   * 与改造前逐条遍历等价，但命中来源按类别分开取，最后比 ord：
+   * `ignored` = 最后命中者是排除；`overridden` = 最后命中者是取反、且它之前有过排除命中。
+   */
   private decide(rel: string, name: string, isDir: boolean): Verdict {
-    let ignored = false;
-    let excludedBefore = false;
-    let overridden = false;
-    for (const rule of this.rules) {
-      if (rule.dirOnly && !isDir) continue;
-      if (!rule.test(rel, name)) continue;
-      if (rule.negate) {
-        overridden = excludedBefore;
-        ignored = false;
-      } else {
-        excludedBefore = true;
-        overridden = false;
-        ignored = true;
+    let bestOrd = -1;
+    let bestNegate = false;
+    /** 最早的「排除」命中序号：只有它早于最终命中的取反规则时才算 overridden。 */
+    let firstExcludeOrd = -1;
+
+    const hit = (rule: IgnoreRule) => {
+      if (rule.dirOnly && !isDir) return;
+      if (rule.ord > bestOrd) {
+        bestOrd = rule.ord;
+        bestNegate = rule.negate;
       }
+      if (!rule.negate && (firstExcludeOrd < 0 || rule.ord < firstExcludeOrd)) {
+        firstExcludeOrd = rule.ord;
+      }
+    };
+
+    for (const rule of this.byName.get(name) ?? []) hit(rule);
+    // `*.a.b` 这类后缀规则：枚举文件名的每一段后缀（'.a.b' 与 '.b' 各自的桶都查）
+    for (let dot = name.indexOf('.'); dot >= 0; dot = name.indexOf('.', dot + 1)) {
+      const bucket = this.bySuffix.get(name.slice(dot));
+      if (bucket) for (const rule of bucket) hit(rule);
     }
-    return { ignored, overridden };
+    for (const rule of this.byLiteral.get(rel) ?? []) hit(rule);
+    for (const rule of this.regexRules) {
+      if (rule.dirOnly && !isDir) continue;
+      if (rule.re!.test(rule.matchOn === 'name' ? name : rel)) hit(rule);
+    }
+
+    return {
+      ignored: bestOrd >= 0 && !bestNegate,
+      overridden: bestNegate && firstExcludeOrd >= 0 && firstExcludeOrd < bestOrd,
+    };
   }
 
   private noteOverridden(rel: string) {
