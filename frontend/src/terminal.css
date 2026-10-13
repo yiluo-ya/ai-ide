@@ -97,6 +97,13 @@
   gap: 2px;
 }
 
+/* shell 选择器（PowerShell / Git Bash）：高度对齐标签行 */
+.terminal-shell-select {
+  height: var(--ctl-h-sm);
+  padding: 0 4px;
+  font-size: var(--fs-sm);
+}
+
 .terminal-action {
   width: 26px;
   height: 22px;

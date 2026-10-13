@@ -2,7 +2,7 @@
  * 交互式终端（2026-10-08）：node-pty 常驻 PTY + WebSocket 双向透传。
  *
  * 与 commands.ts 的「一次性跑命令读输出」不同，这里维护一条**常驻**的伪终端会话：
- * 客户端连上 → 发 {type:'spawn', cols, rows} 起 shell（cwd = 项目根）→ 之后
+ * 客户端连上 → 发 {type:'spawn', cols, rows, shell} 起 shell（cwd = 项目根）→ 之后
  * input / resize 双向流式，直到客户端断开或 shell 退出。
  *
  * 安全边界（与 services.ts / commands.ts 同口径）：
@@ -11,6 +11,7 @@
  * - 每个项目 id 可起多个会话（多标签 / 分屏），断开即回收。
  */
 import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
 import type * as http from 'node:http';
 import type { Duplex } from 'node:stream';
 import * as path from 'node:path';
@@ -19,6 +20,9 @@ import { LOCAL_HOSTS, HOST } from '../config';
 import { logInfo, logError } from '../log';
 import type { ProjectRegistry } from '../registry';
 
+/** 可选的 shell 种类（前端工具栏选择器与之对应）。 */
+export type ShellKind = 'powershell' | 'gitbash';
+
 /** 客户端 → 服务端 的消息。 */
 interface ClientMessage {
   type: 'spawn' | 'input' | 'resize' | 'signal';
@@ -26,6 +30,8 @@ interface ClientMessage {
   data?: string;
   cols?: number;
   rows?: number;
+  /** spawn：要启动的 shell 种类，缺省 powershell。 */
+  shell?: string;
 }
 
 /** 服务端 → 客户端 的消息。 */
@@ -52,13 +58,79 @@ interface TerminalSession {
 /** 按 session id 索引（id 从升级 URL 的 ?session= 带过来，客户端自己生成）。 */
 const sessions = new Map<string, TerminalSession>();
 
-/** Windows 默认 shell；其它平台用用户 SHELL 或 bash。 */
-function defaultShell(): { file: string; args: string[] } {
-  if (process.platform === 'win32') {
-    return { file: process.env.ComSpec ?? 'cmd.exe', args: [] };
+/** 解析结果：可执行文件 + 参数 + 额外环境变量 + 展示名。 */
+interface ResolvedShell {
+  file: string;
+  args: string[];
+  env: Record<string, string>;
+  /** 前端标签标题用的短名（如 PowerShell / Git Bash）。 */
+  name: string;
+}
+
+/** 路径是否是普通文件。 */
+function isFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
   }
-  const shell = process.env.SHELL ?? '/bin/bash';
-  return { file: shell, args: ['-l'] };
+}
+
+/** 按 PATH 找可执行文件（Windows 补 PATHEXT 后缀）；找不到返回 null。 */
+function whichOnPath(name: string): string | null {
+  const exts =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+      : [''];
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      const full = path.join(dir, name + ext);
+      if (isFile(full)) return full;
+    }
+  }
+  return null;
+}
+
+/** PowerShell：优先 PowerShell 7（pwsh），退回系统自带的 5.1。 */
+function findPowerShell(): string | null {
+  const system = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+  return whichOnPath('pwsh') ?? whichOnPath('powershell') ?? (isFile(system) ? system : null);
+}
+
+/**
+ * Git Bash 的 bash.exe。**不按 PATH 裸找 bash** —— PATH 上常先命中 WSL 的
+ * C:\Windows\System32\bash.exe（那会起成 WSL 而不是 Git Bash）。
+ * 顺序：EXEPATH（Git Bash 自己设的）→ 由 PATH 上的 git.exe 反推安装目录 → 常见安装路径。
+ */
+function findGitBash(): string | null {
+  const candidates: string[] = [];
+  const exePath = process.env.EXEPATH;
+  if (exePath) candidates.push(path.resolve(exePath, 'bash.exe'), path.resolve(exePath, '..', 'bin', 'bash.exe'));
+  const git = whichOnPath('git');
+  if (git) candidates.push(path.resolve(path.dirname(git), '..', 'bin', 'bash.exe'));
+  candidates.push('C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Program Files (x86)\\Git\\bin\\bash.exe');
+  const localAppData = process.env.LOCALAPPDATA;
+  if (localAppData) candidates.push(path.join(localAppData, 'Programs', 'Git', 'bin', 'bash.exe'));
+  for (const c of candidates) if (isFile(c)) return c;
+  return null;
+}
+
+/** 解析要启动的 shell；找不到 Git Bash 时抛错（前端会显示该错误）。 */
+function resolveShell(kind: string | undefined): ResolvedShell {
+  if (process.platform === 'win32') {
+    if (kind === 'gitbash') {
+      const bash = findGitBash();
+      if (!bash) throw new Error('未找到 Git Bash（bash.exe），请先安装 Git for Windows');
+      // CHERE_INVOKING：让 `--login` 不要切回 home，保留项目根作为 cwd
+      return { file: bash, args: ['--login', '-i'], env: { CHERE_INVOKING: '1' }, name: 'Git Bash' };
+    }
+    const ps = findPowerShell();
+    if (ps) return { file: ps, args: [], env: {}, name: path.basename(ps, path.extname(ps)) };
+    return { file: process.env.ComSpec ?? 'cmd.exe', args: [], env: {}, name: 'cmd' };
+  }
+  // 非 Windows：powershell 有 pwsh 就用，否则一律用户 SHELL
+  const shell = (kind === 'powershell' ? whichOnPath('pwsh') : null) ?? process.env.SHELL ?? '/bin/bash';
+  return { file: shell, args: ['-l'], env: {}, name: path.basename(shell) };
 }
 
 /** 把项目 id 解析成可用的 cwd（项目根）。 */
@@ -165,21 +237,25 @@ function handleClientMessage(
   if (!session.open) return;
   if (msg.type === 'spawn') {
     if (session.pty) return; // 已起过
-    const { file, args } = defaultShell();
     const cols = Math.max(2, Math.min(500, Math.floor(msg.cols ?? 80)));
     const rows = Math.max(1, Math.min(200, Math.floor(msg.rows ?? 24)));
     try {
+      const { file, args, env, name } = resolveShell(msg.shell);
       const pty = spawn(file, args, {
         name: 'xterm-256color',
         cols,
         rows,
         cwd,
-        env: process.env as Record<string, string>,
+        env: { ...(process.env as Record<string, string>), ...env },
+        // Windows：走 node-pty 自带的 conpty.dll（OpenConsole）而不是系统 conhost。
+        // 系统 conpty 的 kill() 会 fork 一个 node 子进程去取 console 进程列表，
+        // 后端没有 Windows 控制台时会给它分配一个可见控制台窗口 —— 也就是关闭 /
+        // 切换终端时“一闪而过”的窗口；conpty.dll 这条路径不 fork（同 VS Code）。
+        ...(process.platform === 'win32' ? { useConpty: true, useConptyDll: true } : {}),
       });
       session.pty = pty;
-      // 回传 shell 名，前端据此显示「1: cmd」这样的标签标题。
-      const shellName = path.basename(file).replace(/\.exe$/i, '');
-      session.sender.send(JSON.stringify({ type: 'title', title: shellName } satisfies ServerMessage));
+      // 回传 shell 名，前端据此显示「1: PowerShell」这样的标签标题。
+      session.sender.send(JSON.stringify({ type: 'title', title: name } satisfies ServerMessage));
       pty.onData((data) => {
         if (session.open) session.sender.send(JSON.stringify({ type: 'output', data } satisfies ServerMessage));
       });

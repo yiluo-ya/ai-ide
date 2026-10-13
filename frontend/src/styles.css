@@ -2987,6 +2987,15 @@ mark {
   flex-direction: column;
 }
 
+/* 终端常驻槽位（切到「输出」/收起面板时只 display:none，不卸载 —— 会话不丢）。
+   面板本身收起时是 display:none，整棵子树都不占位。 */
+.terminal-slot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* 输出面板 */
 .output-panel {
   display: flex;
