@@ -13,7 +13,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { streamChat, type ChatMessage, type ChatToolCall } from './openai';
+import { streamChat, type ChatMessage, type ChatToolCall } from './llm';
 import { fallbackModel, resolveLlm } from './model-config';
 import { FILE_TOOLS, INDEX_TOOL_NAMES, runAgentTool } from './tools';
 import { agentToolSpecs } from '../api/agent';
@@ -145,7 +145,7 @@ export class BuiltinAgent extends EventEmitter implements AgentAdapter {
   async getState(): Promise<SessionState> {
     return {
       model: this.llm
-        ? { id: this.llm.modelId, name: this.llm.modelId, provider: this.llm.providerId, api: 'openai-compat' }
+        ? { id: this.llm.modelId, name: this.llm.modelId, provider: this.llm.providerId, api: this.llm.apiType }
         : null,
       sessionId: this.sessionId,
       ...(this.sessionName ? { sessionName: this.sessionName } : {}),
@@ -237,6 +237,7 @@ export class BuiltinAgent extends EventEmitter implements AgentAdapter {
     this.emitEvent({ type: 'message_start', message: { role: 'assistant', content: [], timestamp: Date.now() } });
 
     const result = await streamChat({
+      apiType: llm.apiType,
       baseUrl: llm.baseUrl,
       apiKey: llm.apiKey,
       model: llm.modelId,

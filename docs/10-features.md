@@ -120,8 +120,13 @@
 - **适配层**：`backend/src/agent/types.ts` 定接口与归一化事件（事件名沿用 pi 的
   `agent_start` / `message_*` / `tool_execution_*` / `agent_settled`），`adapter.ts` 是工厂；
   接自己的 agent（pi / OpenHands / 自研）只需写一个 `AgentAdapter` 实现 + 在工厂注册，**前端不用改**
-- 模型在顶栏「模型」里配（OpenAI 兼容 base URL + API key + 模型 id，可设默认模型）；
-  明文 key 只落 `~/.ide/model-config.json`（权限 0o600），界面只回显打码值
+- 模型在顶栏「模型」里配：先选 **API 类型**（OpenAI 兼容 `/chat/completions` / Anthropic Messages
+  `/v1/messages` / OpenAI Responses `/responses` / Google Gemini `:generateContent`），再填 base URL +
+  API key + 模型 id（可设默认模型）；OpenAI / DeepSeek / Moonshot / 智谱 / 通义 / Anthropic / Gemini
+  等常见服务可一键填充 base URL（都能再改）
+- **先测试再保存**：「测试连接」用表单里当前的值（不必先保存）给每个模型 id 发一条最小请求，
+  逐条给出 ✓/✗、耗时或对方返回的错误信息
+- 明文 key 只落 `~/.ide/model-config.json`（权限 0o600），界面只回显打码值
 - 一轮最多 `READER_AGENT_MAX_STEPS`（默认 24）次工具调用；会话历史只在内存，重启即清
 - **会话内容按 Markdown 渲染**（助手正文 + 工具结果；工具结果只在带 Markdown 结构或 HTML 文档时渲染，
   其余原样，一键切回源码）：代码块带语言标签与复制按钮；```html 块与 HTML 文档用**沙箱 iframe** 预览

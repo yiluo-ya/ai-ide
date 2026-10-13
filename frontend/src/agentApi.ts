@@ -8,14 +8,28 @@ import { request } from './api';
 
 export type BackendKind = 'builtin' | 'pi' | 'openhands';
 
+/** 模型 API 的协议形状（与后端 `ApiType` 一致）。 */
+export type ApiType = 'openai' | 'anthropic' | 'openai-responses' | 'gemini';
+
 /** 打码后的模型 provider（明文 key 不出服务端）。 */
 export interface ModelProviderPublic {
   id: string;
   name: string;
+  apiType: ApiType;
   baseUrl: string;
   models: string[];
   hasKey: boolean;
   keyHint?: string;
+}
+
+/** 「测试连接」单个模型的结果。 */
+export interface ProbeResultPublic {
+  modelId: string;
+  ok: boolean;
+  ms: number;
+  status?: number;
+  reply?: string;
+  error?: string;
 }
 
 export interface ModelConfigPublic {
@@ -70,11 +84,25 @@ export const agentApi = {
   saveProvider: (input: {
     id?: string;
     name?: string;
+    apiType?: ApiType;
     baseUrl: string;
     apiKey?: string;
     models?: string[];
   }) =>
     request<{ ok: boolean; provider: ModelProviderPublic; config: ModelConfigPublic }>('/agent/model-config', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  /** 测试连接：发一条最小请求；表单里还没保存的值也能测。 */
+  testProvider: (input: {
+    id?: string;
+    apiType?: ApiType;
+    baseUrl: string;
+    apiKey?: string;
+    models?: string[];
+  }) =>
+    request<{ ok: boolean; results: ProbeResultPublic[] }>('/agent/model-config/test', {
       method: 'POST',
       body: JSON.stringify(input),
     }),

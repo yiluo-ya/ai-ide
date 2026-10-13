@@ -63,11 +63,25 @@ export interface ModelRef {
   modelId: string;
 }
 
+/**
+ * 模型 API 的协议形状（provider 级配置）。
+ * 添加一种 = 在 `llm.ts` 里加一个分支 + 一个实现文件，其余代码不用改。
+ */
+export type ApiType = 'openai' | 'anthropic' | 'openai-responses' | 'gemini';
+
+export const API_TYPES: readonly ApiType[] = ['openai', 'anthropic', 'openai-responses', 'gemini'];
+
+export function isApiType(value: unknown): value is ApiType {
+  return typeof value === 'string' && (API_TYPES as readonly string[]).includes(value);
+}
+
 /** 解析后的调用参数（适配器不碰配置文件，宿主解析好再给）。 */
 export interface ResolvedLlm {
   providerId: string;
   providerName?: string;
   modelId: string;
+  /** 走哪种协议形状（缺省 openai 兼容）。 */
+  apiType: ApiType;
   baseUrl: string;
   apiKey: string;
 }

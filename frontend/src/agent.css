@@ -459,6 +459,96 @@
   margin-top: 12px;
 }
 
+/* API 类型徽标（provider 行上） */
+.ms-type {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+}
+
+/* 常见服务一键填充 */
+.ms-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.ms-presets-label {
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+}
+
+.ms-preset {
+  height: var(--ctl-h-sm);
+  padding: 0 10px;
+  background: var(--bg-3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease);
+}
+
+.ms-preset:hover {
+  border-color: var(--accent-2);
+}
+
+/* 「测试连接」的逐模型结果 */
+.ms-test {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--hover-soft);
+  font-size: var(--fs-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ms-test li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ms-test li.ok .ms-test-mark {
+  color: var(--ok);
+}
+
+.ms-test li.bad .ms-test-mark {
+  color: var(--danger);
+}
+
+.ms-test-mark {
+  flex: none;
+}
+
+.ms-test-model {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.ms-test-detail {
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  word-break: break-word;
+}
+
+.ms-hint {
+  margin-left: auto;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+}
+
 .ms-error {
   margin: 6px 0;
   padding: 8px;

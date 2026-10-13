@@ -1,12 +1,53 @@
 /**
- * 设置面板里的「模型」区块：内置 code-agent 用的 provider（base URL + API key + 模型 id）。
+ * 设置面板里的「模型」区块：内置 code-agent 用的 provider。
+ *
+ * 一个 provider = **API 类型**（协议形状，见 backend/src/agent/llm.ts）+ base URL + API key + 模型 id。
+ * 2026-10-13 用户要求：类型可选（OpenAI 兼容 / Anthropic / OpenAI Responses / Gemini）、
+ * base URL 有常见预设，并且**先「测试连接」再保存**（测试用的就是表单里这些值，不必先保存）。
  *
  * 与「pi 的凭证」无关：pi 有自己的 auth.json，这里只服务于阅读器内置的 agent（以及以后的适配器）。
  * 明文 key 只存在服务端的 `data/model-config.json`（0o600），界面只回显打码值。
  */
 import { useEffect, useState } from 'react';
-import { agentApi, type ModelConfigPublic, type ModelProviderPublic } from './agentApi';
+import {
+  agentApi,
+  type ApiType,
+  type ModelConfigPublic,
+  type ModelProviderPublic,
+  type ProbeResultPublic,
+} from './agentApi';
 import { useI18n } from './i18n';
+
+/** 表单里 baseUrl 的初始值 / 切类型时的默认值。 */
+const TYPE_DEFAULT_URL: Record<ApiType, string> = {
+  openai: 'https://api.openai.com/v1',
+  'openai-responses': 'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com',
+  gemini: 'https://generativelanguage.googleapis.com',
+};
+
+/** 常见服务的一键填充（类型 + baseUrl，都能再改）。 */
+const API_PRESETS: Array<{ id: string; label: string; apiType: ApiType; baseUrl: string }> = [
+  { id: 'openai', label: 'OpenAI', apiType: 'openai', baseUrl: 'https://api.openai.com/v1' },
+  { id: 'deepseek', label: 'DeepSeek', apiType: 'openai', baseUrl: 'https://api.deepseek.com/v1' },
+  { id: 'moonshot', label: 'Moonshot', apiType: 'openai', baseUrl: 'https://api.moonshot.cn/v1' },
+  { id: 'zhipu', label: 'Zhipu GLM', apiType: 'openai', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
+  { id: 'dashscope', label: 'Qwen', apiType: 'openai', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { id: 'anthropic', label: 'Anthropic', apiType: 'anthropic', baseUrl: 'https://api.anthropic.com' },
+  { id: 'gemini', label: 'Gemini', apiType: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com' },
+];
+
+/** 这些地址是「预设值」：切类型时可以直接被覆盖，用户手填的地址不覆盖。 */
+const PRESET_URLS = new Set<string>([
+  ...API_PRESETS.map((preset) => preset.baseUrl),
+  ...Object.values(TYPE_DEFAULT_URL),
+]);
+
+const parseModels = (text: string): string[] =>
+  text
+    .split(/[,\s]+/)
+    .map((model) => model.trim())
+    .filter(Boolean);
 
 export function ModelSettings() {
   const { t } = useI18n();
@@ -15,10 +56,13 @@ export function ModelSettings() {
   const [note, setNote] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState('');
-  const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1');
+  const [apiType, setApiType] = useState<ApiType>('openai');
+  const [baseUrl, setBaseUrl] = useState(TYPE_DEFAULT_URL.openai);
   const [apiKey, setApiKey] = useState('');
   const [models, setModels] = useState('');
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResults, setTestResults] = useState<ProbeResultPublic[] | null>(null);
 
   useEffect(() => {
     agentApi
@@ -30,18 +74,34 @@ export function ModelSettings() {
   const reset = () => {
     setEditing(null);
     setName('');
-    setBaseUrl('https://api.openai.com/v1');
+    setApiType('openai');
+    setBaseUrl(TYPE_DEFAULT_URL.openai);
     setApiKey('');
     setModels('');
+    setTestResults(null);
   };
 
   const edit = (provider: ModelProviderPublic) => {
     setEditing(provider.id);
     setName(provider.name);
+    setApiType(provider.apiType);
     setBaseUrl(provider.baseUrl);
     setModels(provider.models.join(', '));
     setApiKey('');
     setNote(null);
+    setTestResults(null);
+  };
+
+  /** 切类型：只把「还是预设值」的 baseUrl 换成新类型的默认值，用户手填的不动。 */
+  const changeApiType = (next: ApiType) => {
+    setApiType(next);
+    if (!baseUrl.trim() || PRESET_URLS.has(baseUrl.trim())) setBaseUrl(TYPE_DEFAULT_URL[next]);
+  };
+
+  const applyPreset = (preset: { apiType: ApiType; baseUrl: string }) => {
+    setApiType(preset.apiType);
+    setBaseUrl(preset.baseUrl);
+    setTestResults(null);
   };
 
   const submit = async () => {
@@ -53,12 +113,10 @@ export function ModelSettings() {
       const res = await agentApi.saveProvider({
         ...(editing ? { id: editing } : {}),
         name: name.trim() || undefined,
+        apiType,
         baseUrl: baseUrl.trim(),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-        models: models
-          .split(/[,\s]+/)
-          .map((m) => m.trim())
-          .filter(Boolean),
+        models: parseModels(models),
       });
       setConfig(res.config);
       setNote(editing ? t('model.updated') : t('model.added'));
@@ -67,6 +125,28 @@ export function ModelSettings() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const test = async () => {
+    if (!baseUrl.trim()) return;
+    setTesting(true);
+    setError(null);
+    setNote(null);
+    setTestResults(null);
+    try {
+      const res = await agentApi.testProvider({
+        ...(editing ? { id: editing } : {}),
+        apiType,
+        baseUrl: baseUrl.trim(),
+        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+        models: parseModels(models),
+      });
+      setTestResults(res.results);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -90,6 +170,8 @@ export function ModelSettings() {
     }
   };
 
+  const apiTypeLabel = (type: ApiType) => t(`model.type.${type}`);
+
   return (
     <section className="model-settings">
       <h3 className="wcr-section-title">{t('model.title')}</h3>
@@ -106,6 +188,9 @@ export function ModelSettings() {
           <li key={provider.id} className="ms-item">
             <div className="ms-row">
               <span className="ms-name">{provider.name}</span>
+              <span className="ms-type" title={apiTypeLabel(provider.apiType)}>
+                {apiTypeLabel(provider.apiType)}
+              </span>
               <span className="ms-url" title={provider.baseUrl}>
                 {provider.baseUrl}
               </span>
@@ -141,6 +226,20 @@ export function ModelSettings() {
         {(config?.providers.length ?? 0) === 0 && <li className="ag-dim">{t('model.noProviders')}</li>}
       </ul>
 
+      <div className="ms-presets">
+        <span className="ms-presets-label">{t('model.presets')}</span>
+        {API_PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            className="ms-preset"
+            title={preset.baseUrl}
+            onClick={() => applyPreset(preset)}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+
       <div className="ms-form">
         <label className="ms-field">
           <span>{t('model.name')}</span>
@@ -150,6 +249,15 @@ export function ModelSettings() {
             onChange={(e) => setName(e.target.value)}
             placeholder={t('model.namePlaceholder')}
           />
+        </label>
+        <label className="ms-field">
+          <span>{t('model.apiType')}</span>
+          <select className="text-input" value={apiType} onChange={(e) => changeApiType(e.target.value as ApiType)}>
+            <option value="openai">{t('model.type.openai')}</option>
+            <option value="anthropic">{t('model.type.anthropic')}</option>
+            <option value="openai-responses">{t('model.type.openai-responses')}</option>
+            <option value="gemini">{t('model.type.gemini')}</option>
+          </select>
         </label>
         <label className="ms-field">
           <span>{t('model.baseUrl')}</span>
@@ -176,7 +284,26 @@ export function ModelSettings() {
         </label>
       </div>
 
+      {testResults && (
+        <ul className="ms-test">
+          {testResults.map((result) => (
+            <li key={result.modelId} className={result.ok ? 'ok' : 'bad'}>
+              <span className="ms-test-mark">{result.ok ? '✓' : '✗'}</span>
+              <span className="ms-test-model">{result.modelId}</span>
+              <span className="ms-test-detail">
+                {result.ok
+                  ? `${result.ms}ms${result.reply ? ` · ${result.reply}` : ''}`
+                  : (result.error ?? `HTTP ${result.status ?? '?'}`)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <div className="ms-actions">
+        <button className="btn ghost" disabled={testing || !baseUrl.trim()} onClick={() => void test()}>
+          {testing ? t('model.testing') : t('model.test')}
+        </button>
         <button className="btn" disabled={saving || !baseUrl.trim()} onClick={() => void submit()}>
           {saving ? t('model.saving') : editing ? t('guide.note.saveEdit') : t('model.addProvider')}
         </button>
@@ -186,6 +313,7 @@ export function ModelSettings() {
           </button>
         )}
         {note && <span className="ms-ok">{note}</span>}
+        <span className="ms-hint">{t('model.testHint')}</span>
       </div>
     </section>
   );

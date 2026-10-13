@@ -10,11 +10,13 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import {
   loadModelConfig,
+  normalizeApiType,
   publicModelConfig,
   removeProvider,
   setDefaultModel,
   upsertProvider,
 } from '../agent/model-config';
+import { probeLlm } from '../agent/probe';
 import { isBackendKind } from '../agent/types';
 import type { AgentSessions } from '../agent/sessions';
 
@@ -40,6 +42,7 @@ export function createAgentSessionRoutes(sessions: AgentSessions): Hono {
     const saved = await upsertProvider({
       id: str(body.id),
       name: str(body.name),
+      apiType: str(body.apiType),
       baseUrl,
       apiKey: str(body.apiKey),
       models,
@@ -49,6 +52,39 @@ export function createAgentSessionRoutes(sessions: AgentSessions): Hono {
       provider: publicModelConfig({ version: 1, providers: [saved] }).providers[0],
       config: publicModelConfig(await loadModelConfig()),
     });
+  });
+
+  /**
+   * 测试连接：拿表单里的值（可能还没保存）发一条最小请求。
+   * 没带 apiKey 但带了 id 时，回退用已保存的 key —— 编辑已有 provider 时表单不回填明文 key。
+   */
+  app.post('/model-config/test', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const baseUrl = str(body.baseUrl);
+    if (!baseUrl) return c.json({ error: 'bad_request', message: 'baseUrl 必填' }, 400);
+
+    const id = str(body.id);
+    let apiKey = str(body.apiKey) ?? '';
+    if (!apiKey && id) {
+      const config = await loadModelConfig();
+      apiKey = config.providers.find((p) => p.id === id)?.apiKey ?? '';
+    }
+    if (!apiKey) return c.json({ error: 'bad_request', message: '还没有 API key：填一个再测' }, 400);
+
+    const modelId = str(body.modelId);
+    const models = modelId
+      ? [modelId]
+      : Array.isArray(body.models)
+        ? body.models.filter((m): m is string => typeof m === 'string' && Boolean(m.trim()))
+        : [];
+    if (models.length === 0) return c.json({ error: 'bad_request', message: '至少填一个模型 id 再测' }, 400);
+
+    const apiType = normalizeApiType(body.apiType);
+    const results = [];
+    for (const model of models) {
+      results.push(await probeLlm({ apiType, baseUrl, apiKey, modelId: model }));
+    }
+    return c.json({ ok: results.every((r) => r.ok), results });
   });
 
   app.post('/model-config/remove', async (c) => {

@@ -148,9 +148,14 @@ unless you enter this mode.
   (named after pi’s `agent_start` / `message_*` / `tool_execution_*` / `agent_settled`), and
   `adapter.ts` is the factory; wiring your own agent (pi / OpenHands / in-house) means writing one
   `AgentAdapter` implementation and registering it — **no frontend changes**
-- Configure models under “Model” in the top bar (OpenAI-compatible base URL + API key + model id,
-  with a default model); the plaintext key is only stored in `~/.ide/model-config.json` (mode 0o600)
-  and the UI only ever echoes a masked value
+- Models live under “Model” in the top bar: pick an **API type** (OpenAI-compatible `/chat/completions`,
+  Anthropic Messages `/v1/messages`, OpenAI Responses `/responses`, Google Gemini `:generateContent`),
+  then base URL + API key + model ids (with a default model); common services (OpenAI / DeepSeek /
+  Moonshot / Zhipu / Qwen / Anthropic / Gemini) fill the base URL in one click (still editable)
+- **Test before saving**: “Test connection” sends one minimal request per model id with the values
+  currently in the form (no need to save first) and reports ✓/✗, latency, or the provider’s error
+- The plaintext key is only stored in `~/.ide/model-config.json` (mode 0o600) and the UI only ever
+  echoes a masked value
 - At most `READER_AGENT_MAX_STEPS` (default 24) tool calls per turn; session history lives in memory
   only and is gone after a restart
 

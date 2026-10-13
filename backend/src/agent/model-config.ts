@@ -12,12 +12,14 @@ import fss from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { DATA_DIR } from '../config';
-import type { ModelRef, ResolvedLlm } from './types';
+import { isApiType, type ApiType, type ModelRef, type ResolvedLlm } from './types';
 
 export interface ModelProvider {
   id: string;
   name: string;
-  /** OpenAI 兼容 base URL，如 https://api.openai.com/v1 */
+  /** 这个 provider 走哪种协议形状（旧配置没有这一项时按 openai 兼容算）。 */
+  apiType: ApiType;
+  /** base URL，如 https://api.openai.com/v1（具体路径由 apiType 决定）。 */
   baseUrl: string;
   apiKey: string;
   /** 这个 provider 下可选的模型 id。 */
@@ -35,6 +37,7 @@ export interface ModelConfig {
 export interface PublicModelProvider {
   id: string;
   name: string;
+  apiType: ApiType;
   baseUrl: string;
   models: string[];
   hasKey: boolean;
@@ -62,7 +65,9 @@ export async function loadModelConfig(): Promise<ModelConfig> {
     const parsed = JSON.parse(raw) as Partial<ModelConfig>;
     cache = {
       version: 1,
-      providers: Array.isArray(parsed.providers) ? parsed.providers.filter(isProvider) : [],
+      providers: Array.isArray(parsed.providers)
+        ? parsed.providers.filter(isProvider).map((p) => ({ ...p, apiType: normalizeApiType(p.apiType) }))
+        : [],
       ...(isModelRef(parsed.default) ? { default: parsed.default } : {}),
     };
   } catch {
@@ -89,6 +94,7 @@ export function publicModelConfig(config: ModelConfig): PublicModelConfig {
     providers: config.providers.map((provider) => ({
       id: provider.id,
       name: provider.name,
+      apiType: provider.apiType,
       baseUrl: provider.baseUrl,
       models: provider.models,
       hasKey: Boolean(provider.apiKey),
@@ -103,6 +109,7 @@ export function publicModelConfig(config: ModelConfig): PublicModelConfig {
 export async function upsertProvider(input: {
   id?: string;
   name?: string;
+  apiType?: string;
   baseUrl: string;
   apiKey?: string;
   models?: string[];
@@ -112,6 +119,7 @@ export async function upsertProvider(input: {
   const provider: ModelProvider = {
     id: existing?.id ?? input.id ?? `p-${Date.now().toString(36)}`,
     name: input.name?.trim() || existing?.name || input.baseUrl,
+    apiType: normalizeApiType(input.apiType ?? existing?.apiType),
     baseUrl: input.baseUrl.trim().replace(/\/+$/, ''),
     apiKey: input.apiKey?.trim() || existing?.apiKey || '',
     models: (input.models ?? existing?.models ?? []).map((m) => m.trim()).filter(Boolean),
@@ -152,6 +160,7 @@ export async function resolveLlm(ref: ModelRef): Promise<ResolvedLlm> {
     providerId: provider.id,
     providerName: provider.name,
     modelId: ref.modelId,
+    apiType: provider.apiType,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
   };
@@ -168,6 +177,11 @@ export async function fallbackModel(): Promise<ModelRef | null> {
 /** 清掉进程内缓存（测试与「保存后立刻生效」用）。 */
 export function resetModelConfigCache(): void {
   cache = null;
+}
+
+/** 未知 / 缺失的 apiType 一律按 openai 兼容算（旧配置文件就是这么存的）。 */
+export function normalizeApiType(value: unknown): ApiType {
+  return isApiType(value) ? value : 'openai';
 }
 
 function maskKey(key: string): string {
