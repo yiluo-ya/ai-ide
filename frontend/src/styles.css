@@ -856,10 +856,22 @@ kbd {
  */
 
 /* 大纲 */
-.outline,
-.search-panel {
+.outline {
   overflow: auto;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 16px;
+}
+
+.outline-search-wrap {
+  padding: 0 0 4px;
+}
+
+.outline-search {
+  width: 100%;
+  font-size: 12px;
 }
 
 .search-host {
@@ -991,13 +1003,14 @@ kbd {
   /* 搜索历史下拉（.search-history）以面板为锚；侧栏加了 position: relative 后
      这里必须自己定位，否则下拉会跑到侧栏顶部、盖住输入框 */
   position: relative;
+  padding: 8px 10px 16px;
+  gap: 6px;
 }
 
 .search-inputs {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 8px 0;
 }
 
 .search-inputs .text-input {
@@ -1009,7 +1022,6 @@ kbd {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  padding: 6px 8px;
   color: var(--fg-dim);
   font-size: var(--fs-sm);
 }
@@ -1022,7 +1034,7 @@ kbd {
 }
 
 .search-summary {
-  padding: 4px 8px 6px;
+  padding: 4px 0 6px;
   color: var(--fg-dim);
   font-size: var(--fs-sm);
 }
@@ -3230,7 +3242,7 @@ mark {
   flex: 1;
   min-height: 0;
   min-width: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .rail-bottom {

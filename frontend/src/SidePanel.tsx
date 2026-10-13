@@ -158,9 +158,29 @@ export function OutlinePanel({
   const { t } = useI18n();
   /** 手动展开 / 折叠的覆盖；缺省时按「顶层一级 + 光标链」展开。 */
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
-  if (!fileName) return <div className="panel-empty">{t('side.noFile')}</div>;
+  const [query, setQuery] = useState('');
+
   // 只留方法与类（含内部类）：变量/字段/导入不进大纲
-  const shown = filterOutline(symbols);
+  const shown = useMemo(() => filterOutline(symbols), [symbols]);
+
+  // 搜索过滤：递归匹配 name，保留命中节点及其祖先目录
+  const filtered = useMemo(() => {
+    if (!query.trim()) return shown;
+    const q = query.toLowerCase();
+    const walk = (items: SymbolInfo[]): SymbolInfo[] => {
+      const out: SymbolInfo[] = [];
+      for (const s of items) {
+        const children = walk(s.children ?? []);
+        if (s.name.toLowerCase().includes(q) || children.length > 0) {
+          out.push({ ...s, children });
+        }
+      }
+      return out;
+    };
+    return walk(shown);
+  }, [shown, query]);
+
+  if (!fileName) return <div className="panel-empty">{t('side.noFile')}</div>;
   if (!shown.length) return <div className="panel-empty">{t('side.noSymbols')}</div>;
   const cursorPath = new Set(symbolPathAt(shown, cursorLine).map(outlineKey));
   const allKeys: string[] = [];
@@ -174,26 +194,42 @@ export function OutlinePanel({
   const setAll = (open: boolean) => setOverrides(Object.fromEntries(allKeys.map((k) => [k, open])));
   return (
     <div className="outline">
-      <div className="outline-tools">
-        <button className="btn ghost small" onClick={() => setAll(true)}>
-          {t('side.expandAll')}
-        </button>
-        <button className="btn ghost small" onClick={() => setAll(false)}>
-          {t('side.collapseAll')}
-        </button>
+      <div className="changes-head">
+        <h3>{t('app.activityOutline')}</h3>
+        <div className="changes-head-actions">
+          <button className="btn ghost small" onClick={() => setAll(true)}>
+            {t('side.expandAll')}
+          </button>
+          <button className="btn ghost small" onClick={() => setAll(false)}>
+            {t('side.collapseAll')}
+          </button>
+        </div>
       </div>
-      {shown.map((s) => (
-        <OutlineNode
-          key={`${s.name}:${s.location.range.start.line}`}
-          symbol={s}
-          depth={0}
-          activeLine={cursorLine}
-          onJump={onJump}
-          overrides={overrides}
-          cursorPath={cursorPath}
-          onToggle={(key, open) => setOverrides((prev) => ({ ...prev, [key]: open }))}
+      <div className="outline-search-wrap">
+        <input
+          className="text-input outline-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t('side.searchSymbols')}
+          spellCheck={false}
         />
-      ))}
+      </div>
+      {filtered.length === 0 && query.trim() ? (
+        <div className="panel-empty">{t('side.noResults')}</div>
+      ) : (
+        filtered.map((s) => (
+          <OutlineNode
+            key={`${s.name}:${s.location.range.start.line}`}
+            symbol={s}
+            depth={0}
+            activeLine={cursorLine}
+            onJump={onJump}
+            overrides={overrides}
+            cursorPath={cursorPath}
+            onToggle={(key, open) => setOverrides((prev) => ({ ...prev, [key]: open }))}
+          />
+        ))
+      )}
     </div>
   );
 }
@@ -535,6 +571,20 @@ export function SearchPanel({
 
   return (
     <div className={`search-panel ${fullscreen ? 'fullscreen' : ''}`}>
+      <div className="changes-head">
+        <h3>{t('app.activitySearch')}</h3>
+        {onToggleFullscreen && (
+          <div className="changes-head-actions">
+            <button
+              className="btn ghost small"
+              onClick={onToggleFullscreen}
+              title={fullscreen ? t('side.backToSidebar') : t('side.fullscreenTitle')}
+            >
+              {fullscreen ? t('side.exitFullscreen') : t('side.fullscreen')}
+            </button>
+          </div>
+        )}
+      </div>
       <div className="search-inputs">
         <div className="search-input-row">
           <input
@@ -557,15 +607,6 @@ export function SearchPanel({
           ) : (
             <button className="btn ghost small" onClick={submit}>
               {t('app.tab.search')}
-            </button>
-          )}
-          {onToggleFullscreen && (
-            <button
-              className="btn ghost small"
-              onClick={onToggleFullscreen}
-              title={fullscreen ? t('side.backToSidebar') : t('side.fullscreenTitle')}
-            >
-              {fullscreen ? t('side.exitFullscreen') : t('side.fullscreen')}
             </button>
           )}
         </div>
