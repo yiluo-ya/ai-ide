@@ -446,6 +446,8 @@ export const zh: Record<string, string> = {
   'app.loading': '加载中…',
   'app.indexing': '索引中',
   'app.ready': '就绪',
+  'app.selectionInfo': '{chars}c · {lines}L',
+  'app.docStats': '{chars}c · {lines}L',
   'app.dockAria': '变更 / 命令 / 大纲 / 接口 / 搜索',
   'app.resizeDock': '调整右侧栏宽度',
   'app.collapseDock': '收起右侧栏',

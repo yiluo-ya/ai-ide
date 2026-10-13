@@ -447,6 +447,8 @@ export const en: Record<string, string> = {
   'app.loading': 'Loading…',
   'app.indexing': 'Indexing',
   'app.ready': 'Ready',
+  'app.selectionInfo': '{chars}c · {lines}L',
+  'app.docStats': '{chars}c · {lines}L',
   'app.dockAria': 'Changes / Commands / Outline / API / Search',
   'app.resizeDock': 'Resize right dock',
   'app.collapseDock': 'Collapse right dock',

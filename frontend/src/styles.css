@@ -107,8 +107,6 @@
   --notice-border: #2f5d78;
   --notice-dot: #4ea1d3;
   --flash-fg: #ffe0a3;
-  --statusbar-bg: #0e639c;
-  --statusbar-fg: #ffffff;
   --swatch-bg: #131315;
   --hover-soft: rgba(255, 255, 255, 0.05);
   --hover-soft-2: rgba(255, 255, 255, 0.07);
@@ -239,8 +237,6 @@
   --notice-border: #9dc6e0;
   --notice-dot: #1f7fbf;
   --flash-fg: #7a4a10;
-  --statusbar-bg: #0f6cbd;
-  --statusbar-fg: #ffffff;
   --swatch-bg: #ffffff;
   --hover-soft: rgba(15, 23, 32, 0.05);
   --hover-soft-2: rgba(15, 23, 32, 0.07);
@@ -1499,8 +1495,9 @@ mark {
   gap: 14px;
   min-height: 24px;
   padding: 2px 12px;
-  background: var(--statusbar-bg);
-  color: var(--statusbar-fg);
+  background: var(--bg-2);
+  color: var(--fg-dim);
+  border-top: 1px solid var(--border);
   font-size: var(--fs-sm);
   line-height: var(--lh-tight);
   font-variant-numeric: tabular-nums;

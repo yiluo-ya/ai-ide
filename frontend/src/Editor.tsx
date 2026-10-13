@@ -148,6 +148,8 @@ interface Props {
   /** 索引完成 / 文件变更时 +1，用于重拉语义着色。 */
   highlightsToken: number;
   onCursor?: (line: number, col: number) => void;
+  /** 状态栏：当前选区的字符数与行数（无选区时为 null）。 */
+  onSelection?: (sel: { chars: number; lines: number } | null) => void;
   /** N22：光标 / 滚动位置变化时上报（供位置记忆落盘）。 */
   onPosition?: (line: number, col: number, scrollTop: number) => void;
   /** 判据 6：复制当前位置为 `path:line:col`。 */
@@ -198,6 +200,7 @@ export function Editor({
   reveal,
   highlightsToken,
   onCursor,
+  onSelection,
   onPosition,
   onCopyLocation,
   onCopySnippet,
@@ -217,6 +220,8 @@ export function Editor({
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const onCursorRef = useRef(onCursor);
   onCursorRef.current = onCursor;
+  const onSelectionRef = useRef(onSelection);
+  onSelectionRef.current = onSelection;
   const onPositionRef = useRef(onPosition);
   onPositionRef.current = onPosition;
   const fileRef = useRef(file);
@@ -309,6 +314,20 @@ export function Editor({
         onPositionRef.current?.(pos?.lineNumber ?? 1, pos?.column ?? 1, editor.getScrollTop());
       }, 400);
     };
+    /** 状态栏：上报当前选区的字符数与行数（空选区 = null）。 */
+    const reportSelection = () => {
+      const model = editor.getModel();
+      const sel = editor.getSelection();
+      if (!model || !sel || sel.isEmpty()) {
+        onSelectionRef.current?.(null);
+        return;
+      }
+      const lines = sel.endLineNumber - sel.startLineNumber + 1;
+      // getValueLengthInRange 把跨行的换行符也算进长度，减掉才是纯字符数
+      const chars = model.getValueLengthInRange(sel) - (lines - 1);
+      onSelectionRef.current?.({ chars, lines });
+    };
+
     const subs = [
       // FR-0008：正文变化上报（App 负责 1 s 防抖落盘）；历史快照不上报
       editor.onDidChangeModelContent(() => {
@@ -319,6 +338,7 @@ export function Editor({
         if (historicalRef.current) return; // 历史版本不上报光标
         onCursorRef.current?.(e.position.lineNumber, e.position.column);
         reportPosition();
+        reportSelection();
         // S7a：宿主跟着知道「在读哪一行」；选区单独上报（S7b），光标上只带一次快照
         const sel = editor.getSelection();
         reportCaret({
@@ -339,6 +359,7 @@ export function Editor({
           col: e.selection.startColumn,
           selection: e.selection.isEmpty() ? undefined : selectionOf(editor, e.selection),
         });
+        reportSelection();
       }),
     ];
     // 判据 6：把光标处复制成 `path:line:col`（右键菜单 + Ctrl/Cmd+Alt+C）

@@ -202,11 +202,11 @@ async function main() {
     assert(items > 0, '空查询结果');
     await page.keyboard.press('Enter');
     await page.waitForTimeout(900);
-    const bar = await page.locator('.statusbar').first().innerText();
-    assert(/util\.ts/.test(bar), `状态栏没有打开文件：${bar.replace(/\s+/g, ' ')}`);
-    const tabs = await page.locator('.tabbar .tab').count();
-    assert(tabs >= 1, '没有标签');
-    return `${bar.replace(/\s+/g, ' ')} / ${tabs} 个标签`;
+    // 2026-10-13：状态栏不再显示文件名（改为位置 / 选中 / 编码），改从标签条确认
+    const tabs = await page.locator('.tabbar .tab').allInnerTexts();
+    assert(tabs.some((t) => /util\.ts/.test(t)), `标签条没有打开的文件：${tabs.join(' | ')}`);
+    assert(tabs.length >= 1, '没有标签');
+    return `${tabs.join(' | ')}`;
   });
 
   // 2026-10-03 用户要求移除「引用 / 层级」面板：原来的 N4（引用）、N（家族）、N16（调用层级）
@@ -252,8 +252,9 @@ async function main() {
     assert(jumpBtn >= 1, '没有「跳到 import 行」动作');
     await page.locator('.goto-notice .btn', { hasText: '跳到 import 行' }).click();
     await page.waitForTimeout(800);
-    const bar = await page.locator('.statusbar').first().innerText();
-    assert(/util\.ts/.test(bar), `没跳到 import 所在文件：${bar.replace(/\s+/g, ' ')}`);
+    // 2026-10-13：状态栏不再显示文件名，改从标签条确认跳到了哪个文件
+    const tabs = await page.locator('.tabbar .tab').allInnerTexts();
+    assert(tabs.some((t) => /util\.ts/.test(t)), `没跳到 import 所在文件：${tabs.join(' | ')}`);
     return notice.replace(/\s+/g, ' ').slice(0, 90);
   });
 

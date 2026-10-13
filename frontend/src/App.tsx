@@ -141,6 +141,8 @@ export default function App() {
   };
   const [quick, setQuick] = useState<QuickOpenMode>(null);
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
+  /** 状态栏：当前选区的字符数 / 行数（无选区时为 null）。 */
+  const [selection, setSelection] = useState<{ chars: number; lines: number } | null>(null);
   const [fileFilter, setFileFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFullscreen, setSearchFullscreen] = useState(false);
@@ -193,6 +195,9 @@ export default function App() {
   useEffect(() => {
     if (fsPrompt) fsInputRef.current?.focus();
   }, [fsPrompt]);
+
+  // 换文件时清掉上一份的选区读数（Editor 复用同一个实例，不会自动清）
+  useEffect(() => setSelection(null), [store.openFile]);
 
   const openFsPrompt = (next: FsPrompt) => {
     setFsPrompt(next);
@@ -333,6 +338,11 @@ export default function App() {
     () => (blameOn ? blameAt(blame, cursor.line) : null),
     [blameOn, blame, cursor.line],
   );
+  /** 状态栏：整份文档的总字符数 / 总行数（以编辑器当前内容为准）。 */
+  const docStats = useMemo(() => {
+    const text = store.fileContent;
+    return { chars: text.length, lines: text.length === 0 ? 1 : text.split('\n').length };
+  }, [store.fileContent]);
   const mapOverview = useMapStore((s) => s.overview);
   /** FR-0008：状态栏的保存状态文案（idle / 无文件时不显示）。 */
   const saveLabel = !store.openFile
@@ -1116,6 +1126,7 @@ export default function App() {
                     reveal={store.reveal}
                     highlightsToken={store.highlightsToken}
                     onCursor={(line, col) => setCursor({ line, col })}
+                    onSelection={setSelection}
                     onPosition={(line, col, scrollTop) => rememberPosition(store.openFile!, line, col, scrollTop)}
                     onCopyLocation={copyLocation}
                     onCopySnippet={copySnippet}
@@ -1210,8 +1221,9 @@ export default function App() {
                   卸载会把会话、滚动内容连同里面跑着的进程一起销毁（见下方终端常驻）。 */}
               <div className="bottom-body">
                 {bottomTab === 'output' && <OutputPanel projectId={store.projectId} />}
-                {/* 终端常驻：切到「输出」/收起/换项目都只隐藏、不卸载 —— 会话、滚动内容与
-                    里面跑着的进程都留着（切换项目也不重连，见 TerminalPanel）。 */}
+                {/* 终端常驻：切到「输出」/收起面板只隐藏、不卸载 —— 会话、滚动内容与
+                    里面跑着的进程都留着。切换项目时终端**跟项目走**：会话重开到新项目根
+                    （路径与当前项目一致），标签保留、面板不自行退出（关闭靠标签 ×）。 */}
                 <div className="terminal-slot" style={{ display: bottomTab === 'terminal' ? 'flex' : 'none' }}>
                   <TerminalPanel projectId={store.projectId} runRequest={runRequest} />
                 </div>
@@ -1256,7 +1268,6 @@ export default function App() {
           </div>
 
           <footer className="statusbar">
-            <span>{store.openFile ?? '—'}</span>
             {saveLabel && <span className={`save-state ${store.saveStatus}`}>{saveLabel}</span>}
             {cursorBlame && (
               <span className="blame-status" title={t('blame.title')}>
@@ -1267,11 +1278,17 @@ export default function App() {
             {store.flash && <span className="flash-text">{store.flash}</span>}
             {store.notice?.reason === 'no-symbol' && <span className="notice-hint">{store.notice.message}</span>}
             {store.fileLoading && <span>{t('app.loading')}</span>}
+            {store.openFile && (
+              <span>{t('app.docStats', { chars: docStats.chars, lines: docStats.lines })}</span>
+            )}
             <span>
               Ln {cursor.line}, Col {cursor.col}
             </span>
+            {selection && (
+              <span>{t('app.selectionInfo', { chars: selection.chars, lines: selection.lines })}</span>
+            )}
+            <span>utf-8</span>
             <span>{store.fileLang}</span>
-            <span>{store.status?.indexing ? t('app.indexing') : t('app.ready')}</span>
           </footer>
         </main>
 
