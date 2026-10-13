@@ -49,6 +49,17 @@ import type {
   SymbolKind,
   TypeHierarchyResult,
   TypeNode,
+  // API 面板（FR-0001）
+  ApiDeleteRequest,
+  ApiEnvironments,
+  ApiEnsureResult,
+  ApiExportResult,
+  ApiRenameRequest,
+  ApiRequestDef,
+  ApiSaveRequest,
+  ApiSendRequest,
+  ApiSendResult,
+  ApiTreeResult,
 } from '../../shared/types';
 import type { LanguagesPayload } from './languages';
 
@@ -86,6 +97,16 @@ export type {
   ImplementationsResult,
   SearchMatch,
   SearchOptions,
+  ApiDeleteRequest,
+  ApiEnvironments,
+  ApiEnsureResult,
+  ApiExportResult,
+  ApiRenameRequest,
+  ApiRequestDef,
+  ApiSaveRequest,
+  ApiSendRequest,
+  ApiSendResult,
+  ApiTreeResult,
 };
 
 const BASE = '/api';
@@ -451,6 +472,35 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ file, line, col }),
     }),
+
+  // ------------------------------------------------------------ API 面板（FR-0001）
+
+  /** 读整棵 `.api` 树（环境 + 集合目录树 + README）。 */
+  apiTree: (id: string) => request<ApiTreeResult>(`/projects/${id}/apis/tree`),
+
+  /** 初始化 `.api`（首次建 README + 空环境），幂等。 */
+  apiEnsure: (id: string) =>
+    request<ApiEnsureResult>(`/projects/${id}/apis/ensure`, { method: 'POST' }),
+
+  /** 写接口 / 目录 / 环境。 */
+  apiSave: (id: string, body: ApiSaveRequest) =>
+    request<{ ok: true }>(`/projects/${id}/apis/save`, { method: 'POST', body: JSON.stringify(body) }),
+
+  /** 删接口 / 目录（递归）。 */
+  apiDelete: (id: string, body: ApiDeleteRequest) =>
+    request<{ ok: true }>(`/projects/${id}/apis/delete`, { method: 'POST', body: JSON.stringify(body) }),
+
+  /** 重命名接口 / 目录。 */
+  apiRename: (id: string, body: ApiRenameRequest) =>
+    request<{ ok: true }>(`/projects/${id}/apis/rename`, { method: 'POST', body: JSON.stringify(body) }),
+
+  /** 转发一次真实 HTTP 请求（后端同机发，绕过 CORS）。 */
+  apiSend: (id: string, body: ApiSendRequest) =>
+    request<ApiSendResult>(`/projects/${id}/apis/send`, { method: 'POST', body: JSON.stringify(body) }),
+
+  /** 导出 postman / swagger。 */
+  apiExport: (id: string, format: 'postman' | 'swagger') =>
+    request<ApiExportResult>(`/projects/${id}/apis/export?format=${format}`),
 };
 
 /** 订阅索引事件（SSE）。返回取消函数。 */
