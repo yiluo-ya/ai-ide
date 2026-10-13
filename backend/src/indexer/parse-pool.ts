@@ -72,11 +72,33 @@ export class ParsePool {
       if (!workers.length) return this.serial(tasks);
       const chunks = splitInto(tasks, this.size);
       const parts = await Promise.all(chunks.map((chunk, i) => this.runOn(workers[i % workers.length], chunk)));
-      return parts.flat();
+      return this.retryTimedOut(tasks, parts.flat());
     } catch (e) {
       this.fallback(e);
       return this.serial(tasks);
     }
+  }
+
+  /**
+   * 超时的任务再**单独**试一次：卡顿多是偶发的（同一文件时而 120ms、时而 70s），
+   * 单文件重试有大机会成功，而单文件超时不会再连累同批其它文件。
+   * 再次超时就认下失败（不再递归）。
+   */
+  private async retryTimedOut(tasks: ParseTask[], results: ParseResult[]): Promise<ParseResult[]> {
+    const idx = results.map((r, i) => (!r.ok && r.error.startsWith('parse timeout') ? i : -1)).filter((i) => i >= 0);
+    if (!idx.length) return results;
+    const workers = this.ensureWorkers(); // 超时退休的 worker 在这里补建
+    if (!workers.length) return results;
+    await Promise.all(
+      idx.map((i, n) =>
+        this.runOn(workers[n % workers.length], [tasks[i]])
+          .then(([r]) => {
+            if (r) results[i] = r;
+          })
+          .catch(() => undefined),
+      ),
+    );
+    return results;
   }
 
   /** 关闭并回收全部 worker。 */
