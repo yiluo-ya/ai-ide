@@ -22,8 +22,9 @@ import { AgentView } from './AgentView';
 import { AgentSessions } from './AgentSessions';
 
 import { FlowView } from './FlowView';
-import { Overview, OverviewPanel } from './Overview';
+import { Overview } from './Overview';
 import { OutlinePanel, SearchPanel } from './SidePanel';
+import { ApiPanel } from './ApiPanel';
 import { GotoNoticeBar, gotoFailureMessage } from './Notice';
 import { QuickOpen, type QuickOpenMode } from './QuickOpen';
 import { TopBar } from './TopBar';
@@ -52,7 +53,6 @@ import type { BlameResult, FileNode, FileOrigin } from '../../shared/types';
 import type { HotMetric } from './mapApi';
 
 type PanelTab =
-  | 'overview'
   | 'guide'
   | 'files'
   | 'refs'
@@ -61,7 +61,8 @@ type PanelTab =
   | 'search'
   | 'changes'
   | 'git'
-  | 'agent';
+  | 'agent'
+  | 'api';
 
 /**
  * 底部面板的入口（VS Code 布局迁移 2026-10-08）：输出 / 终端。
@@ -75,10 +76,10 @@ const BOTTOM_TITLE: Record<BottomTab, string> = {
 };
 
 /**
- * 快捷键顺序的**唯一次序来源**：Ctrl/Cmd+1..6 = 文件 / 搜索 / 源码管理 / code会话 / 总览 / 大纲，0 = 最后一个。
+ * 快捷键顺序的**唯一次序来源**：Ctrl/Cmd+1..6 = 文件 / 搜索 / 源码管理 / code会话 / 大纲 / 接口，0 = 最后一个。
  * 视图实际在哪一侧由 layout.ts 决定；快捷键聚焦到该视图所在侧。
  */
-const PANEL_TABS: ViewId[] = ['files', 'search', 'git', 'agent', 'overview', 'outline'];
+const PANEL_TABS: ViewId[] = ['files', 'search', 'git', 'agent', 'outline', 'api'];
 const HOT_METRICS: HotMetric[] = ['files', 'refs', 'symbols', 'defined', 'unique', 'recent'];
 
 /** M20 地图快照：把「地图的哪个视图」写进 URL，这样「看这个模块的依赖图 / 概览」可以被贴出去。
@@ -843,16 +844,6 @@ export default function App() {
         ) : (
           <div className="panel-empty">{t('app.noProject')}</div>
         );
-      case 'overview':
-        return store.projectId ? (
-          <OverviewPanel
-            onOpenFile={(file, line) => jump(file, line ?? 1, 1)}
-            onOpenMap={() => setMainView('map')}
-            onOpenGraph={() => setGraphOpen(true)}
-          />
-        ) : (
-          <div className="panel-empty">{t('app.noProject')}</div>
-        );
       case 'outline':
         return (
           <OutlinePanel
@@ -862,6 +853,8 @@ export default function App() {
             onJump={(s) => jump(s.location.file, s.location.range.start.line, s.location.range.start.col)}
           />
         );
+      case 'api':
+        return store.projectId ? <ApiPanel projectId={store.projectId} /> : <div className="panel-empty">{t('app.noProject')}</div>;
     }
   };
 

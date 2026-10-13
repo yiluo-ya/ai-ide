@@ -2,7 +2,7 @@
  * 活动栏（最左 / 最右竖条窄栏，VS Code 布局迁移，2026-10-08）。
  *
  * 竖排图标，点击选中该侧视图；拖拽图标到另一条活动栏 = 换侧；在同一条活动栏内拖到某图标上 = 上下排序。
- * 六个视图：files / search / git / agent / overview / outline。
+ * 六个视图：files / search / git / agent / outline / api。
  */
 import { useState, type DragEvent, type ReactNode } from 'react';
 import { useI18n } from './i18n';
@@ -18,8 +18,8 @@ const LABEL: Record<ViewId, string> = {
   search: 'app.activitySearch',
   git: 'app.activityGit',
   agent: 'app.activityAgent',
-  overview: 'app.tab.overview',
   outline: 'app.activityOutline',
+  api: 'app.activityApi',
 };
 
 /** 内联图标（与 TopBar 里一致的线性 SVG 风格）。 */
@@ -50,13 +50,6 @@ function icon(id: ViewId): ReactNode {
           <path d="M8.5 10.5h.01M15.5 10.5h.01M9 14.5c1.8 1.4 4.2 1.4 6 0" />
         </>
       );
-    case 'overview':
-      return (
-        <>
-          <rect x="4" y="4" width="16" height="16" rx="2" />
-          <path d="M4 15h16M10 4v16M14 9l3 2-3 2" />
-        </>
-      );
     case 'outline':
       return (
         <>
@@ -64,6 +57,13 @@ function icon(id: ViewId): ReactNode {
           <circle cx="4" cy="6" r="1" />
           <circle cx="4" cy="12" r="1" />
           <circle cx="4" cy="18" r="1" />
+        </>
+      );
+    case 'api':
+      return (
+        <>
+          <path d="m8 8-4 4 4 4M16 8l4 4-4 4" />
+          <line x1="13" y1="6" x2="11" y2="18" />
         </>
       );
   }

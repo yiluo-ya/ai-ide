@@ -1,7 +1,7 @@
 /**
  * 视图侧位布局（VS Code 双活动栏，2026-10-08）。
  *
- * 六个视图（files / search / git / agent / overview / outline）各有一个 side（left / right），
+ * 六个视图（files / search / git / agent / outline / api）各有一个 side（left / right），
  * 由左右两条活动栏分别展示；拖拽图标到另一条活动栏 = 换侧；在同一条活动栏内拖拽 = 上下排序。
  *
  * 纪律（对齐 prefs.ts）：
@@ -14,9 +14,9 @@ import { useSyncExternalStore } from 'react';
 
 export type ViewSide = 'left' | 'right';
 
-export type ViewId = 'files' | 'search' | 'git' | 'agent' | 'overview' | 'outline';
+export type ViewId = 'files' | 'search' | 'git' | 'agent' | 'outline' | 'api';
 
-export const ALL_VIEWS: ViewId[] = ['files', 'search', 'git', 'agent', 'overview', 'outline'];
+export const ALL_VIEWS: ViewId[] = ['files', 'search', 'git', 'agent', 'outline', 'api'];
 
 /** 默认布局：左边 = 文件 / 搜索 / 大纲 / code会话；右边 = 源码管理(git) / 总览。 */
 const DEFAULT_SIDES: Record<ViewId, ViewSide> = {
@@ -24,14 +24,14 @@ const DEFAULT_SIDES: Record<ViewId, ViewSide> = {
   search: 'left',
   git: 'right',
   agent: 'left',
-  overview: 'right',
   outline: 'left',
+  api: 'right',
 };
 
 /** 默认每侧顺序。 */
 const DEFAULT_ORDER: Record<ViewSide, ViewId[]> = {
   left: ['files', 'search', 'outline', 'agent'],
-  right: ['git', 'overview'],
+  right: ['git', 'api'],
 };
 
 const DEFAULT_ACTIVE: Record<ViewSide, ViewId> = { left: 'files', right: 'git' };
