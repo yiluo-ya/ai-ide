@@ -88,6 +88,8 @@ export class ProjectRegistry {
     if (project) {
       this.ensureIndexing(project);
       this.lastAccess.set(id, Date.now());
+      // 切项目就腾内存：不等 15s 巡检 / 60s 空闲（见 evictFor）
+      this.evictFor(id);
     }
     return project;
   }
@@ -122,6 +124,7 @@ export class ProjectRegistry {
     if (existing) {
       this.ensureIndexing(existing);
       this.lastAccess.set(existing.id, Date.now());
+      this.evictFor(existing.id);
       return { project: existing, created: false };
     }
     const stat = await fsp.stat(abs).catch(() => null);
@@ -134,6 +137,7 @@ export class ProjectRegistry {
     await this.save();
     this.ensureIndexing(project);
     this.lastAccess.set(projectId, Date.now());
+    this.evictFor(projectId);
     return { project, created: true };
   }
 
@@ -257,6 +261,29 @@ export class ProjectRegistry {
       this.stopProject(id, project);
       this.lastAccess.delete(id);
       logInfo('project.index.released', { project: id, active: active.length - victims.length });
+    }
+  }
+
+  /**
+   * 切项目时即时腾内存（2026-10-13）：把「不是当前项目」且超出上限的旧索引立刻释放，
+   * 不必等 15s 巡检 / 60s 空闲 —— 否则「切走再切回」时两次恢复的占用会叠加
+   * （maxActive=2 时 heap 峰值 ~1.1GB）。
+   * 正在索引 / 有活跃 SSE 连接的项目不动（用户可能正看着另一个标签页）。
+   */
+  private evictFor(keepId: string): void {
+    if (this.maxActiveProjects <= 0) return;
+    const allowed = Math.max(0, this.maxActiveProjects - 1);
+    const others = [...this.started]
+      .filter((id) => id !== keepId && this.projects.has(id))
+      .map((id) => ({ id, at: this.lastAccess.get(id) ?? 0 }))
+      .sort((a, b) => a.at - b.at);
+    for (const { id } of others.slice(0, Math.max(0, others.length - allowed))) {
+      if (!this.canRelease(id)) continue;
+      const project = this.projects.get(id);
+      if (!project) continue;
+      this.stopProject(id, project);
+      this.lastAccess.delete(id);
+      logInfo('project.index.released', { project: id, reason: 'switch', active: this.started.size });
     }
   }
 

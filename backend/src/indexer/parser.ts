@@ -86,8 +86,12 @@ export function parseSourceBudgeted(
       },
     });
     if (!tree) return { tree: null, truncated };
+    // 截断判定必须用**字符**长度：tree-sitter 的 `endIndex` 是字符下标（编辑单位），
+    // 与 `source.length` 同口径。此前拿 `Buffer.byteLength(source)`（字节数）比，
+    // 含多字节字符（中文注释 / 全角标点）的 ≥64KB 文件必然 `endIndex < byteLength`，
+    // 于是被误判「超预算截断」整份丢弃 —— 表现为这些文件永远没有符号索引。
     const end = (tree as { rootNode?: { endIndex?: number } }).rootNode?.endIndex;
-    if (typeof end === 'number' && end < Buffer.byteLength(source)) truncated = true;
+    if (typeof end === 'number' && end < source.length) truncated = true;
     return { tree, truncated };
   } catch {
     return { tree: null, truncated };

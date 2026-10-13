@@ -664,6 +664,9 @@ export type HighlightKind = 0 | 1 | 2;
  */
 const isEmphasizable = (def: DefRecord): boolean => !def.local && def.kind !== 'parameter';
 
+/** 着色结果缓存上限（FIFO 淘汰，与 store 的 textCache 同口径）：防止长会话按「看过的文件数」涨内存。 */
+const HIGHLIGHT_CACHE_MAX = 2000;
+
 /**
  * 逐符号判定「本项目 / 外部 / 局部」，返回扁平数组，每 4 个一组
  * `[line(1-based), col(1-based), length(UTF-16), kind]`，按位置升序。
@@ -717,6 +720,10 @@ export function highlightSpans(project: ProjectIndex, file: string): number[] {
     data.push(line, col, length, kind);
     prevLine = line;
     prevEnd = col + length;
+  }
+  if (project.highlightCache.size >= HIGHLIGHT_CACHE_MAX && !project.highlightCache.has(file)) {
+    const oldest = project.highlightCache.keys().next().value;
+    if (oldest !== undefined) project.highlightCache.delete(oldest);
   }
   project.highlightCache.set(file, { revision: project.indexVersion, data });
   return data;

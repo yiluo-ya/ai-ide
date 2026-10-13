@@ -4,7 +4,6 @@
  * 后端起常驻 PTY（node-pty + conpty，见 backend/src/api/terminal.ts），这里用 @xterm/xterm
  * 渲染，WebSocket 双向透传。能力对齐 VS Code 终端：
  * - 多标签（每个标签一条独立会话）；
- * - 标签内向下分屏（多个 pane 垂直堆叠，分隔线可拖动，各自独立会话）；
  * - xterm 自适应容器大小 + 窗口 resize 同步给后端 PTY；
  * - cwd 跟随当前项目（后端解析，cwd = 项目根）。
  *
@@ -12,7 +11,7 @@
  *   客户端→服务端：{type:'spawn',cols,rows} 首帧起 shell；{type:'input',data}；{type:'resize',cols,rows}。
  *   服务端→客户端：{type:'output',data}；{type:'exit',exitCode}；{type:'error',message}。
  *
- * 生命周期纪律：xterm 实例一旦 open 就不随 React 卸载而 dispose —— 所有标签 / 分屏的 DOM 常驻，
+ * 生命周期纪律：xterm 实例一旦 open 就不随 React 卸载而 dispose —— 所有标签的 DOM 常驻，
  * 非激活的仅用 `display:none` 隐藏（否则切换标签会在 StrictMode 双挂载下反复 open/dispose 报错）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -106,14 +105,6 @@ function PlusIcon() {
   return <Icon d="M8 3v10M3 8h10" />;
 }
 
-function SplitIcon() {
-  return <Icon d="M3 3h4v10H3zM9 3h4v10H9z" />;
-}
-
-function TrashIcon() {
-  return <Icon d="M4 4h8M6 4V2h4v2M5 4l.5 9h5l.5-9M6.5 6v4M9.5 6v4" />;
-}
-
 /** 终止一个 pane：断 WS + dispose term。 */
 function destroyPane(pane: Pane): void {
   try {
@@ -204,7 +195,7 @@ function PaneHost({ pane, projectId }: { pane: Pane; projectId: string | null })
   return <div className="terminal-pane-host" ref={hostRef} />;
 }
 
-/** 一个标签页的 panes 容器，承载向下分屏。 */
+/** 一个标签页的 pane 容器（保留多 pane 堆叠结构，分隔线可拖动）。 */
 function TabPanels({
   tab,
   projectId,
@@ -267,7 +258,7 @@ function TabPanels({
   );
 }
 
-/** 底部终端面板：多标签 + 分屏 + 工具栏。所有标签常驻 DOM，非激活的隐藏。 */
+/** 底部终端面板：多标签 + 工具栏。所有标签常驻 DOM，非激活的隐藏。 */
 export function TerminalPanel({ projectId }: { projectId: string | null }) {
   const { t } = useI18n();
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -294,29 +285,6 @@ export function TerminalPanel({ projectId }: { projectId: string | null }) {
     },
     [activeTabId],
   );
-
-  const splitDown = useCallback(() => {
-    setTabs((prev) =>
-      prev.map((tb) => {
-        if (tb.id !== activeTabId) return tb;
-        return { ...tb, panes: [...tb.panes, makePane()] };
-      }),
-    );
-  }, [activeTabId]);
-
-  const killActivePane = useCallback(() => {
-    setTabs((prev) =>
-      prev.map((tb) => {
-        if (tb.id !== activeTabId) return tb;
-        // 对最后一个 pane 发 SIGTERM，其余 pane 保留（终端 kill 通常是针对焦点终端）
-        const pane = tb.panes[tb.panes.length - 1];
-        if (pane?.ws && pane.ws.readyState === WebSocket.OPEN) {
-          pane.ws.send(JSON.stringify({ type: 'signal', data: 'SIGTERM' }));
-        }
-        return tb;
-      }),
-    );
-  }, [activeTabId]);
 
   // 首次进入（有项目）自动开一个标签
   useEffect(() => {
@@ -364,12 +332,6 @@ export function TerminalPanel({ projectId }: { projectId: string | null }) {
         <div className="terminal-actions">
           <button className="terminal-action" onClick={addTab} title={t('app.terminalNew')} aria-label={t('app.terminalNew')}>
             <PlusIcon />
-          </button>
-          <button className="terminal-action" onClick={splitDown} title={t('app.terminalSplit')} aria-label={t('app.terminalSplit')}>
-            <SplitIcon />
-          </button>
-          <button className="terminal-action" onClick={killActivePane} title={t('app.terminalKill')} aria-label={t('app.terminalKill')}>
-            <TrashIcon />
           </button>
         </div>
       </div>

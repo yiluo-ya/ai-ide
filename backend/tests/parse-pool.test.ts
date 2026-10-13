@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ParsePool, type ParseTask } from '../src/indexer/parse-pool';
+import { ParsePool, batchTimeoutMs, type ParseTask } from '../src/indexer/parse-pool';
 
 const TS = 'import { helper } from "./util";\n\nexport function use(x: number): number {\n  return helper(x) + 1;\n}\n';
 const PY = 'import os\n\n\ndef use(path):\n    return os.path.join(path, "x")\n';
@@ -94,4 +94,35 @@ test('parse-pool: close 后不再创建新 worker（已降级为串行）', asyn
     results.map((r) => (r.ok ? r.data.file : 'x')),
     tasks.map((x) => x.rel),
   );
+});
+
+test('parse-pool: 批级超时快速标失败，不拖死后续批次', async (t) => {
+  // 1ms 固定超时：worker 起线程必然超过它 —— 复现「病态批卡住」的场景
+  const timing = new ParsePool(2, 1);
+  t.after(() => timing.close());
+  const t0 = Date.now();
+  const timedOut = await timing.parseBatch(tasks);
+  const elapsed = Date.now() - t0;
+  assert.equal(timedOut.length, tasks.length, '结果数应与任务数一致');
+  for (const r of timedOut) {
+    assert.equal(r.ok, false, '超时批应整体标失败，而不是无限等待');
+    if (!r.ok) assert.match(r.error, /parse timeout/);
+  }
+  assert.ok(elapsed < 10_000, `超时批应快速返回（实际 ${elapsed}ms）`);
+
+  // 正常批次不受影响（另一条池，走默认动态预算；超时的 worker 已退休、会补建）
+  const normal = new ParsePool(2);
+  t.after(() => normal.close());
+  const ok = await normal.parseBatch([
+    { rel: 'src/e.ts', source: 'export const e = 1;\n', langId: 'typescript', mtimeMs: 5, size: 25 },
+  ]);
+  assert.equal(ok[0].ok, true, '正常批次不应受影响');
+});
+
+test('parse-pool: 批超时预算随批大小放宽且有上下限', () => {
+  const one = (size: number): ParseTask => ({ rel: 'a.ts', source: '', langId: 'typescript', mtimeMs: 0, size });
+  assert.equal(batchTimeoutMs([one(100)]), 5_000, '小批走下限');
+  assert.equal(batchTimeoutMs(Array.from({ length: 16 }, () => one(600_000))), 30_000, '大批走上限（~9.4MB）');
+  assert.equal(batchTimeoutMs(Array.from({ length: 16 }, () => one(400_000))), 20_750, '中等批按 3ms/KB 放宽');
+  assert.equal(batchTimeoutMs(Array.from({ length: 16 }, () => one(50_000))), 5_000, '800KB 批仍在下限内');
 });

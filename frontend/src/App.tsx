@@ -1105,6 +1105,8 @@ export default function App() {
             )}
             {store.fileLoading && <div className="loading-mask">{t('app.loading')}</div>}
           </div>
+            </>
+          )}
 
           {/* 底部面板（VS Code 布局迁移 2026-10-08）：输出 / 终端，位于状态栏上方。
               标签竖排在面板右列（2026-10-08），不再占用顶部一行高度。 */}
@@ -1197,8 +1199,6 @@ export default function App() {
             <span>{store.fileLang}</span>
             <span>{store.status?.indexing ? t('app.indexing') : t('app.ready')}</span>
           </footer>
-            </>
-          )}
         </main>
 
         {/* 右侧栏（VS Code 布局迁移 2026-10-08）：右活动栏 + 右侧栏内容，视图可在左右两侧拖拽换侧。 */}

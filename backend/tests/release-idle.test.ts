@@ -125,3 +125,37 @@ test('自动回收: 有活跃 SSE 连接的项目不被释放，流关闭后解�
     await ctx.cleanup();
   }
 });
+
+test('自动回收: 切项目（get）时立即释放最旧的旧项目，不等巡检', async () => {
+  // sweepMs=0 / idleReleaseMs=0 → 只能靠「切项目」这条路径回收
+  const fixtures = [await makeProject(FILES), await makeProject(FILES), await makeProject(FILES)];
+  const dataDir = path.join(fixtures[0].root, '..', `wcr-evict-${Date.now()}`);
+  const registry = new ProjectRegistry(dataDir, { maxActiveProjects: 2, idleReleaseMs: 0, sweepMs: 0 });
+  const app = createApp(registry);
+  try {
+    const ids: string[] = [];
+    for (const [i, fx] of fixtures.entries()) {
+      const res = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ root: fx.root, name: `evict${i}` }),
+      });
+      const { project } = (await res.json()) as { project: { id: string } };
+      await waitIndexed(app, project.id);
+      ids.push(project.id);
+    }
+    // 上限 2：打开第三个时，最久未访问的第一个应被立即释放（巡检已关）
+    assert.equal((await resourcesOf(app, ids[0])).indexed, false, '最旧的旧项目应被即时淘汰');
+    assert.equal((await resourcesOf(app, ids[1])).indexed, true, '上一个项目（在上限内）要留着');
+    assert.equal((await resourcesOf(app, ids[2])).indexed, true, '当前项目必须在');
+
+    // 再切回第一个：它重建，且此刻应该轮到第二个被淘汰
+    await waitIndexed(app, ids[0]);
+    assert.equal((await resourcesOf(app, ids[0])).indexed, true, '切回的项目应被重建');
+    assert.equal((await resourcesOf(app, ids[1])).indexed, false, '切回时最旧的旧项目应被释放');
+  } finally {
+    registry.closeAll();
+    for (const fx of fixtures) await fx.cleanup();
+    await fsp.rm(dataDir, { recursive: true, force: true }).catch(() => {});
+  }
+});

@@ -100,7 +100,8 @@ test('ignore: node_modules / .git 是硬保护，任何 ! 都打不开', async (
 test('ignore: 内置文件名模式按 basename 命中（子目录里的 package-lock.json 也算）', async (t) => {
   // 判定按 basename 而非完整路径：`^package-lock\.json$` 对 `x/package-lock.json` 也要命中。
   // 2026-10-12 分桶改造时曾在这里判错（按 rel 匹配），此用例锁死口径。
-  const root = await makeRoot({ '.gitignore': ['!ignored-dir/'] });
+  // 只验内置规则，不需要任何规则文件
+  const root = await makeRoot();
   t.after(() => fsp.rm(root, { recursive: true, force: true }));
   const ig = await IgnoreMatcher.load(root);
 

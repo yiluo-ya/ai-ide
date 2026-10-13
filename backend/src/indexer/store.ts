@@ -1,5 +1,6 @@
 /** 项目索引存储：扫描目录、建/增量更新索引、文本搜索、文件树、事件推送。 */
 import fsp from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type {
@@ -502,14 +503,20 @@ export class ProjectIndex {
     }
     let buf: Buffer;
     let mtimeMs = entry?.mtimeMs ?? 0;
+    let handle: FileHandle | null = null;
     try {
-      buf = await fsp.readFile(this.abs(rel));
-      mtimeMs = (await fsp.stat(this.abs(rel))).mtimeMs;
+      // 复用同一个 file handle：`fsp.readFile` + `fsp.stat` 会各开一次文件，
+      // 这里 open 一次、读完再 stat（与原来「先读后 stat」同序），每文件少一次 open/close。
+      handle = await fsp.open(this.abs(rel));
+      buf = await handle.readFile();
+      mtimeMs = (await handle.stat()).mtimeMs;
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
       this.skipLog.set(rel, { reason: 'read-error', detail });
       logWarn('index.file.read-failed', { file: rel, error: detail });
       return { ok: false, rel };
+    } finally {
+      await handle?.close().catch(() => undefined);
     }
     if (looksBinary(buf)) {
       this.skipLog.set(rel, { reason: 'binary' });
