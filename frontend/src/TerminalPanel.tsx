@@ -170,8 +170,9 @@ function PaneHost({
   const hostRef = useRef<HTMLDivElement>(null);
   const openedRef = useRef(false);
   /**
-   * 会话绑定在「挂载时的项目」上：之后切换项目**不重连** —— 终端常驻，
-   * 里面跑着的进程不被杀（新标签才用当前项目做 cwd）。
+   * 会话绑定在「挂载时的项目」上，所以下面 effect 的依赖里**没有** projectId ——
+   * 切换项目由上层（TerminalPanel）重开 pane 处理：新 pane 挂载即连到新项目。
+   * 这样避免依赖抖动造成的重复重连（实测会把刚起的会话又关掉）。
    */
   const boundProjectRef = useRef(projectId);
   const { t } = useI18n();
@@ -400,6 +401,20 @@ export function TerminalPanel({ projectId, runRequest }: { projectId: string | n
     for (const tb of tabsRef.current) for (const p of tb.panes) destroyPane(p);
     setTabs([]);
     setActiveTabId(null);
+  }, [projectId]);
+
+  // 切换项目：终端**跟项目走** —— 每个标签按原 shell 重开会话（新 shell 的 cwd = 新项目根）。
+  // 标签与面板保留（不自行退出，关闭靠标签 ×）；重开会话也顺带清掉上一项目的内容，
+  // 避免同一个终端里混着两个项目的路径。
+  const prevProjectRef = useRef(projectId);
+  useEffect(() => {
+    if (prevProjectRef.current === projectId) return;
+    prevProjectRef.current = projectId;
+    if (!projectId) return; // 项目被移除：交给上面那个 effect 收尾
+    const current = tabsRef.current;
+    if (current.length === 0) return;
+    for (const tb of current) for (const p of tb.panes) destroyPane(p);
+    setTabs(current.map((tb) => ({ ...tb, panes: tb.panes.map((p) => makePane(p.shellKind)) })));
   }, [projectId]);
 
   useEffect(() => {
