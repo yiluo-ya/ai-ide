@@ -1421,6 +1421,124 @@ export interface FlowEdge {
   approx?: boolean;
 }
 
+// ------------------------------------------------------------ API 面板（FR-0001）
+
+/** 一套环境：命名 + 平铺键值（`{{key}}` 引用的来源）。 */
+export interface ApiEnvironment {
+  name: string;
+  variables: Record<string, string>;
+}
+
+/** `.api/environments.json` 的内容：多套环境 + 当前选中。 */
+export interface ApiEnvironments {
+  environments: ApiEnvironment[];
+  active: string;
+}
+
+/** 鉴权配置（精简为三种基本类型）。 */
+export interface ApiAuth {
+  type: 'none' | 'basic' | 'bearer' | 'apikey';
+  /** Basic Auth: username + password。 */
+  username?: string;
+  password?: string;
+  /** Bearer Token: token + 可选前缀（默认 Bearer）。 */
+  token?: string;
+  prefix?: string;
+  /** API Key: key name + value + 位置（header 或 query）。 */
+  key?: string;
+  value?: string;
+  location?: 'header' | 'query';
+}
+
+/** 单个接口定义（`.api/collections/**\/*.json`）。 */
+export interface ApiRequestDef {
+  name: string;
+  method: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: unknown;
+  description?: string;
+  auth?: ApiAuth;
+}
+
+/** `.api` 目录里的一个节点（目录 / 接口 / 其他文件）。 */
+export interface ApiTreeNode {
+  /** 目录名 / 文件名（接口取 name 字段）。 */
+  name: string;
+  /** 相对 `.api` 的 POSIX 路径。 */
+  path: string;
+  type: 'dir' | 'request' | 'file';
+  children?: ApiTreeNode[];
+  /** 接口节点的 HTTP method（便于树里显示彩色标签）。 */
+  method?: string;
+}
+
+/** `GET /api/projects/:id/apis/tree` 的结果。 */
+export interface ApiTreeResult {
+  /** `.api` 目录绝对路径（POSIX）。 */
+  root: string;
+  initialized: boolean;
+  environments: ApiEnvironments | null;
+  /** `collections/` 下的递归目录树。 */
+  tree: ApiTreeNode[];
+  readme: string | null;
+}
+
+/** `POST /api/projects/:id/apis/send` 的入参（变量已由调用方替换）。 */
+export interface ApiSendRequest {
+  method: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: unknown;
+}
+
+/** `POST /api/projects/:id/apis/send` 的结果。 */
+export interface ApiSendResult {
+  status: number;
+  statusText: string;
+  headers: Record<string, string>;
+  body: string;
+  durationMs: number;
+  /** 发起失败（网络/CORS/超时）时给原因；正常响应此字段为空。 */
+  error?: string;
+}
+
+/** `POST /api/projects/:id/apis/save` 的入参（写接口 / 目录 / 环境）。 */
+export interface ApiSaveRequest {
+  /** 相对 `.api` 的路径；目录以 `/` 结尾。 */
+  path: string;
+  /** 接口：ApiRequestDef 的 JSON 文本；目录：忽略（传空）。 */
+  content: string;
+  /** environments.json 用这个覆盖（读/写整份）。 */
+  environments?: ApiEnvironments;
+}
+
+/** `POST /api/projects/:id/apis/delete` 的入参。 */
+export interface ApiDeleteRequest {
+  path: string;
+}
+
+/** `POST /api/projects/:id/apis/rename` 的入参（重命名接口 / 目录）。 */
+export interface ApiRenameRequest {
+  /** 相对 `.api` 的原路径（不含 `.api/` 前缀）。 */
+  from: string;
+  /** 新路径（不含 `.api/` 前缀）；目录无需尾 `/`。 */
+  to: string;
+}
+
+/** `POST /api/projects/:id/apis/ensure` 的结果：初始化 `.api`（建 README 等）。 */
+export interface ApiEnsureResult {
+  initialized: boolean;
+  root: string;
+}
+
+/** `GET /api/projects/:id/apis/export?format=` 的结果（返回可下载文本）。 */
+export interface ApiExportResult {
+  format: 'postman' | 'swagger';
+  filename: string;
+  content: string;
+}
+
 /** `POST /api/projects/:id/flow` 的结果。 */
 export interface FlowResult {
   kind: FlowKind;

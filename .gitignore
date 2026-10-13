@@ -6,3 +6,4 @@ tmp/
 .codegraph/
 .xchen/
 /tmp/wcr-clone/
+.api/

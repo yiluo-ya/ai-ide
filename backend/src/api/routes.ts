@@ -136,6 +136,7 @@ import {
 } from '../languages';
 import { agentsDir, openhandsAgentsDir, piInstallHint, probePi, resolvePiRuntime } from '../agent/runtime';
 import { readAgentRuntimeConfig, writeAgentRuntimeConfig } from '../agent/runtime-config';
+import { deleteApi, ensureApi, exportApis, readApiTree, renameApi, saveApi, sendRequest } from './apipanel';
 
 const VERSION = '0.1.0';
 
@@ -659,6 +660,85 @@ export function createApp(
     // 同上：不让文件树在「还没扫过」时返回空树。
     await project.ensureScanned();
     return c.json({ tree: project.buildAllFileTree(), status: project.status });
+  });
+
+  // ------------------------------------------------------- API 面板（FR-0001）
+  // `.api/` 目录为唯一事实源，端点同时面向页面与 code agent。
+
+  /** 读整棵 `.api` 树（环境 + 集合目录树 + README）。 */
+  app.get('/api/projects/:id/apis/tree', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    return c.json(await readApiTree(project.root));
+  });
+
+  /** 初始化 `.api`（首次建 README + 空环境），幂等。 */
+  app.post('/api/projects/:id/apis/ensure', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const result = await ensureApi(project.root);
+    return c.json(result);
+  });
+
+  /** 写接口 / 目录 / 环境（目录 path 以 `/` 结尾）。 */
+  app.post('/api/projects/:id/apis/save', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = (await c.req.json().catch(() => ({}))) as import('../types').ApiSaveRequest;
+    try {
+      await saveApi(project.root, body);
+      return c.json({ ok: true } as const);
+    } catch (e) {
+      return fail(c, 400, 'bad_request', (e as Error).message);
+    }
+  });
+
+  /** 删接口 / 目录（递归）。 */
+  app.post('/api/projects/:id/apis/delete', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = (await c.req.json().catch(() => ({}))) as import('../types').ApiDeleteRequest;
+    try {
+      await deleteApi(project.root, body);
+      return c.json({ ok: true } as const);
+    } catch (e) {
+      return fail(c, 400, 'bad_request', (e as Error).message);
+    }
+  });
+
+  /** 重命名接口 / 目录。 */
+  app.post('/api/projects/:id/apis/rename', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = (await c.req.json().catch(() => ({}))) as import('../types').ApiRenameRequest;
+    try {
+      await renameApi(project.root, body);
+      return c.json({ ok: true } as const);
+    } catch (e) {
+      return fail(c, 400, 'bad_request', (e as Error).message);
+    }
+  });
+
+  /** 转发一次真实 HTTP 请求（后端同机发，绕过 CORS）。 */
+  app.post('/api/projects/:id/apis/send', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as import('../types').ApiSendRequest;
+    try {
+      return c.json(await sendRequest(body));
+    } catch (e) {
+      return fail(c, 400, 'bad_request', (e as Error).message);
+    }
+  });
+
+  /** 导出 postman / swagger。 */
+  app.get('/api/projects/:id/apis/export', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const format = c.req.query('format') === 'swagger' ? 'swagger' : 'postman';
+    try {
+      return c.json(await exportApis(project.root, format));
+    } catch (e) {
+      return fail(c, 400, 'bad_request', (e as Error).message);
+    }
   });
 
   app.get('/api/projects/:id/file', async (c) => {
