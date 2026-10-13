@@ -6,6 +6,7 @@ import { langColor } from './languages';
 import { FileIcon } from './common/fileicon/FileIcon';
 import { heatLevel } from './mapState';
 import { translate, useI18n } from './i18n';
+import { isRunnable } from './runCommand';
 import './filetree.css';
 
 /** 文件树上叠加的事实（来自 /overview 与 /timeline，缺省即不显示徽标）。 */
@@ -34,6 +35,8 @@ interface Props {
   decor?: TreeDecor;
   /** N19：右键菜单里的「在旁边打开」（分屏对照）。 */
   onOpenAside?: (file: string) => void;
+  /** FR-0011：右键菜单「在终端中运行」（App 负责解析解释器并写进终端）。 */
+  onRun?: (file: string) => void;
   /** 右键菜单「复制路径 / 复制文件名」：写剪贴板 + 状态栏反馈（由 App 注入）。 */
   onCopy?: (text: string) => void;
   /** 项目根绝对路径（用于「复制路径」输出全路径而非项目相对路径）。 */
@@ -324,6 +327,7 @@ export function FileTree({
   filter = '',
   decor,
   onOpenAside,
+  onRun,
   onCopy,
   projectRoot,
   onDelete,
@@ -555,15 +559,28 @@ export function FileTree({
               </>
             )}
             {!menu.isDir && (
-              <button
-                role="menuitem"
-                onClick={() => {
-                  onOpenAside?.(menu.path);
-                  setMenu(null);
-                }}
-              >
-                {t('app.openAside')}
-              </button>
+              <>
+                <button
+                  role="menuitem"
+                  disabled={!isRunnable(menu.path)}
+                  title={isRunnable(menu.path) ? undefined : t('filetree.runUnsupported')}
+                  onClick={() => {
+                    onRun?.(menu.path);
+                    setMenu(null);
+                  }}
+                >
+                  {t('filetree.runInTerminal')}
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    onOpenAside?.(menu.path);
+                    setMenu(null);
+                  }}
+                >
+                  {t('app.openAside')}
+                </button>
+              </>
             )}
             {menu.path && (
               <>

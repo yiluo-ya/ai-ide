@@ -407,6 +407,16 @@
   background: var(--row-hover);
 }
 
+/* FR-0011：未识别语言的文件 —— 菜单项置灰，但仍 hover 出 tooltip 说明原因 */
+.tree-menu button:disabled {
+  color: var(--fg-dim);
+  cursor: not-allowed;
+}
+
+.tree-menu button:disabled:hover {
+  background: none;
+}
+
 .summary-bar {
   position: relative;
 }

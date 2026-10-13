@@ -192,6 +192,10 @@ export const api = {
 
   status: (id: string) => request<{ status: IndexStatus }>(`/projects/${id}/status`).then((r) => r.status),
 
+  /** FR-0011：运行环境探测 —— 「在终端中运行」用它挑 Python 解释器（path 为 null = 用 PATH 上的 python）。 */
+  pythonEnv: (id: string) =>
+    request<{ path: string | null; source: 'venv' | 'conda' | 'path' }>(`/projects/${id}/python`),
+
   fileTree: (id: string) =>
     request<{ tree: FileNode; status: IndexStatus }>(`/projects/${id}/files`),
 

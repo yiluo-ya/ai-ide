@@ -119,6 +119,33 @@ request); the endpoints remain for host integrations.
 **Overview**: the project map’s key numbers (identity card, language distribution, entry candidates
 and hotspots, orphans and cycles, directory roles); clicking an item opens the file in the editor.
 
+## Run in Terminal
+
+The bottom **Terminal** is a persistent interactive shell (xterm + node-pty, **local only**). This is
+**not debug** — it just turns the current file into a language-appropriate command and sends it to the
+**already-open** terminal (in the spirit of VS Code's `Run Active File In Active Terminal`, but inferring
+the real command from the language instead of only sending the path).
+
+- Four entry points: file-tree context menu “Run in Terminal”, editor context menu, the editor tab
+  bar `▶` button, and the `Ctrl+F5` shortcut.
+- Language → command (only languages that run a single file directly): `.py/.pyw`→`python`,
+  `.js/.mjs/.cjs`→`node`, `.go`→`go run`, `.ps1`→`powershell -File`, `.sh/.bash`→`bash`, `.rb`→`ruby`,
+  `.php`→`php`, `.pl`→`perl`, `.lua`→`lua`, `.bat/.cmd`→`cmd /c`; compiled ones (`.ts`/`.java`/`.c`/…)
+  are **greyed out**.
+- Paths are quoted per the active shell (borrowing VS Code's `preparePathForShell` rules): PowerShell
+  with spaces/parentheses/quotes → `& '…'`; Git Bash → backslashes to forward slashes + single quotes,
+  and `cmd /c` becomes `cmd //c` (MSYS would otherwise rewrite `/c` as a drive path).
+- cwd always stays at the project root; the command uses a project-relative path.
+- **Python environments**: an interpreter typed in Settings (`Settings → Run → Python interpreter`)
+  always wins; otherwise the project's `.venv` / `venv` / `env` (`Scripts\python.exe` on Windows) and
+  `conda-meta` are detected; failing that, the `python` on PATH is used. A detected interpreter is
+  written as an **absolute path** (as `& 'D:\…\python.exe'` under PowerShell) so it is obvious which
+  environment ran.
+- If no terminal is open: the bottom panel expands, switches to “Terminal”, and a new tab is created;
+  the command is written only after the shell is ready (backend `title`) — otherwise `input` sent before
+  `spawn` is dropped by the backend (`backend/src/api/terminal.ts`).
+- In share mode (`HOST=0.0.0.0`) the terminal is unavailable entirely, and the run entries are disabled.
+
 ## Code Agent (optional)
 
 The “Code sessions” tab in the left panel turns the main area into Agent mode — **sessions on the
@@ -389,6 +416,7 @@ requests return 400. Routes marked **local** return 403 in share mode.
 | POST | `/api/projects/:id/commands/stop` | `{ runId }` stops a background run |
 | GET | `/api/projects/:id/commands/runs` | Run records (running background tasks include log tails) |
 | GET | `/api/projects/:id/commands/risk?command=` | Risk level (`none` / `warn` / `block`) and reason |
+| GET | `/api/projects/:id/python` | Run-environment detection: `{ path, source }` (`venv` / `conda` / `path`; `path: null` = use the `python` on PATH) |
 | GET | `/api/service/status` | The reader’s own pid / port / uptime |
 | POST | `/api/service/restart` / `/api/service/stop` | Restart / stop the reader (`?confirm=1`, delegated to a detached worker) |
 
@@ -467,6 +495,7 @@ requests return 400. Routes marked **local** return 403 in share mode.
 | `Ctrl/Cmd+Alt+E` | Explain the symbol at the cursor (structural, no model) |
 | `Ctrl/Cmd+Alt+B` | Toggle the whole-file blame view |
 | `Ctrl/Cmd+,` | Open Settings |
+| `Ctrl+F5` | Run the current file in the terminal (command inferred from the language) |
 | Middle-click a tab | Open to the side (split view) |
 
 `Ctrl/Cmd+F` (find in file) and `Ctrl/Cmd+G` (go to line) are built into Monaco.

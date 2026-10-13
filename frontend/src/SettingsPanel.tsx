@@ -56,6 +56,7 @@ function shortcutsFor(keymap: KeymapId): Array<{ keys: string; label: string }> 
       { keys: 'Ctrl+G', label: 'topbar.shortcutGotoLine' },
       { keys: 'Ctrl+F', label: 'topbar.shortcutFileSearchIn' },
       { keys: 'Ctrl+Alt+S', label: 'topbar.shortcutSettings' },
+      { keys: 'Ctrl+F5', label: 'topbar.shortcutRunFile' },
     ];
   }
   return [
@@ -71,6 +72,7 @@ function shortcutsFor(keymap: KeymapId): Array<{ keys: string; label: string }> 
     { keys: 'Ctrl/Cmd+G', label: 'topbar.shortcutGotoLine' },
     { keys: 'Ctrl/Cmd+F', label: 'topbar.shortcutFileSearchIn' },
     { keys: 'Ctrl/Cmd+,', label: 'topbar.shortcutSettings' },
+    { keys: 'Ctrl+F5', label: 'topbar.shortcutRunFile' },
   ];
 }
 
@@ -110,6 +112,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const motionId = useId();
   const changesId = useId();
   const agentPathId = useId();
+  const pythonPathId = useId();
 
   /** 服务自述里的版本号（拿不到就不显示这一行）。 */
   const [version, setVersion] = useState<string | null>(null);
@@ -334,6 +337,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         checked={prefs.changesOpen}
         onChange={(v) => savePrefs({ changesOpen: v })}
       />
+
+      <h3 className="wcr-section-title">{t('settings.runSection')}</h3>
+      <p className="wcr-note">{t('settings.pythonPathHint')}</p>
+      <div className="settings-row">
+        <label className="settings-label" htmlFor={pythonPathId}>
+          {t('settings.pythonPath')}
+        </label>
+        <input
+          id={pythonPathId}
+          className="text-input settings-agent-input"
+          type="text"
+          spellCheck={false}
+          placeholder={t('settings.pythonPathEmpty')}
+          value={prefs.pythonPath}
+          onChange={(e) => savePrefs({ pythonPath: e.target.value })}
+        />
+      </div>
 
       <h3 className="wcr-section-title">{t('settings.indexSection')}</h3>
       <h4 className="settings-subtitle">{t('settings.ignoreRules')}</h4>

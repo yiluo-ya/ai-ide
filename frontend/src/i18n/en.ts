@@ -27,6 +27,7 @@ export const en: Record<string, string> = {
   'topbar.legendLocal': 'Local variable / parameter',
   'topbar.legendExternal': 'External dependency / standard library',
   'topbar.shortcutSettings': 'Open settings',
+  'topbar.shortcutRunFile': 'Run current file in terminal',
   'topbar.helpSectionMore': 'More',
 
   // ---------------------------------------------------------------- Add project (folder picker dialog)
@@ -94,6 +95,10 @@ export const en: Record<string, string> = {
   'settings.ignoreRulesEmpty': "(empty = only the project's own .gitignore / .wcrignore)",
   'settings.ignoreRulesSave': 'Save rules',
   'settings.ignoreRulesSaved': 'Saved — click "Reindex" in the toolbar to apply',
+  'settings.runSection': 'Run',
+  'settings.pythonPath': 'Python interpreter',
+  'settings.pythonPathHint': 'Leave empty to auto-detect .venv / venv / env in the project; a value here overrides detection.',
+  'settings.pythonPathEmpty': 'Empty = auto-detect',
   'settings.agentSection': 'Code Agent backend',
   'settings.agentHint':
     'pi is not part of this source tree. Where to find it: the path below → the drop-in directory → PATH, first hit wins; when nothing is found, creating a pi session prints the install commands.',
@@ -480,6 +485,12 @@ export const en: Record<string, string> = {
   'app.terminalConnecting': 'Connecting…',
   'app.terminalExit': 'Process exited (exit {code})',
   'app.terminalDisconnected': 'Connection lost',
+  'app.terminalShell': 'Terminal shell (switching reopens the current terminal)',
+  'run.title': 'Run in Terminal',
+  'run.menu': 'Run in Terminal',
+  'run.noFile': 'Open a file first',
+  'run.shareMode': 'Terminal is unavailable in share mode',
+  'run.unsupported': 'No runner for this file type (needs compiling or unsupported)',
   'app.confirmReindexTitle': 'Rebuild the index?',
   'app.confirmReindexBody':
     'The project directory is re-read and the index rebuilt (tens of seconds for large projects); search and jumps can be incomplete meanwhile.',
@@ -1231,6 +1242,8 @@ export const en: Record<string, string> = {
   'filetree.noFiles': 'No readable files in this project',
   'filetree.noFilesFiltered': 'No files match the current filter',
   'filetree.copyPath': 'Copy path',
+  'filetree.runInTerminal': 'Run in Terminal',
+  'filetree.runUnsupported': 'This file type needs compiling or has no runner',
   'filetree.copyFileName': 'Copy file name',
   'filetree.delete': 'Delete',
   'filetree.projectRoot': 'Project root',

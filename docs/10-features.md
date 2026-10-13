@@ -97,6 +97,26 @@
 **总览**：项目地图的主要数字（身份卡、语言分布、入口候选与热点、孤立与环、目录职责），
 点条目直接在编辑器打开文件。
 
+## 在终端中运行（Run in Terminal）
+
+底部「终端」是常驻交互式 shell（xterm + node-pty，**本机专用**）。这里**不做 debug** ——
+只把「当前文件」按语言拼成一条命令，送进**已开着的那个终端**执行（对齐 VS Code
+`Run Active File In Active Terminal` 的思路，但按语言推断真命令，而不是只送路径）。
+
+- 入口四处：文件树右键「在终端中运行」、编辑器右键、编辑器标签栏 `▶`、快捷键 `Ctrl+F5`。
+- 语言 → 命令（只收**单文件可直接解释执行**的）：`.py/.pyw`→`python`、`.js/.mjs/.cjs`→`node`、
+  `.go`→`go run`、`.ps1`→`powershell -File`、`.sh/.bash`→`bash`、`.rb`→`ruby`、`.php`→`php`、
+  `.pl`→`perl`、`.lua`→`lua`、`.bat/.cmd`→`cmd /c`；需要编译的（`.ts`/`.java`/`.c`/…）菜单项**置灰**。
+- 路径按当前 shell 转义（借 VS Code 的 `preparePathForShell` 规则）：PowerShell 有空格/括号/单引号 →
+  `& '…'`；Git Bash → 反斜杠转正斜杠 + 单引号，且 `cmd /c` 写成 `cmd //c`（MSYS 不把 `/c` 当盘符路径）。
+- cwd 始终 = 项目根，命令里用项目相对路径（终端不 `cd`）。
+- **Python 环境**：设置里手填的解释器优先（`设置 → 运行 → Python 解释器`，覆盖一切）；留空则探测
+  项目根的 `.venv` / `venv` / `env`（Windows 取 `Scripts\python.exe`）与 `conda-meta`；都没有则用 PATH 上的 `python`。
+  探测到的解释器写成**绝对路径**（PowerShell 里 `& 'D:\…\python.exe'`），让「跑的是哪个环境」一眼可见。
+- 终端没开时：自动展开底部面板 → 切到「终端」→ 新建标签；命令要等 shell 就绪（后端回 `title`）
+  后才写入 —— 否则 spawn 之前的 `input` 会被后端丢弃（`backend/src/api/terminal.ts`）。
+- 共享模式（`HOST=0.0.0.0`）下终端整层不可用，运行入口一并禁用。
+
 ## Code Agent（可选）
 
 工具条左栏「code 会话」把主区切成 Agent 模式 —— **左栏管会话、中间看内容**，
@@ -349,6 +369,7 @@ shared/types.ts    前后端共享的 API 契约（位置统一 1-based、列按
 | POST | `/api/projects/:id/commands/stop` | `{ runId }` 停掉一条后台运行 |
 | GET | `/api/projects/:id/commands/runs` | 运行记录（运行中的后台任务带日志尾部） |
 | GET | `/api/projects/:id/commands/risk?command=` | 危险级别（`none` / `warn` / `block`）与原因 |
+| GET | `/api/projects/:id/python` | 运行环境探测：`{ path, source }`（`venv` / `conda` / `path`；`path` 为 null = 用 PATH 上的 python） |
 | GET | `/api/service/status` | 阅读器自身的 pid / 端口 / 运行时长 |
 | POST | `/api/service/restart` / `/api/service/stop` | 重启 / 停止阅读器（`?confirm=1`，独立 worker 代劳） |
 
@@ -424,6 +445,7 @@ shared/types.ts    前后端共享的 API 契约（位置统一 1-based、列按
 | `Ctrl/Cmd+Alt+B` | 切换整文件 blame 视图 |
 | `F3` / `Shift+F3` | 下一个 / 上一个搜索命中（有搜索结果时） |
 | `Ctrl/Cmd+,` | 打开设置 |
+| `Ctrl+F5` | 在终端中运行当前文件（按语言推断命令） |
 | `Ctrl/Cmd+F12` / 编辑器右键 | 部分浏览器会占用 `F12` / `Shift+F12`，可用等价路径 |
 | 标签条中键 | 在旁边分屏打开 |
 

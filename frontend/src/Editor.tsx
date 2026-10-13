@@ -160,6 +160,8 @@ interface Props {
   onExplain?: (file: string, line: number, col: number) => void;
   /** W5 / G9.4：右键「看调用图」（流视图浮层）。 */
   onFlow?: (file: string, line: number, col: number) => void;
+  /** FR-0011：右键「在终端中运行」（整文件跑，不需要行列）。 */
+  onRun?: (file: string) => void;
   /** G6.1：摘要条里点导出符号 / 引用文件时打开（缺省则不跳）。 */
   onOpenFile?: (file: string, line?: number, col?: number) => void;
   /**
@@ -202,6 +204,7 @@ export function Editor({
   onOpenAside,
   onExplain,
   onFlow,
+  onRun,
   onOpenFile,
   historyRev,
   blame,
@@ -228,6 +231,9 @@ export function Editor({
   onExplainRef.current = onExplain;
   const onFlowRef = useRef(onFlow);
   onFlowRef.current = onFlow;
+  /** FR-0011：右键「在终端中运行」的回调（ref 读最新值，见 onExplainRef 说明）。 */
+  const onRunRef = useRef(onRun);
+  onRunRef.current = onRun;
   /** FR-0008：正文变化上报（放 ref：create 只跑一次，不该因它重建设编辑器）。 */
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -376,6 +382,18 @@ export function Editor({
         const current = fileRef.current;
         if (!current || !pos) return;
         onOpenAsideRef.current?.(current, pos.lineNumber, pos.column);
+      },
+    });
+    // FR-0011：在终端中运行当前文件
+    editor.addAction({
+      id: 'wcr.runFile',
+      label: translate('run.menu'),
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 1,
+      run: () => {
+        const current = fileRef.current;
+        if (!current) return;
+        onRunRef.current?.(current);
       },
     });
     // W4 / G5.1：解释光标处的符号（结构性解释，不使用模型）

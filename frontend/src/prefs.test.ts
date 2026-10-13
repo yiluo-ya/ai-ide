@@ -61,6 +61,7 @@ describe('prefs', () => {
       reduceMotion: false,
       changesOpen: true,
       keymap: 'idea',
+      pythonPath: '',
     });
   });
 

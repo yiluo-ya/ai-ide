@@ -38,11 +38,13 @@ export interface Prefs {
   changesOpen: boolean;
   /** 键盘映射方案（VS Code / IDEA），默认 IDEA，见 keymap.ts。 */
   keymap: KeymapId;
+  /** FR-0011：跑 Python 用的解释器绝对路径；空 = 自动探测项目 venv，再退回 PATH。 */
+  pythonPath: string;
 }
 
 export const PREFS_KEY = 'wcr:prefs';
 /** 当前偏好结构版本：以后改字段口径（改名 / 改语义 / 删字段）就加一，并在 MIGRATIONS 补一条。 */
-export const PREFS_VERSION = 1;
+export const PREFS_VERSION = 2;
 export const FONT_SIZE_MIN = 12;
 export const FONT_SIZE_MAX = 18;
 export const SIDEBAR_MIN = 240;
@@ -63,6 +65,7 @@ export const DEFAULT_PREFS: Prefs = {
   reduceMotion: false,
   changesOpen: true,
   keymap: 'idea',
+  pythonPath: '',
 };
 
 type Listener = (prefs: Prefs) => void;
@@ -103,6 +106,7 @@ function coerce(raw: unknown): Prefs {
     reduceMotion: src.reduceMotion === true,
     changesOpen: src.changesOpen !== false,
     keymap: src.keymap === 'vscode' ? 'vscode' : 'idea',
+    pythonPath: typeof src.pythonPath === 'string' ? src.pythonPath.trim() : DEFAULT_PREFS.pythonPath,
   };
 }
 
@@ -117,6 +121,8 @@ function coerce(raw: unknown): Prefs {
 const MIGRATIONS: Record<number, (raw: unknown) => unknown> = {
   // v0 → v1：没有 version 键的存量数据，字段口径与 v1 一致，原样保留（坏数据换成默认值）。
   0: (raw) => (isPlainObject(raw) ? raw : { ...DEFAULT_PREFS }),
+  // v1 → v2：新增 pythonPath（FR-0011）——老数据没这一项，缺省由 coerce 补空串。
+  1: (raw) => (isPlainObject(raw) ? raw : { ...DEFAULT_PREFS }),
 };
 
 /** 存量数据声明的版本：缺失 / 非法按 0（迁移链起点）处理。 */

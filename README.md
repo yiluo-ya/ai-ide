@@ -28,6 +28,7 @@ assistance.)
 | **Left panel** (4 permanent tabs, drag-resizable 240–560) | Files / Outline / Search / Code sessions |
 | **Main area** (three states) | Code · Project map · Agent; the code top bar holds tabs on the left (max 8) and “← → · Share ▾” on the right; the project-map toggle sits in the bottom-right rail, above the layout toggles |
 | **Right dock** (permanent, expanded by default, drag-resizable 220–560, collapsible) | Changes / Commands / Overview |
+| **Bottom panel** (Output / Terminal, collapsible, drag-resizable) | Output = command run history; Terminal = a persistent interactive shell (local only). Right-click a file in the tree or press `Ctrl+F5` to infer a language-appropriate command and run it in the terminal (“Run in Terminal”, no debug) |
 
 Since 2026-10-03 the sidebar no longer has a “More ▾” submenu, and the Guide / References /
 Call hierarchy / Type hierarchy panels no longer have UI entries (their components and backend

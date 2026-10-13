@@ -16,7 +16,8 @@ import { FileSearch, MIN_LEN } from './FileSearch';
 import { ActivityBar } from './ActivityBar';
 import { moveView, reorderView, setActiveView, useLayout, viewsOn, type ViewId } from './layout';
 import { OutputPanel } from './OutputPanel';
-import { TerminalPanel } from './TerminalPanel';
+import { TerminalPanel, type RunRequest } from './TerminalPanel';
+import { isRunnable } from './runCommand';
 import { GraphView, type GraphViewState } from './GraphView';
 import { AgentView } from './AgentView';
 import { AgentSessions } from './AgentSessions';
@@ -70,6 +71,8 @@ type PanelTab =
  */
 type BottomTab = 'output' | 'terminal';
 const BOTTOM_TABS: BottomTab[] = ['output', 'terminal'];
+/** 本机回环地址：非回环访问 = 分享模式（后端终端整层拒绝，运行入口一并禁用）。 */
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const BOTTOM_TITLE: Record<BottomTab, string> = {
   output: 'app.panelOutput',
   terminal: 'app.panelTerminal',
@@ -260,6 +263,14 @@ export default function App() {
   /** 底部面板高度（px），拖动顶边调整。 */
   const [bottomHeight, setBottomHeight] = useState(220);
 
+  /**
+   * FR-0011「在终端中运行」：token 自增的一次运行请求，交给 TerminalPanel 写进激活终端。
+   * pythonEnvRef 缓存后端探测结果（每项目探一次）；prefs.pythonPath 非空时优先、不探测。
+   */
+  const [runRequest, setRunRequest] = useState<RunRequest | null>(null);
+  const runTokenRef = useRef(0);
+  const pythonEnvRef = useRef<{ projectId: string; path: string | null } | null>(null);
+
   /** 打开某个面板：视图在哪一侧就聚焦那一侧；在右侧时顺带展开右侧栏。 */
   const openPanel = useCallback(
     (id: ViewId) => {
@@ -272,6 +283,46 @@ export default function App() {
     },
     [layout.sides],
   );
+
+  /**
+   * FR-0011：在终端里运行一个文件（文件树右键 / 编辑器右键 / 标签栏 ▶ / Ctrl+F5 共用）。
+   * - prefs.pythonPath 非空 → 直接用（完全覆盖探测）；
+   * - 否则探一次项目 venv（结果缓存），没有就用 PATH 上的 python；
+   * - 展开底部面板并切到「终端」，把请求交给 TerminalPanel（它知道当前 pane 用哪种 shell）。
+   */
+  const runFileInTerminal = useCallback((file: string) => {
+    const s = useStore.getState();
+    const projectId = s.projectId;
+    if (!projectId) return;
+    // 共享模式：后端终端整层拒绝（terminal.ts 的 403），入口一并禁用
+    if (!LOCAL_HOSTNAMES.has(window.location.hostname)) {
+      showFlash(translate('run.shareMode'));
+      return;
+    }
+    if (!isRunnable(file)) {
+      showFlash(translate('run.unsupported'));
+      return;
+    }
+    setBottomTab('terminal');
+    setBottomOpen(true);
+    void (async () => {
+      let pythonPath = loadPrefs().pythonPath || null;
+      if (!pythonPath) {
+        const cached = pythonEnvRef.current;
+        if (cached && cached.projectId === projectId) pythonPath = cached.path;
+        else {
+          try {
+            const env = await api.pythonEnv(projectId);
+            pythonEnvRef.current = { projectId, path: env.path };
+            pythonPath = env.path;
+          } catch {
+            pythonPath = null; // 探测失败就退回 PATH，不打断运行
+          }
+        }
+      }
+      setRunRequest({ token: ++runTokenRef.current, file, pythonPath });
+    })();
+  }, []);
   /** W3 / G7.3：整文件 blame 视图开关 + 当前文件的 blame（按文件缓存，光标移动不重新拉）。 */
   const [blameOn, setBlameOn] = useState(false);
   const [blame, setBlame] = useState<BlameResult | null>(null);
@@ -526,6 +577,17 @@ export default function App() {
           }
           return;
         }
+        case 'runFile': {
+          // FR-0011：在终端中运行当前文件（Ctrl+F5）；未打开文件就先提示
+          e.preventDefault();
+          const file = useStore.getState().openFile;
+          if (!file) {
+            showFlash(translate('run.noFile'));
+            return;
+          }
+          runFileInTerminal(file);
+          return;
+        }
         case 'back': // 后退/前进：绑键随 keymap 走（Alt+←/→ 或 Ctrl+Alt+←/→）
           e.preventDefault();
           void useStore.getState().goBack();
@@ -540,7 +602,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [store.openFile, cursor.line, cursor.col, openPanel]);
+  }, [store.openFile, cursor.line, cursor.col, openPanel, runFileInTerminal]);
 
   // M20 地图快照：视图变化写回 URL；从 URL 打开时把热点口径也恢复
   useEffect(() => {
@@ -786,6 +848,7 @@ export default function App() {
               tree={store.tree}
               activeFile={store.openFile}
               onOpen={(file) => jump(file)}
+              onRun={runFileInTerminal}
               filter={fileFilter}
               decor={decor}
               onOpenAside={(file) => void useStore.getState().openInSecondary(file)}
@@ -957,6 +1020,15 @@ export default function App() {
             <div className="editor-actions">
               <button
                 className="btn ghost"
+                disabled={!store.openFile || !isRunnable(store.openFile)}
+                onClick={() => store.openFile && runFileInTerminal(store.openFile)}
+                title={t('run.title')}
+                aria-label={t('run.title')}
+              >
+                ▶
+              </button>
+              <button
+                className="btn ghost"
                 disabled={!canBack}
                 onClick={() => void useStore.getState().goBack()}
                 title={loadPrefs().keymap === 'idea' ? 'Ctrl+Alt+←' : 'Alt+←'}
@@ -1053,6 +1125,7 @@ export default function App() {
                     onOpenHistory={openHistoryVersion}
                     onExplain={openExplain}
                     onFlow={openFlow}
+                    onRun={runFileInTerminal}
                     editable
                     onChange={(text) => useStore.getState().editorChanged(text)}
                   />
@@ -1133,15 +1206,16 @@ export default function App() {
               }}
             />
             <div className="bottom-stack">
-              {bottomOpen && (
-                <div className="bottom-body">
-                  {bottomTab === 'output' ? (
-                    <OutputPanel projectId={store.projectId} />
-                  ) : (
-                    <TerminalPanel projectId={store.projectId} />
-                  )}
+              {/* 收起面板时（.bottom-panel.collapsed 为 display:none）**不卸载内容**：终端是常驻会话，
+                  卸载会把会话、滚动内容连同里面跑着的进程一起销毁（见下方终端常驻）。 */}
+              <div className="bottom-body">
+                {bottomTab === 'output' && <OutputPanel projectId={store.projectId} />}
+                {/* 终端常驻：切到「输出」/收起/换项目都只隐藏、不卸载 —— 会话、滚动内容与
+                    里面跑着的进程都留着（切换项目也不重连，见 TerminalPanel）。 */}
+                <div className="terminal-slot" style={{ display: bottomTab === 'terminal' ? 'flex' : 'none' }}>
+                  <TerminalPanel projectId={store.projectId} runRequest={runRequest} />
                 </div>
-              )}
+              </div>
               <div className="bottom-rail">
                 <div
                   className="bottom-tabs"

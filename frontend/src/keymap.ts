@@ -18,6 +18,7 @@ export type KeyAction =
   | 'outlinePanel' // 大纲面板
   | 'filesPanel' // 文件面板
   | 'continueReading' // 继续上次阅读位置
+  | 'runFile' // 在终端中运行当前文件（FR-0011）
   | 'back' // 后退到上一个光标/编辑位置
   | 'forward' // 前进到下一个光标/编辑位置
   | 'sidePanel'; // 切到某个侧栏 tab（具体是哪个由 1..9/0 数字决定）
@@ -58,6 +59,8 @@ const VSCODE_KEYMAP: Keymap = [
   { gesture: g('o', { ctrl: true, meta: true, shift: true }), action: 'outlinePanel' },
   { gesture: g('e', { ctrl: true, meta: true, shift: true }), action: 'filesPanel' },
   { gesture: g('r', { ctrl: true, meta: true, shift: true }), action: 'continueReading' },
+  // 在终端中运行当前文件（FR-0011）：沿用 VS Code 的 Ctrl+F5 位置语义（这里不做 debug）
+  { gesture: g('f5', { ctrl: true }), action: 'runFile' },
   // 后退/前进：VS Code 沿用项目原习惯 Alt+←/→（浏览器/通用习惯）。
   { gesture: g('arrowleft', { alt: true }), action: 'back' },
   { gesture: g('arrowright', { alt: true }), action: 'forward' },
@@ -78,6 +81,7 @@ const IDEA_KEYMAP: Keymap = [
   { gesture: g('o', { ctrl: true, shift: true }), action: 'outlinePanel' },
   { gesture: g('e', { ctrl: true, shift: true }), action: 'filesPanel' },
   { gesture: g('r', { ctrl: true, shift: true }), action: 'continueReading' },
+  { gesture: g('f5', { ctrl: true }), action: 'runFile' },
   // 后退/前进：IDEA 用 Ctrl+Alt+←/→（Navigate Back/Forward）。
   { gesture: g('arrowleft', { ctrl: true, alt: true }), action: 'back' },
   { gesture: g('arrowright', { ctrl: true, alt: true }), action: 'forward' },

@@ -70,6 +70,7 @@ import {
   writeProjectFile,
 } from '../indexer/fswrite';
 import { buildRoutes } from '../indexer/guide';
+import { detectPythonEnv } from '../indexer/run-env';
 import { fileSummary } from '../indexer/summary';
 import { buildTimeline, DEFAULT_RECENT_WINDOW_MS, hostLinesFor, markHostOrigins } from '../indexer/timeline';
 import { compareSnapshot, readmap } from '../indexer/changes';
@@ -456,6 +457,16 @@ export function createApp(
     const project = registry.get(c.req.param('id'));
     if (!project) return fail(c, 404, 'project_not_found');
     return c.json({ status: project.status });
+  });
+
+  /**
+   * FR-0011：运行环境探测 —— 「在终端中运行」用它挑 Python 解释器。
+   * 只认项目根的 .venv / venv / env 与 conda-meta；`path: null` 表示交给 PATH 上的 python。
+   */
+  app.get('/api/projects/:id/python', (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    return c.json(detectPythonEnv(project.root));
   });
 
   // -------------------------------------------------------------- 命令管理（2026-10-03）
