@@ -7,6 +7,7 @@ import { closeAllTerminals, handleTerminalUpgrade } from './api/terminal';
 import { ProjectRegistry } from './registry';
 import { DATA_DIR, HOST, PORT, CORS_ORIGINS, SHARE_NOTE_LOCAL, SHARE_NOTE_SHARED, shareHintFor } from './config';
 import { installNoWatch, installProjectHint, migrateLegacyDataDir } from './bootstrap';
+import { setShutdownTask } from './services';
 import { primeUserIgnore } from './indexer/user-ignore';
 import { logError, logInfo } from './log';
 
@@ -66,7 +67,7 @@ export async function createServer(opts: ServerOptions): Promise<ServerHandle> {
   });
   logSharing(registry, port);
 
-  return {
+  const handle: ServerHandle = {
     port,
     host: opts.host,
     registry,
@@ -76,8 +77,14 @@ export async function createServer(opts: ServerOptions): Promise<ServerHandle> {
         closeAllTerminals();
         registry.closeAll();
         server.close(() => resolve());
+        // SSE / keep-alive 连接不会自己断，不强制断开的话 server.close 永不回调，
+        // 重启时的「优雅关闭」就只能干等（见 services.shutdownForRestart）。
+        httpServer.closeAllConnections();
       }),
   };
+  // 重启 / 停止时先优雅关闭再退出（services.restartService / stopService 会调它）
+  setShutdownTask(() => handle.close());
+  return handle;
 }
 
 /** 把 WebSocket 升级事件交给终端模块（不引额外依赖）。 */

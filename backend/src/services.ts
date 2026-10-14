@@ -15,6 +15,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DATA_DIR, HOST, PORT } from './config';
+import { logInfo } from './log';
 import type { ServiceStatus } from './types';
 
 export type { ServiceStatus };
@@ -101,6 +102,49 @@ export function noteAction(action: string, detail?: string): void {
   lastAction = { action, at: Date.now(), ...(detail ? { detail } : {}) };
 }
 
+/** 退出前要做的「优雅关闭」：由 createServer 注册（CLI 与 server.ts 两条入口都覆盖）。 */
+type ShutdownTask = () => void | Promise<void>;
+let shutdownTask: ShutdownTask | null = null;
+
+export function setShutdownTask(task: ShutdownTask | null): void {
+  shutdownTask = task;
+}
+
+/**
+ * 关掉 Node 内置 fetch（undici）的全局连接池。
+ * 带着 keep-alive 连接直接 `process.exit`，在 Windows 上会撞 libuv 的
+ * `UV_HANDLE_CLOSING` 断言（实测 20/20；本仓库 bootstrap.ts 也记着同一个坑）。
+ */
+async function closeFetchDispatcher(): Promise<void> {
+  const dispatcher = (globalThis as unknown as Record<symbol, unknown>)[Symbol.for('undici.globalDispatcher.1')] as
+    { close?: () => Promise<unknown> } | undefined;
+  try {
+    await dispatcher?.close?.();
+  } catch {
+    /* 拿不到（版本差异）或已经关了，都不影响退出 */
+  }
+}
+
+/**
+ * 重启 / 停止前的收尾：留出响应返回时间 → 优雅关闭（HTTP / pty / watcher / fetch 连接池）→ 退出。
+ *
+ * 为什么不能像以前那样直接 `process.exit`（2026-10-13 排障）：带着活跃句柄硬退，在 Windows 上
+ * 可能卡在 libuv 的退出清理里 —— 事件循环停住、端口不释放、进程既不退也不再应答，于是 worker
+ * 等满 15s 后 `taskkill /T` 强杀旧进程树，连它自己也一起带走，服务就再没人拉起来。
+ * 关闭动作给 3s 上限：关不掉也不能把「退出」本身拖住。
+ */
+async function shutdownForRestart(delayMs: number): Promise<void> {
+  await delay(delayMs);
+  logInfo('service.shutdown', { graceful: Boolean(shutdownTask) });
+  try {
+    await Promise.race([Promise.resolve(shutdownTask?.()), delay(3000)]);
+  } catch {
+    /* 关闭失败也要退 */
+  }
+  await closeFetchDispatcher();
+  process.exit(0);
+}
+
 /**
  * 拉起一个新服务（detached：不受本进程退出影响），日志追加到 `data/server.log`。
  * 起完写 state 文件，之后的重启才有「原命令」可用。
@@ -163,6 +207,8 @@ export async function restartService(): Promise<{ via: string }> {
           logPath: logFile(),
         };
   const worker = workerFile();
+  // worker 会先把自己「脱树」（WMI 起二级 worker）再干活 —— 这样它强杀旧进程树时不会被
+  // /T 一起带走（2026-10-13，详见 bin/restart-worker.mjs 顶部说明）。
   const child = spawn(process.execPath, [worker, JSON.stringify(state)], {
     detached: true,
     stdio: 'ignore',
@@ -170,8 +216,8 @@ export async function restartService(): Promise<{ via: string }> {
   });
   child.unref();
   noteAction('restart', `worker pid ${child.pid}`);
-  // 给 HTTP 响应留出返回时间，再退出自己
-  setTimeout(() => process.exit(0), 500).unref();
+  // 给 HTTP 响应留出返回时间，再优雅关闭并退出自己
+  void shutdownForRestart(400);
   return { via: worker };
 }
 
@@ -181,8 +227,8 @@ export async function stopService(): Promise<{ pid: number }> {
   const pid = state && isAlive(state.pid) ? state.pid : process.pid;
   noteAction('stop', `pid ${pid}`);
   killTree(pid);
-  // 先让 HTTP 响应发出去，再退出自己（pid 可能就是自己）
-  setTimeout(() => process.exit(0), 400).unref();
+  // 先让 HTTP 响应发出去，再优雅关闭并退出自己（pid 可能就是自己）
+  void shutdownForRestart(300);
   return { pid };
 }
 
