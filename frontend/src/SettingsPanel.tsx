@@ -57,6 +57,8 @@ function shortcutsFor(keymap: KeymapId): Array<{ keys: string; label: string }> 
       { keys: 'Ctrl+F', label: 'topbar.shortcutFileSearchIn' },
       { keys: 'Ctrl+Alt+S', label: 'topbar.shortcutSettings' },
       { keys: 'Ctrl+F5', label: 'topbar.shortcutRunFile' },
+      { keys: 'Alt+F', label: 'topbar.shortcutRevealInFiles' },
+      { keys: 'Ctrl+Alt+-', label: 'topbar.shortcutCollapseAll' },
     ];
   }
   return [
@@ -73,6 +75,8 @@ function shortcutsFor(keymap: KeymapId): Array<{ keys: string; label: string }> 
     { keys: 'Ctrl/Cmd+F', label: 'topbar.shortcutFileSearchIn' },
     { keys: 'Ctrl/Cmd+,', label: 'topbar.shortcutSettings' },
     { keys: 'Ctrl+F5', label: 'topbar.shortcutRunFile' },
+    { keys: 'Alt+F', label: 'topbar.shortcutRevealInFiles' },
+    { keys: 'Ctrl/Cmd+Shift+-', label: 'topbar.shortcutCollapseAll' },
   ];
 }
 
@@ -111,6 +115,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const whitespaceId = useId();
   const motionId = useId();
   const changesId = useId();
+  const autoRevealId = useId();
   const agentPathId = useId();
   const pythonPathId = useId();
 
@@ -336,6 +341,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         label={t('settings.changesOpen')}
         checked={prefs.changesOpen}
         onChange={(v) => savePrefs({ changesOpen: v })}
+      />
+      <Toggle
+        id={autoRevealId}
+        label={t('settings.autoReveal')}
+        checked={prefs.autoReveal}
+        onChange={(v) => savePrefs({ autoReveal: v })}
       />
 
       <h3 className="wcr-section-title">{t('settings.runSection')}</h3>

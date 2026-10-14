@@ -70,3 +70,31 @@
   gap: 3px;
   cursor: pointer;
 }
+
+/* FR-0012：树工具行（收拢全部 / 定位当前文件）—— 靠右排 */
+.tree-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.tree-actions .btn {
+  padding: 1px 8px;
+  font-size: var(--fs-xs);
+  line-height: 18px;
+}
+
+/* FR-0012：「在树中定位」落到的那一行闪一下（动效减弱时由全局规则关掉） */
+.tree-row.reveal-flash {
+  animation: wcr-reveal-flash 1.2s ease-out;
+}
+
+@keyframes wcr-reveal-flash {
+  0%,
+  55% {
+    background: var(--row-active);
+  }
+  100% {
+    background: transparent;
+  }
+}

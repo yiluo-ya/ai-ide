@@ -1,5 +1,5 @@
 /** 文件树：目录可展开/折叠，点击文件打开；叠加「改动热力 / 来源徽标」。 */
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { FileOrigin } from '../../shared/types';
 import type { FileNode } from './api';
 import { langColor } from './languages';
@@ -7,6 +7,8 @@ import { FileIcon } from './common/fileicon/FileIcon';
 import { heatLevel } from './mapState';
 import { translate, useI18n } from './i18n';
 import { isRunnable } from './runCommand';
+import { usePrefs } from './prefs';
+import { allDirPaths, ancestorDirs, readTreeState, writeTreeState } from './treeState';
 import './filetree.css';
 
 /** 文件树上叠加的事实（来自 /overview 与 /timeline，缺省即不显示徽标）。 */
@@ -58,6 +60,14 @@ interface Props {
   hasClipboard?: boolean;
   /** FR-0009：拖拽移动 —— `from` 拖到目录 `toDir`（空串 = 项目根）。 */
   onMoveDrop?: (from: string, toDir: string) => void;
+  /** FR-0012：项目 id —— 展开 / 折叠状态按项目分键持久化。 */
+  projectId?: string | null;
+  /** FR-0012：每次 +1 就把当前打开文件定位到树里（展开祖先链 + 滚动可见 + 闪烁）。 */
+  revealToken?: number;
+  /** FR-0012：每次 +1 就收拢所有文件夹。 */
+  collapseAllToken?: number;
+  /** FR-0012：只显示可索引文件（隐藏二进制 / 被规则忽略的文件）。 */
+  indexedOnly?: boolean;
 }
 
 /** 右键菜单（视口坐标定位）：文件与目录都可开（目录用于复制路径 / 文件名）。 */
@@ -122,6 +132,13 @@ function matchesVisible(node: FileNode, visible: Set<string> | undefined): boole
   return (node.children ?? []).some((c) => matchesVisible(c, visible));
 }
 
+/** FR-0012：开了「只显示可索引文件」时，二进制 / 被规则忽略的文件整棵隐藏（目录靠子树存活）。 */
+function matchesIndexed(node: FileNode, indexedOnly: boolean): boolean {
+  if (!indexedOnly) return true;
+  if (node.type === 'file') return node.indexed !== false;
+  return (node.children ?? []).some((c) => matchesIndexed(c, true));
+}
+
 const ORIGIN_BADGE: Record<FileOrigin, { mark: string; titleKey: string } | null> = {
   // 2026-10-03 用户要求去掉「agent 产出」（没啥用）：不再在文件树上标它。
   agent: null,
@@ -140,10 +157,17 @@ function sortNodes(nodes: FileNode[]): FileNode[] {
   });
 }
 
-/** 过滤（搜索 / 只看）之后的子节点，按目录在前排序。 */
-function visibleChildren(node: FileNode, filter: string, decor?: TreeDecor): FileNode[] {
+/** 过滤（搜索 / 只看 / 只含可索引）之后的子节点，按目录在前排序。 */
+function visibleChildren(
+  node: FileNode,
+  filter: string,
+  decor: TreeDecor | undefined,
+  indexedOnly: boolean,
+): FileNode[] {
   return sortNodes(
-    (node.children ?? []).filter((c) => matchesFilter(c, filter) && matchesVisible(c, decor?.visible)),
+    (node.children ?? []).filter(
+      (c) => matchesFilter(c, filter) && matchesVisible(c, decor?.visible) && matchesIndexed(c, indexedOnly),
+    ),
   );
 }
 
@@ -152,11 +176,11 @@ function visibleChildren(node: FileNode, filter: string, decor?: TreeDecor): Fil
  * 从 node 起，只要「过滤后唯一子节点还是目录」就一路并进来，直到出现分支（多个子项）或子项是文件。
  * 返回的链首是最外层目录、链尾是这条链真正代表的目录。
  */
-function compactChain(node: FileNode, filter: string, decor?: TreeDecor): FileNode[] {
+function compactChain(node: FileNode, filter: string, decor: TreeDecor | undefined, indexedOnly: boolean): FileNode[] {
   const chain = [node];
   let cur = node;
   for (;;) {
-    const kids = visibleChildren(cur, filter, decor);
+    const kids = visibleChildren(cur, filter, decor, indexedOnly);
     if (kids.length === 1 && kids[0].type === 'directory') {
       cur = kids[0];
       chain.push(cur);
@@ -204,6 +228,8 @@ function TreeNode({
   decor,
   expanded,
   collapsed,
+  indexedOnly,
+  flashPath,
   toggle,
   onMenu,
   dnd,
@@ -217,11 +243,16 @@ function TreeNode({
   expanded: Set<string>;
   /** 用户显式折叠过的目录：过滤自动展开时也压得住。 */
   collapsed: Set<string>;
+  /** FR-0012：只显示可索引文件。 */
+  indexedOnly: boolean;
+  /** FR-0012：正在闪烁高亮的路径（刚定位到的那一行）。 */
+  flashPath: string | null;
   toggle: (paths: string[]) => void;
   onMenu: (e: React.MouseEvent, path: string, isDir: boolean) => void;
   dnd: Dnd;
 }) {
-  if (!matchesFilter(node, filter) || !matchesVisible(node, decor?.visible)) return null;
+  if (!matchesFilter(node, filter) || !matchesVisible(node, decor?.visible) || !matchesIndexed(node, indexedOnly))
+    return null;
 
   if (node.type === 'directory') {
     // 过滤时自动展开，方便直接看到命中项；但用户显式折叠过的目录优先 ——
@@ -229,15 +260,18 @@ function TreeNode({
     const auto = Boolean(filter || decor?.visible);
     // 单链目录压缩（2026-10-05 用户要求）：唯一子目录并成一行 a/b/c 一直到分支处；
     // 折叠时只显示最外层名字，展开时才显示整条链。
-    const chain = compactChain(node, filter, decor);
+    const chain = compactChain(node, filter, decor, indexedOnly);
     const tail = chain[chain.length - 1];
     const open = !collapsed.has(node.path) && (expanded.has(node.path) || auto);
     const label = open ? chain.map((n) => n.name).join('/') : node.name;
-    const children = visibleChildren(tail, filter, decor);
+    const children = visibleChildren(tail, filter, decor, indexedOnly);
     return (
       <div className="tree-dir">
         <div
-          className={`tree-row dir${dnd.target === tail.path ? ' drop-target' : ''}`}
+          className={`tree-row dir${dnd.target === tail.path ? ' drop-target' : ''}${
+            flashPath === tail.path ? ' reveal-flash' : ''
+          }`}
+          data-path={tail.path}
           style={{ paddingLeft: depth * 12 + 6 }}
           onClick={() => toggle(chain.map((n) => n.path))}
           onContextMenu={(e) => {
@@ -282,6 +316,8 @@ function TreeNode({
               decor={decor}
               expanded={expanded}
               collapsed={collapsed}
+              indexedOnly={indexedOnly}
+              flashPath={flashPath}
               toggle={toggle}
               onMenu={onMenu}
               dnd={dnd}
@@ -291,13 +327,19 @@ function TreeNode({
     );
   }
 
-  const className = ['tree-row', 'file', activeFile === node.path ? 'active' : '']
+  const className = [
+    'tree-row',
+    'file',
+    activeFile === node.path ? 'active' : '',
+    flashPath === node.path ? 'reveal-flash' : '',
+  ]
     .filter(Boolean)
     .join(' ');
 
   return (
     <div
       className={className}
+      data-path={node.path}
       style={{ paddingLeft: depth * 12 + 18 }}
       onClick={() => onOpen(node.path)}
       onContextMenu={(e) => {
@@ -320,6 +362,15 @@ function TreeNode({
   );
 }
 
+/**
+ * FR-0012：最近一次被 autoReveal 定位过的「项目 + 文件」。
+ *
+ * 放模块级（而非组件内 state）的原因：切面板会重挂载 FileTree，若只认组件内状态，
+ * 「收拢 → 切到搜索面板 → 切回文件面板」就又会被自动展开，与「展开状态按项目记住」自相矛盾。
+ * autoReveal 的语义是**打开文件时跟随**，不是「面板每次出现都展开」。
+ */
+let lastAutoRevealed: string | null = null;
+
 export function FileTree({
   tree,
   activeFile,
@@ -340,16 +391,30 @@ export function FileTree({
   onPaste,
   hasClipboard,
   onMoveDrop,
+  projectId,
+  revealToken = 0,
+  collapseAllToken = 0,
+  indexedOnly = false,
 }: Props) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const prefs = usePrefs();
+  // FR-0012：展开 / 折叠状态按项目分键持久化（切面板 / 刷新 / 切项目回来都还在）。
+  // 惰性初始值只读一次 localStorage；切项目由 App 侧的 key 重挂载实现。
+  const [storedTree] = useState(() => readTreeState(projectId));
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(storedTree.expanded));
   /** 用户显式折叠过的目录（优先级高于「过滤 / 只看」的自动展开）。 */
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(storedTree.collapsed));
   /** 右键菜单；null = 不开。 */
   const [menu, setMenu] = useState<LeafMenu | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   /** FR-0009 拖拽：源路径放 ref（hover 时读，不必重渲），目标目录放 state（要高亮）。 */
   const dragSource = useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  /** FR-0012 定位：容器 ref（在它里面按 data-path 找行）+ 待定位 / 正在闪烁的路径。 */
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [pendingReveal, setPendingReveal] = useState<{ path: string; nonce: number } | null>(null);
+  const [flashPath, setFlashPath] = useState<string | null>(null);
+  const flashTimer = useRef<number | null>(null);
 
   const canDrop = (dir: string) => {
     const src = dragSource.current;
@@ -411,6 +476,89 @@ export function FileTree({
     });
   };
 
+  /** FR-0012：把某个文件定位到树里 —— 展开它整条祖先链，并排队滚动到它那一行。 */
+  const revealPath = useCallback((path: string) => {
+    const dirs = ancestorDirs(path);
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const d of dirs) next.add(d);
+      return next;
+    });
+    setCollapsed((prev) => {
+      if (!dirs.some((d) => prev.has(d))) return prev;
+      const next = new Set(prev);
+      for (const d of dirs) next.delete(d);
+      return next;
+    });
+    setPendingReveal({ path, nonce: Date.now() });
+  }, []);
+
+  /** FR-0012：收拢所有文件夹 —— 清空展开集合，并把全部目录压进「显式折叠」集合（过滤状态下也收得动）。 */
+  const collapseAll = useCallback(() => {
+    setExpanded(new Set());
+    setCollapsed(new Set(allDirPaths(tree)));
+    setPendingReveal(null);
+    setFlashPath(null);
+  }, [tree]);
+
+  // FR-0012：展开 / 折叠状态写回（挂载时多写一次，无副作用）。
+  useEffect(() => {
+    writeTreeState(projectId, { expanded: [...expanded], collapsed: [...collapsed] });
+  }, [projectId, expanded, collapsed]);
+
+  // FR-0012：外部信号（工具按钮 / 快捷键 / 标签右键）—— 每次 +1 就把当前打开文件定位到树里。
+  useEffect(() => {
+    if (revealToken > 0 && activeFile) revealPath(activeFile);
+  }, [revealToken, activeFile, revealPath]);
+
+  // FR-0012：外部信号 —— 每次 +1 就收拢所有文件夹。
+  useEffect(() => {
+    if (collapseAllToken > 0) collapseAll();
+  }, [collapseAllToken, collapseAll]);
+
+  // FR-0012：打开文件自动跟随（可在设置里关掉）；同一个文件只跟随一次，别跟「用户手动收拢」抢。
+  useEffect(() => {
+    if (!prefs.autoReveal || !activeFile) return;
+    const mark = `${projectId ?? ''}|${activeFile}`;
+    if (lastAutoRevealed === mark) return;
+    lastAutoRevealed = mark;
+    revealPath(activeFile);
+  }, [activeFile, prefs.autoReveal, projectId, revealPath]);
+
+  // FR-0012：待定位的行渲染出来后再滚动 + 闪烁（依赖里带上会影响可见性的量，展开后重试）。
+  useLayoutEffect(() => {
+    if (!pendingReveal) return;
+    const host = containerRef.current;
+    // 属性选择器里只须转义引号与反斜杠（路径里都是 `/`）
+    const selector = `[data-path="${pendingReveal.path.replace(/["\\]/g, '\\$&')}"]`;
+    const row = host?.querySelector<HTMLElement>(selector);
+    if (!row) return; // 这一轮还不够（如在折叠的子树里 / 被过滤掉）：等依赖变化再试
+    row.scrollIntoView({ block: 'nearest' });
+    setFlashPath(pendingReveal.path);
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlashPath(null), 1200);
+    setPendingReveal(null);
+  }, [pendingReveal, expanded, collapsed, filter, decor, indexedOnly]);
+
+  useEffect(
+    () => () => {
+      if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    },
+    [],
+  );
+
+  // 右键菜单：先按光标坐标摆（渲染前就落在那儿），再在布局阶段钳进视口 ——
+  // 贴近窗口底部右击时整体上移（否则「复制路径 / 删除」这些下半截的项落到视口外点不到），
+  // 贴住右边缘时左移。用 ref 直接改样式，paint 之前完成，不会看见跳一下。
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!menu || !el) return;
+    const pad = 8;
+    const { width, height } = el.getBoundingClientRect();
+    el.style.left = `${Math.max(pad, Math.min(menu.x, window.innerWidth - pad - width))}px`;
+    el.style.top = `${Math.max(pad, Math.min(menu.y, window.innerHeight - pad - height))}px`;
+  }, [menu]);
+
   const children = useMemo(() => sortNodes(tree?.children ?? []), [tree]);
 
   if (!tree) return <div className="panel-empty">{t('filetree.noProject')}</div>;
@@ -419,6 +567,7 @@ export function FileTree({
 
   return (
     <div
+      ref={containerRef}
       className={`file-tree${dropTarget === '' ? ' drop-target' : ''}`}
       onContextMenu={(e) => {
         // 空白处右键 = 对项目根操作（新建在根目录 / 粘贴到根目录）。
@@ -451,6 +600,8 @@ export function FileTree({
             decor={decor}
             expanded={expanded}
             collapsed={collapsed}
+            indexedOnly={indexedOnly}
+            flashPath={flashPath}
             toggle={toggle}
             dnd={dnd}
             onMenu={(e, path, isDir) => setMenu({ path, isDir, x: e.clientX, y: e.clientY })}
@@ -468,7 +619,7 @@ export function FileTree({
               setMenu(null);
             }}
           />
-          <div className="tree-menu" style={{ top: menu.y, left: menu.x }} role="menu">
+          <div ref={menuRef} className="tree-menu" style={{ top: menu.y, left: menu.x }} role="menu">
             <div className="tree-menu-file" title={menu.path || t('filetree.projectRoot')}>
               {menu.path || t('filetree.projectRoot')}
             </div>
@@ -595,6 +746,15 @@ export function FileTree({
                   }}
                 >
                   {t('filetree.copyPath')}
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    onCopy?.(menu.path);
+                    setMenu(null);
+                  }}
+                >
+                  {t('filetree.copyRelativePath')}
                 </button>
                 <button
                   role="menuitem"

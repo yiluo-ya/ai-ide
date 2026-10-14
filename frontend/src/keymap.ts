@@ -21,6 +21,8 @@ export type KeyAction =
   | 'runFile' // 在终端中运行当前文件（FR-0011）
   | 'back' // 后退到上一个光标/编辑位置
   | 'forward' // 前进到下一个光标/编辑位置
+  | 'revealInFiles' // FR-0012：把当前打开文件定位到文件树里
+  | 'collapseAll' // FR-0012：收拢文件树里所有文件夹
   | 'sidePanel'; // 切到某个侧栏 tab（具体是哪个由 1..9/0 数字决定）
 
 export type KeymapId = 'vscode' | 'idea';
@@ -64,6 +66,9 @@ const VSCODE_KEYMAP: Keymap = [
   // 后退/前进：VS Code 沿用项目原习惯 Alt+←/→（浏览器/通用习惯）。
   { gesture: g('arrowleft', { alt: true }), action: 'back' },
   { gesture: g('arrowright', { alt: true }), action: 'forward' },
+  // FR-0012：定位当前文件（Alt+F，两套 keymap 一致）+ 收拢所有文件夹
+  { gesture: g('f', { alt: true }), action: 'revealInFiles' },
+  { gesture: g('-', { ctrl: true, shift: true }), action: 'collapseAll' },
 ];
 
 /**
@@ -85,6 +90,9 @@ const IDEA_KEYMAP: Keymap = [
   // 后退/前进：IDEA 用 Ctrl+Alt+←/→（Navigate Back/Forward）。
   { gesture: g('arrowleft', { ctrl: true, alt: true }), action: 'back' },
   { gesture: g('arrowright', { ctrl: true, alt: true }), action: 'forward' },
+  // FR-0012：定位当前文件（与 VS Code 方案一致）+ 收拢所有文件夹
+  { gesture: g('f', { alt: true }), action: 'revealInFiles' },
+  { gesture: g('-', { ctrl: true, alt: true }), action: 'collapseAll' },
 ];
 
 const KEYMAPS: Record<KeymapId, Keymap> = {

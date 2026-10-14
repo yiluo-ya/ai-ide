@@ -40,11 +40,13 @@ export interface Prefs {
   keymap: KeymapId;
   /** FR-0011：跑 Python 用的解释器绝对路径；空 = 自动探测项目 venv，再退回 PATH。 */
   pythonPath: string;
+  /** FR-0012：打开文件时自动在文件树里定位（展开祖先链 + 滚动 + 闪烁）。 */
+  autoReveal: boolean;
 }
 
 export const PREFS_KEY = 'wcr:prefs';
 /** 当前偏好结构版本：以后改字段口径（改名 / 改语义 / 删字段）就加一，并在 MIGRATIONS 补一条。 */
-export const PREFS_VERSION = 2;
+export const PREFS_VERSION = 3;
 export const FONT_SIZE_MIN = 12;
 export const FONT_SIZE_MAX = 18;
 export const SIDEBAR_MIN = 240;
@@ -66,6 +68,7 @@ export const DEFAULT_PREFS: Prefs = {
   changesOpen: true,
   keymap: 'idea',
   pythonPath: '',
+  autoReveal: true,
 };
 
 type Listener = (prefs: Prefs) => void;
@@ -107,6 +110,7 @@ function coerce(raw: unknown): Prefs {
     changesOpen: src.changesOpen !== false,
     keymap: src.keymap === 'vscode' ? 'vscode' : 'idea',
     pythonPath: typeof src.pythonPath === 'string' ? src.pythonPath.trim() : DEFAULT_PREFS.pythonPath,
+    autoReveal: src.autoReveal !== false,
   };
 }
 
@@ -123,6 +127,8 @@ const MIGRATIONS: Record<number, (raw: unknown) => unknown> = {
   0: (raw) => (isPlainObject(raw) ? raw : { ...DEFAULT_PREFS }),
   // v1 → v2：新增 pythonPath（FR-0011）——老数据没这一项，缺省由 coerce 补空串。
   1: (raw) => (isPlainObject(raw) ? raw : { ...DEFAULT_PREFS }),
+  // v2 → v3：新增 autoReveal（FR-0012）——老数据缺省为 true，由 coerce 默认开。
+  2: (raw) => (isPlainObject(raw) ? raw : { ...DEFAULT_PREFS }),
 };
 
 /** 存量数据声明的版本：缺失 / 非法按 0（迁移链起点）处理。 */

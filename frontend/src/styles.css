@@ -1122,6 +1122,113 @@ mark {
   min-height: 0;
 }
 
+/* FR-0012：面包屑 —— 当前打开文件的路径层级（点任一段下拉该目录下的条目） */
+.breadcrumbs {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 8px 3px;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.breadcrumbs .crumb {
+  flex: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 5px;
+  border: none;
+  border-radius: var(--r-xs);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.breadcrumbs .crumb:hover,
+.breadcrumbs .crumb.open {
+  background: var(--row-hover);
+  color: var(--fg);
+}
+
+.breadcrumbs .crumb.current {
+  max-width: 320px;
+  color: var(--fg);
+  cursor: default;
+}
+
+.breadcrumbs .crumb.current:hover {
+  background: none;
+}
+
+.breadcrumbs .crumb-sep {
+  flex: none;
+  opacity: 0.5;
+}
+
+.breadcrumbs-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.breadcrumbs-menu {
+  position: absolute;
+  top: 100%;
+  left: 8px;
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  max-height: 320px;
+  overflow: auto;
+  padding: var(--sp-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-3);
+  box-shadow: var(--elev-2);
+}
+
+.crumb-item {
+  text-align: left;
+  padding: 3px 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.crumb-item:hover {
+  background: var(--row-hover);
+}
+
+.crumb-item.dir {
+  color: var(--tree-dir);
+}
+
+.crumb-item.current {
+  background: var(--row-active);
+  color: var(--accent-fg);
+}
+
+.crumb-item.up {
+  color: var(--fg-dim);
+}
+
+.crumb-empty {
+  padding: 4px 8px;
+  color: var(--fg-dim);
+}
+
 /* 代码展示区顶条（2026-10-08）：左标签条 + 右 ← → / 分享。
    取代原来的导航条（总览 / 面包屑 / 复制位置 / 旁边打开 / 项目地图），少占一行。 */
 .editor-topbar {

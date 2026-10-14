@@ -9,13 +9,20 @@
 - Open a project as a **local directory** (`POST /api/projects`; the same path always reuses the same id)
 - The file tree lists **every file** in the project (including non-indexable binaries and assets):
   directories first, files after, **collapsed by default**, two colours for dirs vs files;
-  filter by time (all / changed today / within 3 days / within 7 days) and by “orphan”
+  filter by time (all / changed today / within 3 days / within 7 days), “orphan” and “indexed”
+- **File-tree navigation** (2026-10-14, see `FR/FR-0012-fr.md`): the toolbar’s **“Collapse” folds every
+  folder at once** (`Ctrl+Alt+-` / `Ctrl+Shift+-`), **“Reveal” puts the open file back in the tree**
+  (expands its ancestors, scrolls to it and flashes; `Alt+F`, the tab context menu and auto-reveal on
+  open — the latter can be turned off in settings); expand / collapse state is **remembered per project**
+  (survives reload, panel switches and project switches); the context menu also has **Copy relative path**
 - File-tree badges: `●` just changed (flashes for 20 seconds), heat blocks (brighter = newer),
   `◌` recently changed, `★` hotspot, `?` orphan
   (2026-10-08, at the user’s request: the “Add to reading queue” context-menu item and all
   read / unread marks were removed)
-- Monaco syntax highlighting, breadcrumbs (including symbol path with a sibling-symbol menu),
-  outline (`Ctrl/Cmd+Shift+O`)
+- Monaco syntax highlighting, outline (`Ctrl/Cmd+Shift+O`)
+- Breadcrumbs (restored on 2026-10-14 at the user’s request, see `FR/FR-0012-fr.md`): a row under the
+  editor top bar showing the open file’s path (project › dirs… › file); clicking any segment opens a
+  dropdown of that directory’s entries (click a folder to drill down, a file to open it)
 - Go to definition (`F12` / `Ctrl+F12` / Ctrl+Click), find references (`Shift+F12`).
   **A failed jump never just “does nothing”**: a notice bar gives a plain-language explanation and a
   next action (external dependency → “jump to the import line”; unresolvable → “search xxx”;
@@ -496,6 +503,8 @@ requests return 400. Routes marked **local** return 403 in share mode.
 | `Ctrl/Cmd+Alt+B` | Toggle the whole-file blame view |
 | `Ctrl/Cmd+,` | Open Settings |
 | `Ctrl+F5` | Run the current file in the terminal (command inferred from the language) |
+| `Alt+F` | Reveal the current file in the file tree |
+| `Ctrl/Cmd+Shift+-` (VS Code scheme) / `Ctrl+Alt+-` (IDEA scheme) | Collapse all folders in the file tree |
 | Middle-click a tab | Open to the side (split view) |
 
 `Ctrl/Cmd+F` (find in file) and `Ctrl/Cmd+G` (go to line) are built into Monaco.

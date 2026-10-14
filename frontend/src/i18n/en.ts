@@ -28,6 +28,8 @@ export const en: Record<string, string> = {
   'topbar.legendExternal': 'External dependency / standard library',
   'topbar.shortcutSettings': 'Open settings',
   'topbar.shortcutRunFile': 'Run current file in terminal',
+  'topbar.shortcutRevealInFiles': 'Reveal the current file in the file tree',
+  'topbar.shortcutCollapseAll': 'Collapse all folders in the file tree',
   'topbar.helpSectionMore': 'More',
 
   // ---------------------------------------------------------------- Add project (folder picker dialog)
@@ -88,6 +90,7 @@ export const en: Record<string, string> = {
   'settings.interface': 'Interface',
   'settings.reduceMotion': 'Reduce motion',
   'settings.changesOpen': 'Changes panel expanded by default',
+  'settings.autoReveal': 'Auto-reveal the open file in the file tree',
   'settings.indexSection': 'Index',
   'settings.ignoreRules': 'Custom ignore rules',
   'settings.ignoreRulesHint':
@@ -428,6 +431,8 @@ export const en: Record<string, string> = {
   'app.recent7d': 'Within 7 days',
   'app.onlyOrphansTitle': 'Only files nobody references',
   'app.orphan': 'Orphans',
+  'app.indexedOnly': 'Indexed',
+  'app.indexedOnlyTitle': 'Show indexed files only (hide binary / ignored files)',
   'app.noProject': 'Open a project first',
   'app.siblingSymbols': 'Sibling symbols',
   'app.siblingSymbolsHead': 'Sibling symbols · {n}',
@@ -1244,6 +1249,7 @@ export const en: Record<string, string> = {
   'filetree.noFiles': 'No readable files in this project',
   'filetree.noFilesFiltered': 'No files match the current filter',
   'filetree.copyPath': 'Copy path',
+  'filetree.copyRelativePath': 'Copy relative path',
   'filetree.runInTerminal': 'Run in Terminal',
   'filetree.runUnsupported': 'This file type needs compiling or has no runner',
   'filetree.copyFileName': 'Copy file name',
@@ -1257,6 +1263,8 @@ export const en: Record<string, string> = {
   'filetree.copy': 'Copy',
   'filetree.cut': 'Cut',
   'filetree.paste': 'Paste here',
+  'filetree.revealActive': 'Reveal',
+  'filetree.collapseAll': 'Collapse',
   'prompt.ok': 'OK',
   'prompt.inDir': 'Create inside {dir}',
   'prompt.nameLabel': 'Name (may contain / to create folders)',

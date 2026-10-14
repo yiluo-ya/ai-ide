@@ -371,6 +371,9 @@
   z-index: 31;
   min-width: 150px;
   max-width: 260px;
+  /* 菜单比窗口还高时自己滚（否则上翻也放不下） */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding: 4px;

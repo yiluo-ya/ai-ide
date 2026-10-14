@@ -31,6 +31,8 @@ export const zh: Record<string, string> = {
   'topbar.legendExternal': '外部依赖 / 标准库',
   'topbar.shortcutSettings': '打开设置',
   'topbar.shortcutRunFile': '在终端中运行当前文件',
+  'topbar.shortcutRevealInFiles': '在文件树中定位当前文件',
+  'topbar.shortcutCollapseAll': '收拢文件树里所有文件夹',
   'topbar.helpSectionMore': '更多',
 
   // ---------------------------------------------------------------- 添加项目（目录选择弹窗）
@@ -92,6 +94,7 @@ export const zh: Record<string, string> = {
   'settings.interface': '界面',
   'settings.reduceMotion': '动效减弱',
   'settings.changesOpen': '右侧变更栏默认展开',
+  'settings.autoReveal': '打开文件时自动在文件树中定位',
   'settings.indexSection': '索引',
   'settings.ignoreRules': '自定义忽略规则',
   'settings.ignoreRulesHint':
@@ -427,6 +430,8 @@ export const zh: Record<string, string> = {
   'app.recent7d': '7 天内',
   'app.onlyOrphansTitle': '只看没人引用的文件',
   'app.orphan': '孤立',
+  'app.indexedOnly': '可索引',
+  'app.indexedOnlyTitle': '只显示可索引文件（隐藏二进制 / 被规则忽略的文件）',
   'app.noProject': '先打开一个项目',
   'app.siblingSymbols': '同级符号',
   'app.siblingSymbolsHead': '同级符号 · {n}',
@@ -1218,6 +1223,7 @@ export const zh: Record<string, string> = {
   'filetree.noFiles': '项目里没有可读文件',
   'filetree.noFilesFiltered': '当前过滤条件下没有文件',
   'filetree.copyPath': '复制路径',
+  'filetree.copyRelativePath': '复制相对路径',
   'filetree.runInTerminal': '在终端中运行',
   'filetree.runUnsupported': '该类型需要编译或没有运行器',
   'filetree.copyFileName': '复制文件名',
@@ -1231,6 +1237,8 @@ export const zh: Record<string, string> = {
   'filetree.copy': '复制',
   'filetree.cut': '剪切',
   'filetree.paste': '粘贴到这里',
+  'filetree.revealActive': '定位',
+  'filetree.collapseAll': '收拢',
   'prompt.ok': '确定',
   'prompt.inDir': '在 {dir} 下新建',
   'prompt.nameLabel': '名字（可含 / 建中间目录）',

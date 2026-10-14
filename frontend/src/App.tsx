@@ -12,6 +12,7 @@ import { api } from './api';
 import { ensureLanguages, guessLangFor } from './languages';
 import { Editor } from './Editor';
 import { FileTree, type TreeDecor } from './FileTree';
+import { Breadcrumbs } from './Breadcrumbs';
 import { FileSearch, MIN_LEN } from './FileSearch';
 import { ActivityBar } from './ActivityBar';
 import { moveView, reorderView, setActiveView, useLayout, viewsOn, type ViewId } from './layout';
@@ -168,6 +169,11 @@ export default function App() {
   const [graphState, setGraphState] = useState<GraphViewState | null>(null);
   const [recentFilter, setRecentFilter] = useState<RecentFilter>('all');
   const [onlyOrphans, setOnlyOrphans] = useState(false);
+  /** FR-0012：只显示可索引文件（隐藏二进制 / 被规则忽略的文件）。 */
+  const [indexedOnly, setIndexedOnly] = useState(false);
+  /** FR-0012：文件树的两条外部信号（自增触发；FileTree 侧监听）。 */
+  const [treeRevealToken, setTreeRevealToken] = useState(0);
+  const [treeCollapseToken, setTreeCollapseToken] = useState(0);
   /** P24 的浮层：设置 · 模型（模型与设置平级，2026-10-03 用户要求）。 */
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -288,6 +294,28 @@ export default function App() {
     },
     [layout.sides],
   );
+
+  /**
+   * FR-0012：把某个文件定位到文件树里（工具按钮 / 快捷键 / 标签右键共用）。
+   * 过滤态下树里可能根本没有它，先把文件名过滤清掉，再发「定位」信号。
+   */
+  const revealFileInTree = useCallback(
+    (file: string | null) => {
+      if (!file) return;
+      setSidebarOpen(true);
+      openPanel('files');
+      setFileFilter('');
+      setTreeRevealToken((n) => n + 1);
+    },
+    [openPanel],
+  );
+
+  /** FR-0012：收拢文件树里所有文件夹。 */
+  const collapseAllInTree = useCallback(() => {
+    setSidebarOpen(true);
+    openPanel('files');
+    setTreeCollapseToken((n) => n + 1);
+  }, [openPanel]);
 
   /**
    * FR-0011：在终端里运行一个文件（文件树右键 / 编辑器右键 / 标签栏 ▶ / Ctrl+F5 共用）。
@@ -606,13 +634,21 @@ export default function App() {
           e.preventDefault();
           void useStore.getState().goForward();
           return;
+        case 'revealInFiles':
+          e.preventDefault();
+          revealFileInTree(useStore.getState().openFile);
+          return;
+        case 'collapseAll':
+          e.preventDefault();
+          collapseAllInTree();
+          return;
         default:
           return;
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [store.openFile, cursor.line, cursor.col, openPanel, runFileInTerminal]);
+  }, [store.openFile, cursor.line, cursor.col, openPanel, runFileInTerminal, revealFileInTree, collapseAllInTree]);
 
   // M20 地图快照：视图变化写回 URL；从 URL 打开时把热点口径也恢复
   useEffect(() => {
@@ -852,9 +888,38 @@ export default function App() {
                 />
                 {t('app.orphan')}
               </label>
+              <label title={t('app.indexedOnlyTitle')}>
+                <input
+                  type="checkbox"
+                  checked={indexedOnly}
+                  onChange={(e) => setIndexedOnly(e.target.checked)}
+                />
+                {t('app.indexedOnly')}
+              </label>
+              {/* FR-0012：树的两个工具动作（与右键 / 快捷键同源） */}
+              <span className="tree-actions">
+                <button
+                  className="btn ghost"
+                  disabled={!store.openFile}
+                  onClick={() => revealFileInTree(store.openFile)}
+                  title={`${t('filetree.revealActive')} (Alt+F)`}
+                >
+                  {t('filetree.revealActive')}
+                </button>
+                <button
+                  className="btn ghost"
+                  onClick={collapseAllInTree}
+                  title={`${t('filetree.collapseAll')} (${
+                    loadPrefs().keymap === 'idea' ? 'Ctrl+Alt+-' : 'Ctrl+Shift+-'
+                  })`}
+                >
+                  {t('filetree.collapseAll')}
+                </button>
+              </span>
             </div>
             {/* 打开文件不带行号：回到上次读到的位置（N22） */}
             <FileTree
+              key={store.projectId ?? ''}
               tree={store.tree}
               activeFile={store.openFile}
               onOpen={(file) => jump(file)}
@@ -874,6 +939,10 @@ export default function App() {
               onPaste={(dir) => void useStore.getState().pasteInto(dir)}
               hasClipboard={store.clipboard != null}
               onMoveDrop={moveInto}
+              projectId={store.projectId}
+              revealToken={treeRevealToken}
+              collapseAllToken={treeCollapseToken}
+              indexedOnly={indexedOnly}
             />
           </>
         );
@@ -1066,6 +1135,15 @@ export default function App() {
                 <button
                   className="share-item"
                   onClick={() => {
+                    revealFileInTree(tabMenu.file);
+                    setTabMenu(null);
+                  }}
+                >
+                  {translate('filetree.revealActive')}
+                </button>
+                <button
+                  className="share-item"
+                  onClick={() => {
                     useStore.getState().closeTab(tabMenu.file);
                     afterCloseTabs(tabMenu.file);
                     setTabMenu(null);
@@ -1105,6 +1183,11 @@ export default function App() {
                 </button>
               </div>
             </>
+          )}
+
+          {/* FR-0012：面包屑 —— 当前打开文件的路径层级，点一段下拉该目录下的条目 */}
+          {!showMap && store.openFile && (
+            <Breadcrumbs file={store.openFile} tree={store.tree} onOpen={(file) => jump(file)} />
           )}
 
           <div className="editor-wrap">
