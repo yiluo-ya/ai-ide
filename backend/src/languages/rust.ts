@@ -3,7 +3,8 @@
  *
  * 覆盖口径（只读 AST，不做类型推断）：
  * - 定义：fn / struct / enum / trait / mod / type / const / static / macro_rules!、impl 内方法与字段；
- * - 引用：标识符与类型标识符；`p.field` 记为成员引用（`obj.method()` 仍无法跳转，见 P2 的 unresolved 口径）；
+ * - 引用：标识符与类型标识符；`p.field` 记为成员引用（`obj.method()` 在接收者有明写类型时可跳，
+ *   见 resolver 的 `resolveMember`「层 A」；无注解 / 鸭子类型仍落 unresolved）；
  * - 继承：`impl Trait for Type` 与 `#[derive(...)]` 都作为目标类型的 implements 基名（impl 可出现在定义之前，
  *   也可能在别的文件里 —— 跨文件的 impl 覆盖不到，只认同一文件内的语法事实）；
  * - 模块：`crate::a::b` → `src/a/b.rs` 或 `src/a/b/mod.rs`；`std::` / 第三方 crate 返回 null（落 external）。
@@ -335,6 +336,62 @@ function defineParameters(node: any, ctx: WalkContext) {
   }
 }
 
+/** 类型节点 → 类型名（`&T` / `&mut T` 去引用、泛型取首段、`a::B` 取末段）。 */
+function rustTypeNameOf(node: any): string | null {
+  if (!node) return null;
+  switch (node.type) {
+    case 'type_identifier':
+      return node.text;
+    case 'scoped_type_identifier': {
+      const name = node.childForFieldName('name') ?? (node.namedChildren as any[]).pop();
+      return name?.text ?? null;
+    }
+    case 'reference_type': {
+      const inner = node.childForFieldName('type') ?? (node.namedChildren as any[]).pop();
+      return rustTypeNameOf(inner);
+    }
+    case 'generic_type': {
+      const inner = node.childForFieldName('type') ?? (node.namedChildren as any[])[0];
+      return rustTypeNameOf(inner);
+    }
+  }
+  return null;
+}
+
+/** `Client { .. }` / `Client::new(..)` → 类型名（其余调用不猜）。 */
+function rustValueTypeName(value: any): string | null {
+  if (!value) return null;
+  if (value.type === 'struct_expression') return rustTypeNameOf(value.childForFieldName('name'));
+  if (value.type === 'call_expression') {
+    const fn = value.childForFieldName('function');
+    if (fn?.type !== 'scoped_identifier') return null;
+    const path = fn.childForFieldName('path');
+    return path?.text ?? null;
+  }
+  return null;
+}
+
+/**
+ * 成员跳转层 A：从 `let c: Client = ...` / `let c = Client::new()` / 形参 `c: &Client` 读类型名。
+ * 只读语法、不做推断：其余表达式一律不猜。
+ */
+function rustTypeOfDef(node: any): string | null {
+  const parent = node?.parent?.type;
+  const decl =
+    node?.type === 'let_declaration' || parent === 'let_declaration' || node?.type === 'parameter' || parent === 'parameter'
+      ? (node?.type === 'let_declaration' || node?.type === 'parameter' ? node : node.parent)
+      : null;
+  if (!decl) return null;
+  const annot = decl.childForFieldName('type');
+  const typeNode =
+    annot?.type === 'type_annotation'
+      ? annot.childForFieldName('type') ?? (annot.namedChildren as any[])[0]
+      : annot;
+  const fromType = rustTypeNameOf(typeNode);
+  if (fromType) return fromType;
+  return rustValueTypeName(decl.childForFieldName('value'));
+}
+
 /** `a::b::c` 形式的路径 → 段数组。 */
 function pathSegments(node: any): string[] | null {
   if (!node) return null;
@@ -622,6 +679,7 @@ export const rust: LanguageSpec = {
   decoratorsOf: rustDecorators,
   docstringOf: rustDocstring,
   basesOf: rustBases,
+  typeOfDef: rustTypeOfDef,
 
   resolveModule(specifier: string, fromFile: string, _hint): ModuleCandidate[] | null {
     const segs = specifier.split('::').filter(Boolean);

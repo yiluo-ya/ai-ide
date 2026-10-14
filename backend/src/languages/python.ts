@@ -1,7 +1,7 @@
 /** Python 语言模块：定义 / 引用提取 + 模块解析。 */
 import Python from 'tree-sitter-python';
-import type { BaseInfo, DecoratorInfo, LanguageSpec, ModuleCandidate, ModuleHint } from '../indexer/walker';
-import { WalkContext } from '../indexer/walker';
+import type { BaseInfo, CtorCallInfo, DecoratorInfo, LanguageSpec, ModuleCandidate, ModuleHint } from '../indexer/walker';
+import { SELF_ARG, WalkContext } from '../indexer/walker';
 import { joinRel } from '../indexer/paths';
 import { readHintFile } from '../config';
 import type { SymbolKind } from '../types';
@@ -21,7 +21,7 @@ function defineTarget(node: any, ctx: WalkContext, kind: SymbolKind = 'variable'
       const attribute = node.childForFieldName('attribute');
       const cls = ctx.enclosing(['class']);
       if (object?.type === 'identifier' && PY_SELF.has(object.text) && attribute && cls) {
-        ctx.defineIn(cls, attribute, { nameNode: attribute, kind: 'property' });
+        ctx.defineIn(cls, attribute, { nameNode: attribute, kind: 'property', typeScopeId: ctx.scope.id });
         return;
       }
       ctx.walk(node);
@@ -72,6 +72,94 @@ function stripStringLiterals(text: string): string {
   let body = text.slice(m[0].length);
   if (body.endsWith(quote)) body = body.slice(0, -quote.length);
   return body;
+}
+
+/** 类型表达式 → 类型名:限定名取末段、下标取内层、字符串前向引用脱引号、`A | B` 取 A。 */
+function pyTypeNameOf(node: any): string | null {
+  if (!node) return null;
+  switch (node.type) {
+    case 'type':
+      // tree-sitter-python 把注解包了一层 `type` 节点
+      return pyTypeNameOf((node.namedChildren as any[])[0]);
+    case 'identifier':
+      return node.text;
+    case 'attribute': {
+      const attr = node.childForFieldName('attribute');
+      return attr?.text ?? null;
+    }
+    case 'subscript': {
+      const slice = node.childForFieldName('slice') ?? (node.namedChildren as any[])[1];
+      return pyTypeNameOf(slice);
+    }
+    case 'string':
+      return stripStringLiterals(node.text);
+    case 'binary_operator': {
+      return pyTypeNameOf(node.childForFieldName('left'));
+    }
+  }
+  return null;
+}
+
+/** `Client()` / `models.Client()` → 构造器名（其余调用不猜）。 */
+function pyValueTypeName(value: any): string | null {
+  if (value?.type !== 'call') return null;
+  return pyTypeNameOf(value.childForFieldName('function'));
+}
+
+/** 构造点实参的语法类型（成员跳转层 B）：`self`/`cls` 占位 SELF_ARG，`X()` → X，其余不猜。 */
+function pyArgTypeOf(node: any): string | null {
+  if (node.type === 'identifier') {
+    return node.text === 'self' || node.text === 'cls' ? SELF_ARG : null;
+  }
+  return pyValueTypeName(node);
+}
+
+/**
+ * 构造调用（成员跳转层 B）：`Client(self)` → callee `Client` / 实参类型 `[SELF_ARG]`。
+ * 只记名字首字母大写的调用（PEP 8 类名约定），否则每个函数调用都会落一条噪音；
+ * 关键字实参 / 星号解包会让位置对不齐，整条放弃。
+ */
+function pyCtorCallOf(node: any): CtorCallInfo | null {
+  if (node.type !== 'call') return null;
+  const calleeName = pyTypeNameOf(node.childForFieldName('function'));
+  if (!calleeName || !/^[A-Z]/.test(calleeName)) return null;
+  const args = node.childForFieldName('arguments');
+  const argTypes: Array<string | null> = [];
+  for (const c of (args?.namedChildren ?? []) as any[]) {
+    if (c.type === 'keyword_argument' || c.type === 'list_splat' || c.type === 'dictionary_splat') return null;
+    argTypes.push(pyArgTypeOf(c));
+  }
+  return { calleeName, argTypes };
+}
+
+/** 承载类型注解 / 右值的声明节点（名字节点则向上找一层）。 */
+const PY_TYPE_DECLS = new Set(['assignment', 'typed_parameter', 'typed_default_parameter', 'named_expression']);
+
+/**
+ * 成员跳转层 A：从赋值的类型注解 / 右值构造调用读类型名
+ * （`x: Client = ...` / `x = Client()` / `self.client = Client()`）。
+ * 只读语法、不做推断：鸭子类型、无注解形参一律不猜。
+ */
+function pyTypeOfDef(node: any): string | null {
+  if (!node) return null;
+  // 向上找声明节点：`x` → assignment；`self.x` 的属性名 identifier → attribute → assignment。
+  let decl: any = null;
+  for (let cur = node, i = 0; cur && i < 3; cur = cur.parent, i++) {
+    if (PY_TYPE_DECLS.has(cur.type)) {
+      decl = cur;
+      break;
+    }
+  }
+  if (!decl) return null;
+  const annot =
+    pyTypeNameOf(decl.childForFieldName('type')) ??
+    (decl.type === 'typed_parameter' ? pyTypeNameOf((decl.namedChildren as any[])[1]) : null);
+  if (annot) return annot;
+  const value = decl.childForFieldName('right') ?? decl.childForFieldName('value');
+  const fromCall = pyValueTypeName(value);
+  if (fromCall) return fromCall;
+  // `self.core = core`：右值是名字（形参 / 变量），把类型名留给解析期再求一次
+  return value?.type === 'identifier' ? value.text : null;
 }
 
 /** L4a：函数 / 类 body 的第一个语句是字符串字面量时，它就是 docstring。 */
@@ -392,6 +480,10 @@ export const python: LanguageSpec = {
   decoratorsOf: pythonDecorators,
   docstringOf: pythonDocstring,
   basesOf: pythonBases,
+  typeOfDef: pyTypeOfDef,
+  implicitSelfParam: (name) => name === 'self' || name === 'cls',
+  isConstructorName: (fnName) => fnName === '__init__',
+  ctorCallOf: pyCtorCallOf,
   resolveModule(specifier: string, fromFile: string, hint?: ModuleHint): ModuleCandidate[] | null {
     const dots = /^\.+/.exec(specifier)?.[0].length ?? 0;
     const rest = dots ? specifier.slice(dots) : specifier;

@@ -44,6 +44,42 @@ export interface DefRecord {
   doc?: string[] | null;
   /** 显式声明的基类 / 接口（N17）；无则 undefined。 */
   bases?: BaseInfo[];
+  /**
+   * 声明处能读到的类型名（成员跳转层 A）：类型注解或初始化表达式里的名字。
+   * 只读 AST 语法、不做类型推断；读不出为 undefined。用于 `obj.method()` 的成员跳转
+   * （如 `const c = new Client()` / `c: Client` / `self.client = Client()`）。
+   */
+  typeName?: string | null;
+  /**
+   * 解析 `typeName` 应当使用的可见性作用域（缺省 = `scopeId`）。
+   * Python 的 `self.x = y` 把属性记成**类**作用域的成员，但 `y` 按赋值处（方法体内）
+   * 的可见性解析，因此需单独记下赋值所在作用域。
+   */
+  typeScopeId?: string | null;
+  /**
+   * 形参在「实参位置」上的序号（成员跳转层 B）：0-based，隐式 self / cls 这类不占
+   * 实参位置的首参为 null / undefined（由语言插件决定）。非参数恒为 undefined。
+   */
+  argIndex?: number | null;
+}
+
+/**
+ * 构造调用（成员跳转层 B）：`C(实参…)` 各实参的语法类型。
+ *
+ * 用途：形参在源码里没写类型（或写的是 `Any` / 项目外类型）时，从「谁构造了这个类」
+ * 反推形参类型 —— `SessionPool(self)` → `SessionPool.__init__(self, core)` 的 core 是 XchenCore。
+ * 只读 AST 语法：实参读不出类型（字面量 / 复杂表达式 / 关键字实参 / 解包）记 null，
+ * 调用方据此整条放弃，不猜位置。
+ */
+export interface CtorCallRecord {
+  /** 被构造的类名（源码写法，限定名取末段）。 */
+  calleeName: string;
+  /** 实参语法类型名，与源码位置一一对应；读不出为 null。 */
+  argTypes: Array<string | null>;
+  file: string;
+  /** 调用点所在作用域（解析实参类型名时要用它的可见性）。 */
+  scopeId: string;
+  range: Range;
 }
 
 /** 字面量（L6）：值溯源的最小事实单元。 */
@@ -107,6 +143,8 @@ export interface FileIndex extends FileSymbols {
   tree: unknown;
   /** 本文件里的字面量（L6），按源码顺序。 */
   literals: LitRecord[];
+  /** 本文件里的构造调用（成员跳转层 B），按源码顺序。 */
+  ctorCalls: CtorCallRecord[];
   defsByScope: Map<string, Map<string, DefRecord[]>>;
   importsByScope: Map<string, Map<string, ImportRecord>>;
   /** 解析 <file> 时用到的语言语法包的额外元数据（包名 / module path 等）。 */
@@ -138,6 +176,7 @@ export interface SerializedParsed {
   references: RefRecord[];
   imports: ImportRecord[];
   literals: LitRecord[];
+  ctorCalls: CtorCallRecord[];
   defsByScope: Record<string, Record<string, DefRecord[]>>;
   importsByScope: Record<string, Record<string, ImportRecord>>;
   meta: Record<string, string>;

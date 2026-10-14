@@ -29,13 +29,15 @@ import { pipeline } from 'node:stream/promises';
 import { StringDecoder } from 'node:string_decoder';
 import { createGunzip, createGzip, gunzipSync } from 'node:zlib';
 import { logWarn } from '../log';
-import type { DefRecord, FileIndex, ImportRecord, LitRecord, RefRecord, ScopeRecord } from './model';
+import type { CtorCallRecord, DefRecord, FileIndex, ImportRecord, LitRecord, RefRecord, ScopeRecord } from './model';
 import type { BaseInfo, Resolved } from './model';
 import { fileIndexFromSnapshot, type SnapshotRestoreOptions } from './parser';
 import type { EntryInfo, SkipInfo } from './store';
 import type { Range, SymbolKind } from '../types';
 
-export const SNAPSHOT_SCHEMA = 1;
+// 2：def 子记录新增 typeName 列（成员跳转「层 A」的类型事实），旧快照按 schema 不符回落重建。
+// 3：文件记录新增 ctorCalls（层 B：构造点实参类型），def 子记录新增 argIndex（形参的实参位置）。
+export const SNAPSHOT_SCHEMA = 3;
 
 /** 当前快照格式（NDJSON + gzip）。 */
 export const SNAPSHOT_FILE = 'snapshot.ndjson.gz';
@@ -100,6 +102,8 @@ export interface SnapshotLine {
   references: RefRecord[];
   imports: ImportRecord[];
   literals: LitRecord[];
+  /** 构造调用（成员跳转层 B）；旧快照 / 单测构造的记录可缺省。 */
+  ctorCalls?: CtorCallRecord[];
 }
 
 export function snapshotDir(dataDir: string, projectId: string): string {
@@ -189,6 +193,7 @@ export function toFileRecord(fi: FileIndex, opts: FileRecordOptions = {}): Snaps
     references: fi.references,
     imports: fi.imports,
     literals: fi.literals,
+    ctorCalls: fi.ctorCalls,
   };
   // 只有不瘦身时才碰 fi.source（懒读的 fi 一碰就要读盘）
   if (!opts.omitSource) rec.source = fi.source;
@@ -217,14 +222,16 @@ export function fromFileRecord(rec: SnapshotLine, opts: SnapshotRestoreOptions =
  * 布局：第 1 行 header（对象）；之后每行是 `[文件记录, ...]`，每个文件记录是位置数组：
  * 0 file · 1 lang · 2 mtimeMs · 3 size · 4 indexed(0/1) · 5 error · 6 degraded ·
  * 7 encoding · 8 source（生产路径不写，`encOpt(undefined)`=0）· 9 meta ·
- * 10 scopes · 11 definitions · 12 references · 13 imports · 14 literals
+ * 10 scopes · 11 definitions · 12 references · 13 imports · 14 literals · 15 ctorCalls
  *
  * 子记录也用位置数组（range 仍用 4 元数组，实测展平到记录里 parse 更快但重建对象更慢，净持平）：
  * - scope：id · parent · kind · name · range
  * - def：id · name · kind · range · nameRange · scopeId · containerName · detail ·
- *   local(0/1) · bodyScopeId · decorators · doc · bases
+ *   local(0/1) · bodyScopeId · decorators · doc · bases · typeName · typeScopeId ·
+ *   argIndex（0-based 数值，编码时 +2 —— 见 `encNumOpt`：`0` 是合法值，不能当「没有」的标记）
  * - ref：name · kind · range · scopeId · memberParts · text · resolved
  * - lit：text · kind · range · boundDefId · keyOf
+ * - ctorCall：calleeName · argTypes · scopeId · range（file 用行记录的）
  * - import：localName · module · importedName · kind · scopeId · range · resolvedFile
  *
  * 三态字段（undefined / null / 值）统一走 `encOpt` / `decOpt`：`0`=undefined、`1`=null、其余=值。
@@ -241,6 +248,21 @@ function encOpt(v: unknown): unknown {
 /** 三态解码：0 → undefined（字段不存在），1 → null。 */
 function decOpt(v: unknown): unknown {
   return v === 0 ? undefined : v === 1 ? null : v;
+}
+
+/**
+ * 数值型三态编码：undefined → 0，null → 1，数值 n → n + 2。
+ *
+ * 为什么不复用 `encOpt`：它拿 `0` 当「没有」的标记，而数值字段本身可以是 0
+ * （`argIndex` 就是 0-based 的实参位置）—— 复用会让「第 0 个实参」在往返后凭空消失。
+ */
+function encNumOpt(v: number | null | undefined): unknown {
+  return v === undefined ? 0 : v === null ? 1 : v + 2;
+}
+
+/** 数值型三态解码：与 `encNumOpt` 互逆。 */
+function decNumOpt(v: unknown): number | null | undefined {
+  return v === 0 ? undefined : v === 1 ? null : (v as number) - 2;
 }
 
 const encRange = (r: Range): [number, number, number, number] => [r.start.line, r.start.col, r.end.line, r.end.col];
@@ -277,6 +299,9 @@ export function encodeFileRecord(rec: SnapshotLine): unknown[] {
       encOpt(d.decorators),
       encOpt(d.doc),
       encOpt(d.bases),
+      encOpt(d.typeName),
+      encOpt(d.typeScopeId),
+      encNumOpt(d.argIndex),
     ]),
     rec.references.map((r) => [
       r.name,
@@ -297,6 +322,7 @@ export function encodeFileRecord(rec: SnapshotLine): unknown[] {
       encOpt(i.resolvedFile),
     ]),
     rec.literals.map((l) => [l.text, l.kind, encRange(l.range), encOpt(l.boundDefId), encOpt(l.keyOf)]),
+    (rec.ctorCalls ?? []).map((c) => [c.calleeName, c.argTypes, c.scopeId, encRange(c.range)]),
   ];
 }
 
@@ -340,6 +366,12 @@ export function decodeFileRecord(raw: unknown[]): SnapshotLine {
       if (doc !== undefined) def.doc = doc as string[] | null;
       const bases = decOpt(d[12]);
       if (bases !== undefined) def.bases = bases as BaseInfo[];
+      const typeName = decOpt(d[13]);
+      if (typeName !== undefined) def.typeName = typeName as string | null;
+      const typeScopeId = decOpt(d[14]);
+      if (typeScopeId !== undefined) def.typeScopeId = typeScopeId as string | null;
+      const argIndex = decNumOpt(d[15]);
+      if (argIndex !== undefined) def.argIndex = argIndex as number | null;
       return def;
     }),
     references: ((raw[12] ?? []) as unknown[][]).map((r) => {
@@ -380,6 +412,13 @@ export function decodeFileRecord(raw: unknown[]): SnapshotLine {
       if (keyOf !== undefined) lit.keyOf = keyOf as string | null;
       return lit;
     }),
+    ctorCalls: ((raw[15] ?? []) as unknown[][]).map((c) => ({
+      calleeName: String(c[0]),
+      argTypes: ((c[1] ?? []) as Array<string | null>),
+      file,
+      scopeId: String(c[2]),
+      range: decRange(c[3]),
+    })),
   };
   const encoding = decOpt(raw[7]);
   if (typeof encoding === 'string') rec.encoding = encoding;

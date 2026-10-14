@@ -330,7 +330,8 @@ shared/types.ts    前后端共享的 API 契约（位置统一 1-based、列按
 | POST | `/api/projects/:id/flow` | `{ kind: 'calls' \| 'callers' \| 'data', depth }` 调用流 |
 
 `reason` 取值：`resolved`（已解析）/ `external`（外部依赖或内置符号，不跳转）/
-`unresolved`（未能解析，通常是类型推断才能确定的调用）/ `no-symbol`（光标处没有符号）。
+`unresolved`（未能解析：接收者无明写类型、动态成员等）/ `no-symbol`（光标处没有符号）。
+接收者是变量 / 参数 / 属性但源码里**明写了类型**（注解 / `new X()`）时按 `resolved` 处理，可跨文件跳定义。
 
 ### 项目地图 / 依赖图
 

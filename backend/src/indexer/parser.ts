@@ -6,6 +6,7 @@ import { decodeBuffer } from './encoding';
 import { SourceText } from './source-text';
 import { WalkContext, type LanguageSpec } from './walker';
 import type {
+  CtorCallRecord,
   DefRecord,
   FileIndex,
   ImportRecord,
@@ -232,6 +233,7 @@ function lineSymbolIndex(
       references,
       imports: [],
       literals: [],
+      ctorCalls: [],
       defsByScope,
       importsByScope,
       meta: {},
@@ -269,6 +271,7 @@ function buildFileIndex(
   const imports = topLevelOnly ? ctx.imports.filter((i) => i.scopeId === fileScopeId) : ctx.imports;
   const references = topLevelOnly ? [] : ctx.references;
   const literals = topLevelOnly ? [] : ctx.literals;
+  const ctorCalls = topLevelOnly ? [] : ctx.ctorCalls;
 
   const { defsByScope, importsByScope } = buildScopeMaps(definitions, imports);
 
@@ -283,6 +286,7 @@ function buildFileIndex(
     references,
     imports,
     literals,
+    ctorCalls,
     defsByScope,
     importsByScope,
     meta: ctx.meta,
@@ -313,6 +317,7 @@ export function plainFileIndex(
       references: [],
       imports: [],
       literals: [],
+      ctorCalls: [],
       defsByScope: new Map(),
       importsByScope: new Map(),
       meta: {},
@@ -335,6 +340,7 @@ export function serializeFileIndex(fi: FileIndex): SerializedParsed {
     references: fi.references,
     imports: fi.imports,
     literals: fi.literals,
+    ctorCalls: fi.ctorCalls,
     defsByScope: mapOfMapsToPlain(fi.defsByScope),
     importsByScope: mapOfMapsToPlain(fi.importsByScope),
     meta: fi.meta,
@@ -366,6 +372,7 @@ export function deserializeFileIndex(data: SerializedParsed, source: string): Fi
       references: data.references,
       imports: data.imports,
       literals: data.literals,
+      ctorCalls: data.ctorCalls ?? [],
       defsByScope,
       importsByScope,
       meta: data.meta,
@@ -396,6 +403,7 @@ export interface SnapshotParsedData {
   references?: RefRecord[];
   imports?: ImportRecord[];
   literals?: LitRecord[];
+  ctorCalls?: CtorCallRecord[];
 }
 
 /** 懒读正文失败时的回调（P9：store 写进 skipLog）。 */
@@ -475,6 +483,7 @@ export function fileIndexFromSnapshot(data: SnapshotParsedData, opts: SnapshotRe
       references: data.references ?? [],
       imports,
       literals: data.literals ?? [],
+      ctorCalls: data.ctorCalls ?? [],
       defsByScope,
       importsByScope,
       meta: data.meta ?? {},

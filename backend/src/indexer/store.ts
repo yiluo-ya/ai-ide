@@ -17,7 +17,7 @@ import type {
   VerifyResult,
 } from '../types';
 import type { IgnoreInfo } from '../types';
-import type { DefRecord, FileIndex, ImportRecord, RefRecord } from './model';
+import type { CtorCallRecord, DefRecord, FileIndex, ImportRecord, RefRecord } from './model';
 import { deserializeFileIndex, indexSource, plainFileIndex, serializeFileIndex } from './parser';
 import { ParsePool, type ParseResult, type ParseTask } from './parse-pool';
 import { decodeBuffer, looksBinary } from './encoding';
@@ -145,6 +145,8 @@ export class ProjectIndex {
   readonly refsByName = new Map<string, Array<{ file: string; ref: RefRecord }>>();
   readonly importsByName = new Map<string, Array<{ file: string; imp: ImportRecord }>>();
   readonly classMap = new Map<string, string[]>();
+  /** 被构造的类名 → 构造调用点（成员跳转层 B：用实参类型回填形参类型）。 */
+  readonly ctorCallsByName = new Map<string, Array<{ file: string; call: CtorCallRecord }>>();
   projectMeta: Record<string, string> = {};
 
   status: IndexStatus = {
@@ -490,6 +492,7 @@ export class ProjectIndex {
     this.refsByName.clear();
     this.importsByName.clear();
     this.classMap.clear();
+    this.ctorCallsByName.clear();
   }
 
   /** 读盘 + 解码 + 二进制 / 过大判定；失败时写入 skipLog（P9）。 */
@@ -611,6 +614,12 @@ export class ProjectIndex {
       if (list) list.push(item);
       else this.importsByName.set(imp.localName, [item]);
     }
+    for (const call of fi.ctorCalls) {
+      const list = this.ctorCallsByName.get(call.calleeName);
+      const item = { file: fi.file, call };
+      if (list) list.push(item);
+      else this.ctorCallsByName.set(call.calleeName, [item]);
+    }
   }
 
   private removeFromMaps(rel: string, fi: FileIndex) {
@@ -643,6 +652,13 @@ export class ProjectIndex {
       const next = list.filter((r) => !(r.file === rel && sameRange(r.imp, imp)));
       if (next.length) this.importsByName.set(imp.localName, next);
       else this.importsByName.delete(imp.localName);
+    }
+    for (const call of fi.ctorCalls) {
+      const list = this.ctorCallsByName.get(call.calleeName);
+      if (!list) continue;
+      const next = list.filter((c) => !(c.file === rel && sameRange(c.call, call)));
+      if (next.length) this.ctorCallsByName.set(call.calleeName, next);
+      else this.ctorCallsByName.delete(call.calleeName);
     }
   }
 

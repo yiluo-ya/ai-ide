@@ -5,6 +5,7 @@
 import type { LangId, Range, SymbolKind } from '../types';
 import type {
   BaseInfo,
+  CtorCallRecord,
   DefRecord,
   ImportRecord,
   LitRecord,
@@ -15,6 +16,12 @@ import type {
 } from './model';
 
 export type { BaseInfo };
+
+/**
+ * 实参类型里的占位符：实参就是调用点所在类的实例（Python `self` / JS/TS `this`）。
+ * 语言插件不知道所在类，统一由 walker 在 `addCtorCall` 里换成类名。
+ */
+export const SELF_ARG = '@self';
 
 export interface ScopeRule {
   kind: ScopeKind;
@@ -98,6 +105,12 @@ export interface LineRef {
   text?: string;
 }
 
+/** 构造调用的语法事实（成员跳转层 B）；`argTypes` 里的 SELF_ARG 由 walker 展开为所在类名。 */
+export interface CtorCallInfo {
+  calleeName: string;
+  argTypes: Array<string | null>;
+}
+
 export interface LanguageSpec {
   id: LangId;
   label: string;
@@ -161,6 +174,29 @@ export interface LanguageSpec {
    * 只读 AST 语法，不做类型推断：泛型参数、条件类型、动态注册一律不覆盖。
    */
   basesOf?: (node: any) => BaseInfo[] | null;
+  /**
+   * 定义节点上的「类型事实」（成员跳转层 A）：从类型注解 / 初始化表达式里读出类型名，
+   * 让 `obj.method()` 这类成员访问能在项目内跳转（`obj` 是变量 / 参数 / 属性时）。
+   * 只读 AST 语法，**不做类型推断**：读不出类型（动态 / 无注解 / 鸭子类型）就返回 null；
+   * 入参是 `ctx.define` 时的节点（可能只是名字节点，实现里按需向上找声明节点）。
+   */
+  typeOfDef?: (node: any, ctx: WalkContext) => string | null;
+  /**
+   * 形参是否**不占实参位置**（成员跳转层 B 的位置对齐用）：Python 的隐式 `self` / `cls`。
+   * 给了它，参数定义的 `argIndex` 由 walker 自动编号（跳过命中的首参），语言插件不必自己数。
+   */
+  implicitSelfParam?: (name: string) => boolean;
+  /**
+   * 该函数名是不是**构造器**（成员跳转层 B 只用构造器的形参回填，避免把普通函数的
+   * 参数也按构造点实参对齐）。Java 的构造器名等于类名，故还传所在类名。
+   */
+  isConstructorName?: (fnName: string, className: string | null) => boolean;
+  /**
+   * 构造调用节点上的实参语法类型（成员跳转层 B）：`Client(self, x)` →
+   * `{ calleeName: 'Client', argTypes: [SELF_ARG, null] }`。
+   * 只读语法：实参是字面量 / 复杂表达式 / 关键字实参 / 解包时一律记 null（调用方整条放弃）。
+   */
+  ctorCallOf?: (node: any, ctx: WalkContext) => CtorCallInfo | null;
 
   // -------------------------------------------------------------- 语言元数据
   // 语言插件化（07-languages-plugin）后，下面这些事实由 spec 自述、经 /api/languages
@@ -325,10 +361,14 @@ export class WalkContext {
   readonly imports: ImportRecord[] = [];
   /** 本文件的字面量（L6），按源码顺序。 */
   readonly literals: LitRecord[] = [];
+  /** 本文件的构造调用（成员跳转层 B），按源码顺序。 */
+  readonly ctorCalls: CtorCallRecord[] = [];
   readonly meta: Record<string, string> = {};
   private stack: ScopeRecord[] = [];
   /** 作用域 → 其内部定义的 local 判定（由 `ScopeRule.localDefs` 指定；见 enterScope）。 */
   private scopeLocalDefs = new Map<string, boolean>();
+  /** 作用域 → 已登记的参数个数（成员跳转层 B 的实参位置编号）。 */
+  private paramSeq = new Map<string, number>();
   private counter = 0;
   /** 收集到的注释块（用于「声明上方紧邻注释」的归属）。 */
   private comments: Array<{ startLine: number; endLine: number; lines: string[] }> = [];
@@ -430,6 +470,10 @@ export class WalkContext {
       local?: boolean;
       detail?: string | null;
       nameRange?: Range;
+      /** 显式给出的类型名（覆盖 spec.typeOfDef）。 */
+      typeName?: string | null;
+      /** 解析 typeName 用的作用域（覆盖 scope.id）；见 DefRecord.typeScopeId。 */
+      typeScopeId?: string | null;
     },
   ): DefRecord | null {
     return this.defineIn(this.scope, node, opts);
@@ -446,6 +490,10 @@ export class WalkContext {
       local?: boolean;
       detail?: string | null;
       nameRange?: Range;
+      /** 显式给出的类型名（覆盖 spec.typeOfDef）。 */
+      typeName?: string | null;
+      /** 解析 typeName 用的作用域（覆盖 scope.id）；见 DefRecord.typeScopeId。 */
+      typeScopeId?: string | null;
     },
   ): DefRecord | null {
     const name = opts.name ?? opts.nameNode?.text ?? '';
@@ -457,6 +505,9 @@ export class WalkContext {
       this.scopeLocalDefs.get(scope.id) ??
       (scope.kind === 'function' || scope.kind === 'block' || scope.kind === 'namespace');
     const decorators = this.spec.decoratorsOf?.(node) ?? null;
+    const typeName =
+      opts.typeName !== undefined ? opts.typeName : this.spec.typeOfDef?.(node, this) ?? null;
+    const argIndex = opts.kind === 'parameter' ? this.argIndexOf(scope, name) : undefined;
     const def: DefRecord = {
       id: `${this.file}!${nameRange.start.line}:${nameRange.start.col}:${name}`,
       name,
@@ -471,6 +522,9 @@ export class WalkContext {
       bodyScopeId: null,
       decorators: decorators?.length ? decorators.map((d) => d.text) : undefined,
       doc: null,
+      typeName: typeName || null,
+      typeScopeId: opts.typeScopeId ?? null,
+      argIndex: argIndex ?? null,
     };
     if (decorators?.length) {
       for (const d of decorators) this.decoratorLines.push([d.startLine, d.endLine]);
@@ -482,6 +536,34 @@ export class WalkContext {
     this.defByNodeKey.set(nodeKey(node), def);
     this.definitions.push(def);
     return def;
+  }
+
+  /**
+   * 参数在「实参位置」上的编号（成员跳转层 B）：隐式首参（Python 的 self / cls）不占位、
+   * 返回 null 且不推进计数；其余按登记顺序编号。编号只在本函数作用域内有意义。
+   */
+  private argIndexOf(scope: ScopeRecord, name: string): number | null {
+    const seq = this.paramSeq.get(scope.id);
+    if (seq === undefined && this.spec.implicitSelfParam?.(name)) {
+      this.paramSeq.set(scope.id, 0);
+      return null;
+    }
+    const next = seq ?? 0;
+    this.paramSeq.set(scope.id, next + 1);
+    return next;
+  }
+
+  /** 记录一次构造调用（成员跳转层 B），把 SELF_ARG 展开为调用点所在类的名字。 */
+  private addCtorCall(node: any, info: CtorCallInfo) {
+    if (this.topLevelOnly) return;
+    const selfName = this.enclosing(['class'])?.name ?? null;
+    this.ctorCalls.push({
+      calleeName: info.calleeName,
+      argTypes: info.argTypes.map((t) => (t === SELF_ARG ? selfName : t)),
+      file: this.file,
+      scopeId: this.scope.id,
+      range: this.rangeOf(node),
+    });
   }
 
   /** 声明签名：跳过装饰器 / 注解自己占用的行，再把多行签名压平为一行（L3d）。 */
@@ -659,6 +741,9 @@ export class WalkContext {
       this.walkChildren(node);
       return;
     }
+    // 构造调用（成员跳转层 B）：先记事实，再照常遍历（实参里的引用仍要收）。
+    const ctor = spec.ctorCallOf?.(node, this);
+    if (ctor) this.addCtorCall(node, ctor);
     const handler = spec.handlers[node.type];
     if (handler) {
       const handled = handler(node, this);

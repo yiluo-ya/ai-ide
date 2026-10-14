@@ -1,8 +1,10 @@
 /**
  * 符号解析：作用域就近查找 + 导入跨文件解析 + 成员链解析（FR-0002 §4.3）。
  *
- * 明确不做的：类型推断。`obj.method()` 里的 obj 是变量时无法确定其类型，
- * 只有模块/包/类级限定名（`os.path.join`、`pkg.Func`、`Foo.bar`、`this.x`）能跨文件解析。
+ * 类型事实的用法（成员跳转）：只读源码里能**直接读出**的类型，据此解析 `obj.method()`：
+ * - 层 A：声明处明写的类型（`c: Client`、`const c = new Client()` 这类注解 / 初始化）；
+ * - 层 B：形参没写明（`core: Any` / 无注解）时，从它的构造点实参类型回填（`SessionPool(self)`）。
+ * 不做类型推断：鸭子类型、接口多实现、跨过程流动 / 工厂函数仍解析不出（如实返回 unresolved）。
  */
 import type {
   DensitySegment,
@@ -17,6 +19,7 @@ import type {
   Range,
   ReferenceLocation,
   SymbolInfo,
+  SymbolKind,
   UnresolvedDetail,
 } from '../types';
 import type { DefRecord, FileIndex, ImportRecord, LitRecord, RefRecord, Resolved } from './model';
@@ -99,8 +102,9 @@ export function resolveRef(
       }
     }
     if (!target) target = resolveName(project, fi.file, head, ref.scopeId);
+    const seen = new Set<string>();
     for (let i = next; i < parts.length && target; i++) {
-      target = resolveMember(project, target, parts[i]);
+      target = resolveMember(project, target, parts[i], seen);
     }
     return target;
   }
@@ -198,11 +202,23 @@ export function resolveImport(
   return { kind: 'external' };
 }
 
-/** 成员访问：在模块 / 类体作用域里找同名定义。 */
+/** 可作成员容器的「类型类」定义（层 A 靠类型名解析时只认这些，避免同名变量误跳）。 */
+const TYPE_KINDS = new Set<SymbolKind>([
+  'class', 'struct', 'interface', 'enum', 'type', 'namespace', 'module', 'package',
+]);
+
+/**
+ * 成员访问：在模块 / 类体作用域里找同名定义。
+ *
+ * 接收者没有 body（局部变量 / 参数 / 属性）时，先求它的类型（`resolveReceiverType`），
+ * 再进入那个类型定义里找成员。类型拿不准就返回 null —— 宁可说「需要类型信息」，也不猜位置。
+ * `seen` 记住已展开过的接收者，防 A→B→A 成环。
+ */
 export function resolveMember(
   project: ProjectIndex,
   target: Resolved,
   name: string,
+  seen: Set<string> = new Set(),
 ): Resolved | null {
   if (target.kind === 'external') return target;
   if (target.kind === 'module') return topLevelLookup(project, target.file, name);
@@ -210,7 +226,98 @@ export function resolveMember(
   const fi = project.files.get(target.file);
   if (!fi) return null;
   if (target.def.bodyScopeId) {
-    return resolveMemberInScope(project, fi, target.file, target.def.bodyScopeId, name, new Set());
+    const member = resolveMemberInScope(project, fi, target.file, target.def.bodyScopeId, name, new Set());
+    if (member) return member;
+  }
+  const key = target.def.id;
+  if (seen.has(key)) return null;
+  seen.add(key);
+  const typeDef = resolveReceiverType(project, target.file, target.def);
+  if (!typeDef) return null;
+  return resolveMember(project, typeDef, name, seen);
+}
+
+/**
+ * 接收者的类型 —— 只读 AST 语法，分两层：
+ * - 层 A（`DefRecord.typeName`）：声明处**明写**的类型名（`c: Client` / `new Client()`）；
+ * - 层 B（`inferParamTypeFromCtor`）：声明处给不出（`core: Any` / 无注解）时，从「谁构造了
+ *   这个类」用实参语法类型回填（`SessionPool(self)` → `core` 是 XchenCore）。
+ * 任一步拿不准就返回 null（宁可说「需要类型信息」，也不猜一个位置）。
+ */
+function resolveReceiverType(project: ProjectIndex, file: string, def: DefRecord): Resolved | null {
+  return resolveReceiverTypeSeen(project, file, def, new Set());
+}
+
+/**
+ * 求接收者类型（带已展开集合，防类型链成环）。
+ * 第 3 条是「类型名」的转导：`self.core = core` 的 typeName 是 `core`（右值是个名字），
+ * 它只能按**赋值处**的可见性（`typeScopeId`）解析成那个形参的定义，再继续求它的类型。
+ * 目标必须是定义（同名变量 / 参数），且还没展开过 —— 否则回退「需要类型信息」。
+ */
+function resolveReceiverTypeSeen(
+  project: ProjectIndex,
+  file: string,
+  def: DefRecord,
+  seen: Set<string>,
+): Resolved | null {
+  if (seen.has(def.id)) return null;
+  seen.add(def.id);
+  const typeName = def.typeName;
+  if (typeName) {
+    const scopeId = def.typeScopeId ?? def.scopeId;
+    const t = resolveName(project, file, typeName, scopeId);
+    if (t && t.kind === 'def' && TYPE_KINDS.has(t.def.kind)) return t;
+    if (t && t.kind === 'def') {
+      const viaAlias = resolveReceiverTypeSeen(project, t.file, t.def, seen);
+      if (viaAlias) return viaAlias;
+    }
+  }
+  return inferParamTypeFromCtor(project, file, def);
+}
+
+/**
+ * 层 B：形参类型从构造点回填。
+ *
+ * `def __init__(self, core)` + 唯一的 `SessionPool(self)` → `core` 的类型是实参 `self` 所在类。
+ * 只认**构造器**的形参，且只在「所有构造点给出一致的项目内类型类」时才返回 —— 任一构造点
+ * 给不出类型、或两点指向不同类，都返回 null（工厂函数 / DI / 多态实参一律不猜）。
+ */
+function inferParamTypeFromCtor(project: ProjectIndex, file: string, def: DefRecord): Resolved | null {
+  if (def.kind !== 'parameter' || typeof def.argIndex !== 'number') return null;
+  const fi = project.files.get(file);
+  if (!fi) return null;
+  const fn = fi.definitions.find(
+    (d) => d.bodyScopeId === def.scopeId && (d.kind === 'function' || d.kind === 'method'),
+  );
+  if (!fn) return null;
+  const className = enclosingClassName(fi, fn.scopeId);
+  if (!className) return null;
+  if (!specById(fi.lang)?.isConstructorName?.(fn.name, className)) return null;
+  const classDef = resolveName(project, file, className, fn.scopeId);
+  if (!classDef || classDef.kind !== 'def' || !TYPE_KINDS.has(classDef.def.kind)) return null;
+  const calls = project.ctorCallsByName.get(className);
+  if (!calls?.length) return null;
+  let chosen: Resolved | null = null;
+  for (const { file: callFile, call } of calls) {
+    // 构造点必须真的指向本类（同名不同类要排除）
+    const callee = resolveName(project, callFile, call.calleeName, call.scopeId);
+    if (!callee || callee.kind !== 'def' || callee.def.id !== classDef.def.id) continue;
+    const typeName = call.argTypes[def.argIndex] ?? null;
+    if (!typeName) return null;
+    const t = resolveName(project, callFile, typeName, call.scopeId);
+    if (!t || t.kind !== 'def' || !TYPE_KINDS.has(t.def.kind)) return null;
+    if (!chosen) chosen = t;
+    else if (chosen.def.id !== t.def.id) return null;
+  }
+  return chosen;
+}
+
+/** 从作用域往上找最近的类作用域名（层 B 定位形参所属类）。 */
+function enclosingClassName(fi: FileIndex, scopeId: string): string | null {
+  let scope = fi.scopes.get(scopeId) ?? null;
+  while (scope) {
+    if (scope.kind === 'class' && scope.name) return scope.name;
+    scope = scope.parent ? fi.scopes.get(scope.parent) ?? null : null;
   }
   return null;
 }
@@ -233,13 +340,22 @@ function resolveMemberInScope(
   const defs = fi.defsByScope.get(scopeId)?.get(name);
   if (defs?.length) return { kind: 'def', file, def: defs[defs.length - 1] };
   const scopeDefs = fi.defsByScope.get(scopeId);
-  if (!scopeDefs) return null;
-  for (const nsDefs of scopeDefs.values()) {
+  for (const nsDefs of scopeDefs?.values() ?? []) {
     for (const nsDef of nsDefs) {
       if (nsDef.kind === 'namespace' && nsDef.bodyScopeId) {
         const inner = resolveMemberInScope(project, fi, file, nsDef.bodyScopeId, name, seen);
         if (inner) return inner;
       }
+    }
+  }
+  // 同一文件里同名的其它类型作用域：Rust 的 `impl Client { .. }` 与 `struct Client`
+  // 是两个独立 scope，成员（方法）只落在 impl 那个里，要合并着找。
+  const scope = fi.scopes.get(scopeId);
+  if (scope?.kind === 'class' && scope.name) {
+    for (const [sid, sibling] of fi.scopes) {
+      if (sid === scopeId || sibling.kind !== 'class' || sibling.name !== scope.name) continue;
+      const inner = resolveMemberInScope(project, fi, file, sid, name, seen);
+      if (inner) return inner;
     }
   }
   return null;

@@ -5,8 +5,9 @@
 import JavaScript from 'tree-sitter-javascript';
 import TypeScript from 'tree-sitter-typescript';
 import type {
-  BaseInfo, DecoratorInfo, LanguageSpec, ModuleCandidate, ModuleHint, WalkContext,
+  BaseInfo, CtorCallInfo, DecoratorInfo, LanguageSpec, ModuleCandidate, ModuleHint, WalkContext,
 } from '../indexer/walker';
+import { SELF_ARG } from '../indexer/walker';
 import { dirname, joinRel } from '../indexer/paths';
 import { readHintFile, readHintJson, stripJsonComments } from '../config';
 import type { SymbolKind } from '../types';
@@ -333,6 +334,79 @@ function tsTypeNameOf(node: any): string | null {
   return null;
 }
 
+/** 承载类型注解 / 初始化值的声明节点（名字节点则向上找一层）。 */
+const TS_TYPE_DECLS = new Set([
+  'variable_declarator', 'required_parameter', 'optional_parameter',
+  'public_field_definition', 'field_definition', 'property_signature',
+]);
+
+function tsDeclOf(node: any): any {
+  if (!node) return null;
+  if (TS_TYPE_DECLS.has(node.type)) return node;
+  return node.parent && TS_TYPE_DECLS.has(node.parent.type) ? node.parent : null;
+}
+
+/** 类型注解 → 类型名：去 `type_annotation` 包装、数组取元素类型、联合取第一个具名类型。 */
+function tsAnnotationName(node: any): string | null {
+  if (!node) return null;
+  if (node.type === 'type_annotation') {
+    return tsAnnotationName(node.childForFieldName('type') ?? (node.namedChildren as any[])[0]);
+  }
+  if (node.type === 'parenthesized_type') return tsAnnotationName((node.namedChildren as any[])[0]);
+  if (node.type === 'array_type') {
+    return tsAnnotationName(node.childForFieldName('element') ?? (node.namedChildren as any[])[0]);
+  }
+  if (node.type === 'union_type') {
+    for (const c of node.namedChildren as any[]) {
+      const name = tsAnnotationName(c);
+      if (name) return name;
+    }
+    return null;
+  }
+  const name = tsTypeNameOf(node);
+  // 限定名（`models.User`）交给按名字解析时取末段（导入的类名通常是末段）
+  return name ? name.split('.').pop() ?? name : null;
+}
+
+/**
+ * 成员跳转层 A（`obj.method()`）：从声明的**类型注解**或 `new X()` 初始化读出类型名。
+ * 只读语法，不做类型推断：工厂函数 / 对象字面量 / 动态赋值一律返回 null（不猜）。
+ */
+function tsTypeOfDef(node: any): string | null {
+  const decl = tsDeclOf(node);
+  if (!decl) return null;
+  const fromAnnotation = tsAnnotationName(decl.childForFieldName?.('type'));
+  if (fromAnnotation) return fromAnnotation;
+  const value = decl.childForFieldName?.('value');
+  if (value?.type !== 'new_expression') return null;
+  const ctor = value.childForFieldName('constructor');
+  return ctor?.type === 'identifier' ? ctor.text : null;
+}
+
+/**
+ * 构造调用（成员跳转层 B）：`new Client(this)` → callee `Client` / 实参类型 `[SELF_ARG]`。
+ * `new` 语法本身就是构造，无歧义；实参是字面量 / 复杂表达式时记 null（不猜）。
+ */
+function tsCtorCallOf(node: any): CtorCallInfo | null {
+  if (node.type !== 'new_expression') return null;
+  const ctor = node.childForFieldName('constructor');
+  if (!ctor || ctor.type !== 'identifier') return null;
+  const args = node.childForFieldName('arguments');
+  const argTypes: Array<string | null> = [];
+  for (const c of (args?.namedChildren ?? []) as any[]) {
+    argTypes.push(tsArgTypeOf(c));
+  }
+  return { calleeName: ctor.text, argTypes };
+}
+
+/** 构造点实参的语法类型：`this` → SELF_ARG，`new X()` → X，其余不猜。 */
+function tsArgTypeOf(node: any): string | null {
+  if (node.type === 'this') return SELF_ARG;
+  if (node.type !== 'new_expression') return null;
+  const ctor = node.childForFieldName('constructor');
+  return ctor?.type === 'identifier' ? ctor.text : null;
+}
+
 /**
  * 显式继承 / 实现（N17）：类与接口的 extends / implements。
  * 只读 AST：条件类型、映射类型、混入函数的动态基类不覆盖。
@@ -646,6 +720,9 @@ function makeTsSpec(
 
     decoratorsOf: tsDecorators,
     basesOf: tsBases,
+    typeOfDef: tsTypeOfDef,
+    isConstructorName: (fnName) => fnName === 'constructor',
+    ctorCallOf: tsCtorCallOf,
 
     params: defineParams,
 

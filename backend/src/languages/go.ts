@@ -39,6 +39,70 @@ function defineParameters(node: any, ctx: WalkContext) {
   }
 }
 
+/** 类型节点 → 类型名（指针 / 切片去包装、限定名取末段）。 */
+function goTypeNameOf(node: any): string | null {
+  if (!node) return null;
+  switch (node.type) {
+    case 'type_identifier':
+      return node.text;
+    case 'qualified_type': {
+      const name = node.childForFieldName('name') ?? (node.namedChildren as any[]).pop();
+      return name?.text ?? null;
+    }
+    case 'pointer_type':
+    case 'slice_type':
+    case 'array_type':
+    case 'generic_type': {
+      const inner =
+        node.childForFieldName('element') ?? node.childForFieldName('type') ?? (node.namedChildren as any[]).pop();
+      return goTypeNameOf(inner);
+    }
+  }
+  return null;
+}
+
+/** `Client{}` / `&Client{}` 这类复合字面量 → 类型名（工厂调用不猜）。 */
+function goValueTypeName(value: any): string | null {
+  if (!value) return null;
+  if (value.type === 'composite_literal') return goTypeNameOf(value.childForFieldName('type'));
+  if (value.type === 'unary_expression') return goValueTypeName(value.childForFieldName('operand'));
+  return null;
+}
+
+/**
+ * 成员跳转层 A：从 `var c Client` / `c := Client{}` / 形参 `c *Client` 读类型名。
+ * 只读语法、不做推断：多值赋值与工厂调用一律不猜。
+ */
+function goTypeOfDef(node: any): string | null {
+  let decl = node;
+  if (decl?.type === 'identifier') decl = decl.parent;
+  if (decl?.type === 'expression_list') decl = decl.parent;
+  if (!decl) return null;
+  switch (decl.type) {
+    case 'parameter_declaration':
+    case 'variadic_parameter_declaration':
+    case 'field_declaration':
+      return goTypeNameOf(decl.childForFieldName('type'));
+    case 'var_spec':
+    case 'const_spec': {
+      const fromType = goTypeNameOf(decl.childForFieldName('type'));
+      if (fromType) return fromType;
+      return goValueTypeName((decl.namedChildren as any[]).find((c: any) => c.type !== 'identifier'));
+    }
+    case 'short_var_declaration':
+    case 'range_clause': {
+      const left = decl.childForFieldName('left');
+      const leftCount = left?.type === 'expression_list' ? (left.namedChildren as any[]).length : 1;
+      if (leftCount !== 1) return null; // 多值赋值：左右不对应，不猜
+      const right = decl.childForFieldName('right');
+      const value = right?.type === 'expression_list' ? (right.namedChildren as any[])[0] : right;
+      return goValueTypeName(value);
+    }
+    default:
+      return null;
+  }
+}
+
 /** `pkg.Func` → ['pkg','Func']。 */
 function memberParts(node: any): string[] | null {
   if (node.type !== 'selector_expression') return null;
@@ -312,6 +376,7 @@ export const go: LanguageSpec = {
   },
 
   basesOf: goBases,
+  typeOfDef: goTypeOfDef,
 
   resolveModule(specifier: string, _fromFile: string, hint): ModuleCandidate[] | null {
     // 1) 根 go.mod 的 module path（单模块仓库）

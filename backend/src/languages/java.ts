@@ -1,6 +1,7 @@
 /** Java 语言模块：定义 / 引用提取 + 基于类名索引的 import 解析。 */
 import Java from 'tree-sitter-java';
-import type { BaseInfo, DecoratorInfo, LanguageSpec, WalkContext } from '../indexer/walker';
+import type { BaseInfo, CtorCallInfo, DecoratorInfo, LanguageSpec, WalkContext } from '../indexer/walker';
+import { SELF_ARG } from '../indexer/walker';
 import type { SymbolKind } from '../types';
 
 const JAVA_BUILTINS = new Set([
@@ -38,6 +39,78 @@ function defineLambdaParams(node: any, ctx: WalkContext) {
   for (const c of node.namedChildren as any[]) {
     if (c.type === 'formal_parameter' || c.type === 'spread_parameter') ctx.walk(c);
     else if (c.type === 'identifier') ctx.define(c, { nameNode: c, kind: 'parameter' });
+  }
+}
+
+/** 类型节点 → 类型名（去泛型实参、数组取元素类型、限定名取末段）。基本类型没有项目内定义。 */
+function javaTypeNameOf(node: any): string | null {
+  if (!node) return null;
+  switch (node.type) {
+    case 'type_identifier':
+      return node.text;
+    case 'generic_type': {
+      const inner = node.childForFieldName('type') ?? (node.namedChildren as any[])[0];
+      return javaTypeNameOf(inner);
+    }
+    case 'scoped_type_identifier': {
+      const name = node.childForFieldName('name') ?? (node.namedChildren as any[]).pop();
+      return name?.text ?? null;
+    }
+    case 'array_type': {
+      const el = node.childForFieldName('element') ?? (node.namedChildren as any[])[0];
+      return javaTypeNameOf(el);
+    }
+  }
+  return null;
+}
+
+/**
+ * 构造调用（成员跳转层 B）：`new Client(this)` → callee `Client` / 实参类型 `[SELF_ARG]`。
+ * `new` 语法本身就是构造，无歧义；实参是字面量 / 复杂表达式时记 null（不猜）。
+ */
+function javaCtorCallOf(node: any): CtorCallInfo | null {
+  if (node.type !== 'object_creation_expression') return null;
+  const type = node.childForFieldName('type');
+  const calleeName = javaTypeNameOf(type);
+  if (!calleeName) return null;
+  const args = node.childForFieldName('arguments');
+  const argTypes: Array<string | null> = [];
+  for (const c of (args?.namedChildren ?? []) as any[]) {
+    argTypes.push(javaArgTypeOf(c));
+  }
+  return { calleeName, argTypes };
+}
+
+/** 构造点实参的语法类型：既 `this` → SELF_ARG，`new X()` → X，其余不猜。 */
+function javaArgTypeOf(node: any): string | null {
+  if (node.type === 'this') return SELF_ARG;
+  if (node.type !== 'object_creation_expression') return null;
+  return javaTypeNameOf(node.childForFieldName('type'));
+}
+
+/**
+ * 成员跳转层 A：从字段 / 形参 / 局部变量的类型注解或 `new X()` 读类型名。
+ * 只读语法、不做推断：`var` 声明与工厂方法返回类型一律不猜。
+ */
+function javaTypeOfDef(node: any): string | null {
+  const decl = node?.type === 'identifier' && node.parent ? node.parent : node;
+  if (!decl) return null;
+  switch (decl.type) {
+    case 'formal_parameter':
+    case 'spread_parameter':
+    case 'catch_formal_parameter':
+    case 'resource':
+    case 'enhanced_for_statement':
+      return javaTypeNameOf(decl.childForFieldName('type'));
+    case 'variable_declarator': {
+      const fromType = javaTypeNameOf(decl.parent?.childForFieldName?.('type'));
+      if (fromType) return fromType;
+      const value = decl.childForFieldName('value');
+      if (value?.type !== 'object_creation_expression') return null;
+      return javaTypeNameOf(value.childForFieldName('type'));
+    }
+    default:
+      return null;
   }
 }
 
@@ -344,6 +417,9 @@ export const java: LanguageSpec = {
 
   decoratorsOf: javaDecorators,
   basesOf: javaBases,
+  typeOfDef: javaTypeOfDef,
+  isConstructorName: (fnName, className) => className !== null && fnName === className,
+  ctorCallOf: javaCtorCallOf,
 
   resolveModule() {
     return null;
