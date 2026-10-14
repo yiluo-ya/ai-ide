@@ -33,7 +33,7 @@
   grouped by file
 - Tabs (limit 8; middle-click or “Open to the side” for split view), recent files (empty query in
   Ctrl+P), position memory (switching back restores the last line and scroll position),
-  back / forward (`Alt+←` / `Alt+→`)
+  back / forward (`Alt+←` / `Alt+→`; covers opened / jumped-to spots as well as places you clicked)
 - **Editing and deletion** (2026-10-10, see `FR/FR-0008-fr.md`): a file is editable as soon as it
   opens, saved **1 s after you stop typing** (the status bar shows unsaved / saving / saved); if the
   file changed on disk meanwhile, a dialog asks whether to keep yours or the disk version; right-click
@@ -497,7 +497,7 @@ requests return 400. Routes marked **local** return 403 in share mode.
 | `Ctrl/Cmd+Shift+E` | Focus the Files panel |
 | `Ctrl/Cmd+Shift+R` | Continue reading (back to the last file, line and column) |
 | `Ctrl/Cmd+1..4` / `Ctrl/Cmd+0` | Switch left panel (Files / Outline / Search / Code sessions); `0` = last |
-| `Alt+←` / `Alt+→` | Back / forward |
+| `Alt+←` / `Alt+→` | Back / forward (last opened / jumped-to position, or the last place you clicked) |
 | `Ctrl/Cmd+Alt+C` | Copy current position as `path:line:col` |
 | `Ctrl/Cmd+Alt+E` | Explain the symbol at the cursor (structural, no model) |
 | `Ctrl/Cmd+Alt+B` | Toggle the whole-file blame view |

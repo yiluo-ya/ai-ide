@@ -1211,6 +1211,7 @@ export default function App() {
                     onCursor={(line, col) => setCursor({ line, col })}
                     onSelection={setSelection}
                     onPosition={(line, col, scrollTop) => rememberPosition(store.openFile!, line, col, scrollTop)}
+                    onClickPosition={(line, col) => useStore.getState().noteCursorAt(store.openFile!, line, col)}
                     onCopyLocation={copyLocation}
                     onCopySnippet={copySnippet}
                     onOpenAside={(file, line, col) => void useStore.getState().openInSecondary(file, line, col)}

@@ -152,6 +152,12 @@ interface Props {
   onSelection?: (sel: { chars: number; lines: number } | null) => void;
   /** N22：光标 / 滚动位置变化时上报（供位置记忆落盘）。 */
   onPosition?: (line: number, col: number, scrollTop: number) => void;
+  /**
+   * 编辑器内点击文本区产生的光标位置（App 负责记进前进 / 后退历史）。
+   * 与 onPosition 的区别：onPosition 是「防抖后的当前落脚点」（用于下次打开这个文件回到哪），
+   * 这里是「用户主动点了一下」这个离散动作，用来在导航历史里留回退点。
+   */
+  onClickPosition?: (line: number, col: number) => void;
   /** 判据 6：复制当前位置为 `path:line:col`。 */
   onCopyLocation?: (file: string, line: number, col: number) => void;
   /** S3a：复制选中代码为「带出处的片段」（出处行 + 围栏代码块）。 */
@@ -202,6 +208,7 @@ export function Editor({
   onCursor,
   onSelection,
   onPosition,
+  onClickPosition,
   onCopyLocation,
   onCopySnippet,
   onOpenAside,
@@ -224,6 +231,8 @@ export function Editor({
   onSelectionRef.current = onSelection;
   const onPositionRef = useRef(onPosition);
   onPositionRef.current = onPosition;
+  const onClickPositionRef = useRef(onClickPosition);
+  onClickPositionRef.current = onClickPosition;
   const fileRef = useRef(file);
   fileRef.current = file;
   const onCopyRef = useRef(onCopyLocation);
@@ -350,6 +359,18 @@ export function Editor({
       }),
       editor.onDidScrollChange(() => {
         reportPosition();
+      }),
+      // 在编辑器里点一下也进导航历史：位置本身就是一个可回退的点（App 侧压栈）。
+      // 只认文本区左键——滚动条 / 行号槽 / 浮层部件 / 右键 / Ctrl+Click（跳转）| Alt+Click（多光标）都不算。
+      editor.onMouseUp((e) => {
+        if (historicalRef.current) return; // 历史快照不记位置
+        if (!e.event.leftButton) return;
+        if (e.event.ctrlKey || e.event.metaKey || e.event.altKey) return;
+        const t = e.target.type;
+        if (t !== monaco.editor.MouseTargetType.CONTENT_TEXT && t !== monaco.editor.MouseTargetType.CONTENT_EMPTY) return;
+        const pos = editor.getPosition();
+        if (!pos) return;
+        onClickPositionRef.current?.(pos.lineNumber, pos.column);
       }),
       editor.onDidChangeCursorSelection((e) => {
         if (historicalRef.current) return;

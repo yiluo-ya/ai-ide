@@ -206,6 +206,8 @@ interface State {
   reindex: () => Promise<void>;
   loadTree: () => Promise<void>;
   openFileAt: (file: string, line?: number, col?: number, endLine?: number, endCol?: number) => Promise<void>;
+  /** 编辑器内点击某处产生的光标位置：也记进前进 / 后退栈（不推 URL、不改打开的文件）。 */
+  noteCursorAt: (file: string, line: number, col: number) => void;
   goBack: () => Promise<void>;
   goForward: () => Promise<void>;
   refreshSymbols: () => Promise<void>;
@@ -833,12 +835,8 @@ export const useStore = create<State>((set, get) => ({
           scrollTop: line == null ? memory?.scrollTop : undefined,
         },
       });
-      if (!suppressed) {
-        const prev = get().history.slice(0, get().historyIndex + 1);
-        prev.push({ file, line: targetLine, col: targetCol });
-        const trimmed = prev.slice(-HISTORY_LIMIT);
-        set({ history: trimmed, historyIndex: trimmed.length - 1 });
-      }
+      // 打开 / 跳转也压一条「可回退的位置」；编辑器内点击走 noteCursorAt，两条共用同一栈
+      if (!suppressed) pushHistoryEntry(file, targetLine, targetCol);
       // N19：标签页（同文件合并 + LRU 上限）
       const tabs = [
         { file, line: targetLine, col: targetCol },
@@ -855,6 +853,17 @@ export const useStore = create<State>((set, get) => ({
     } catch (e) {
       set({ fileLoading: false, error: e instanceof Error ? e.message : String(e) });
     }
+  },
+
+  /**
+   * 编辑器内点击某处：把「点到的位置」也记进前进 / 后退栈。
+   *
+   * 为什么不复用 `openFileAt`：这里没有「打开文件」这件事——文件已经开着、正文不动，
+   * 也不该推 URL（光标移动不刷地址栏）。它只是给「我刚才在哪一行」留一个回退点。
+   */
+  noteCursorAt(file, line, col) {
+    if (!get().projectId) return;
+    pushHistoryEntry(file, line, col);
   },
 
   /** N19：在旁边打开（分屏）——同一文件也允许（对照两个位置）。 */
@@ -1480,6 +1489,20 @@ export const useStore = create<State>((set, get) => ({
     set({ notice: null });
   },
 }));
+
+/**
+ * 压一条导航历史（前进 / 后退用的「位置」栈）：打开文件与编辑器内点击光标位置共用同一条。
+ * 同位置不重复压（反复点同一处、重复打开同一位置不会堆出空条目）；超上限截掉最旧的。
+ */
+function pushHistoryEntry(file: string, line: number, col: number) {
+  const { history, historyIndex } = useStore.getState();
+  const top = history[historyIndex];
+  if (top && top.file === file && top.line === line && top.col === col) return;
+  const kept = history.slice(0, historyIndex + 1);
+  kept.push({ file, line, col });
+  const trimmed = kept.slice(-HISTORY_LIMIT);
+  useStore.setState({ history: trimmed, historyIndex: trimmed.length - 1 });
+}
 
 /** 宿主（如 xchen 项目列表）通过 iframe 发来的跳转指令。 */
 export interface HostOpenMessage {

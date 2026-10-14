@@ -413,6 +413,47 @@ async function main() {
     return `${files.length} 个文件节点，贴住父目录 ${anchored.length} 个，y 分 ${bands} 档`;
   }, 40_000);
 
+  await step('N18：编辑器里点过的位置也能后退回去（点击不推 URL）', async () => {
+    // 历史栈是内存态、位置记忆落在 localStorage：都清掉，从「刚打开一个文件」这个确定状态开始
+    await page.evaluate(() => window.localStorage.clear());
+    await page.goto(`${BASE}/?project=${PROJECT}`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await openFile('service.ts');
+
+    const caretLine = () =>
+      page.evaluate(() => window.__wcrMonaco?.editor.getEditors()[0]?.getPosition()?.lineNumber ?? 0);
+    /** 点第 line 行的正文：用编辑器自己的布局信息算屏幕坐标，派发真实鼠标事件。 */
+    const clickLine = async (line) => {
+      const box = await page.evaluate((target) => {
+        const ed = window.__wcrMonaco.editor.getEditors()[0];
+        ed.revealLineInCenter(target);
+        const rect = ed.getDomNode().getBoundingClientRect();
+        const info = ed.getLayoutInfo();
+        return {
+          x: rect.left + info.contentLeft + 40,
+          y: rect.top + (ed.getTopForLineNumber(target) - ed.getScrollTop()) + 8,
+        };
+      }, line);
+      await page.mouse.click(box.x, box.y);
+      await page.waitForTimeout(400);
+    };
+
+    const backBtn = page.locator('button[title="Ctrl+Alt+←"]');
+    assert(await backBtn.isDisabled(), '刚打开文件时历史只有一条，后退不该可用');
+    // 键盘移动光标不进历史（口径：只记鼠标点过的地方）
+    await gotoLine(3);
+    assert(await backBtn.isDisabled(), '键盘移动光标不该进历史');
+    const urlBefore = page.url();
+    await clickLine(5);
+    assert((await caretLine()) === 5, `点击后光标应在第 5 行，实际 ${await caretLine()}`);
+    assert(!(await backBtn.isDisabled()), '点击编辑器里的位置后，后退应变为可用');
+    assert(page.url() === urlBefore, `光标位置不该推地址栏 URL：${page.url()}`);
+    await clickLine(11);
+    await page.keyboard.press('Control+Alt+ArrowLeft');
+    await page.waitForTimeout(900);
+    assert((await caretLine()) === 5, `后退应回到上一次点击的第 5 行，实际 ${await caretLine()}`);
+    return '点 5 → 点 11 → 后退回 5，URL 未变';
+  });
+
   await browser.close();
 
   report();
