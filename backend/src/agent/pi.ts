@@ -9,11 +9,18 @@
  * 与内置 agent 的分工：
  * - 工具集、系统提示、上下文压缩都由 pi 自己负责（它是完整的 coding agent）；
  * - 模型凭证来自 pi 自己的配置（`~/.pi/agent/auth.json`），**不使用**本项目的「模型」配置；
- * - 历史由 pi 进程持有，`--no-session` 表示不落盘，进程退出即清。
+ * - 历史由 pi 进程持有：默认 `--no-session` 不落盘；给了 `agentSession` 时改用
+ *   `--session-id`（FR-0013），pi 自己把历史写进 `--session-dir` 下，重启后可续传。
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { piNotFoundMessage, piSpawnOptions, resolvePiRuntime, type PiRuntime } from './runtime';
+import {
+  PiNotFoundError,
+  piSpawnOptions,
+  piNotFoundMessage,
+  resolvePiRuntime,
+  type PiRuntime,
+} from './runtime';
 import { readAgentRuntimeConfig } from './runtime-config';
 import {
   type AdapterExit,
@@ -131,17 +138,29 @@ export class PiAgent extends EventEmitter implements AgentAdapter {
   // ------------------------------------------------------------------ 内部
 
   /**
-   * 起 pi：命令与参数都来自定位链（`runtime.ts`，FR-0007），参数本身仍是固定字面量。
+   * 起 pi：命令与参数都来自定位链（`runtime.ts`，FR-0007）。
+   * 定了会话身份就带 `--session-id` + `--session-dir`（FR-0013，历史由 pi 落盘、可续传），
+   * 没定就沿用 `--no-session`（一次性会话）。
    * 定位链没落到真实文件时（PATH 兜底），起不来就用安装指引代替原始报错（D5）。
    */
   private async spawn(): Promise<void> {
-    const runtime = resolvePiRuntime(await readAgentRuntimeConfig(), ['--mode', 'rpc', '--no-session']);
+    const identity = this.options.agentSession;
+    const piArgs = identity
+      ? [
+          '--mode',
+          'rpc',
+          '--session-id',
+          identity.id,
+          ...(identity.dir ? ['--session-dir', identity.dir] : []),
+        ]
+      : ['--mode', 'rpc', '--no-session'];
+    const runtime = resolvePiRuntime(await readAgentRuntimeConfig(), piArgs);
     return new Promise((resolve, reject) => {
       let child: ChildProcess;
       try {
         child = spawn(runtime.command, runtime.prefixArgs, piSpawnOptions(runtime, this.cwd));
       } catch (error) {
-        reject(new Error(startFailure(runtime, error)));
+        reject(runtime.resolved ? new Error(startFailure(runtime, error)) : new PiNotFoundError());
         return;
       }
       this.child = child;
@@ -156,7 +175,7 @@ export class PiAgent extends EventEmitter implements AgentAdapter {
         // 还可能被 sessions 层拼到给用户看的指引后面 —— 这一支一律丢开。
         if (!runtime.resolved) this.stderrLines.length = 0;
         this.failPending(detail);
-        reject(new Error(detail));
+        reject(runtime.resolved ? new Error(detail) : new PiNotFoundError());
       });
       child.once('exit', (code, signal) => {
         // 没定位到真实文件（PATH 兜底）又立刻非 0 退出：几乎都是「压根没装」。

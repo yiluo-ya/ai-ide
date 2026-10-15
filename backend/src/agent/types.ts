@@ -106,6 +106,13 @@ export interface AdapterOptions {
    * 提示词也写明「本轮不要写文件」。默认 false（可读可写）。
    */
   readOnly?: boolean;
+  /**
+   * 会话身份（FR-0013）：宿主给了就用它认领持久化后端自己的历史（pi 的 `--session-id`），
+   * 续传时传同一个 id。不给 = 一次性会话（pi 侧即 `--no-session`）。
+   */
+  agentSession?: { id: string; dir?: string };
+  /** 续传时回填的历史（内置 agent 用；pi 的历史在它自己的会话文件里）。 */
+  messages?: AgentMessage[];
 }
 
 export interface SessionState {

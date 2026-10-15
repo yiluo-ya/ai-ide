@@ -105,6 +105,8 @@ export class BuiltinAgent extends EventEmitter implements AgentAdapter {
     this.modelRef = options.model;
     this.sessionName = options.name;
     this.tools = toolDefinitions(options.readOnly === true);
+    // FR-0013 续传：宿主把落盘的历史回填进来，接着往下聊
+    if (options.messages?.length) this.history.push(...options.messages.map((m) => ({ ...m })));
   }
 
   get stderrTail(): string[] {

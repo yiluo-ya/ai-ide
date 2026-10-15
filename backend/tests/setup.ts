@@ -9,3 +9,10 @@
  * 显式打开并指定临时插件目录。
  */
 process.env.READER_PLUGINS ??= '0';
+
+/**
+ * FR-0013：保存模型配置会顺手把配置同步进 pi 的 `~/.pi/agent`。
+ * 测试里必须关掉 —— 否则跑一次单测就会改写开发机真实的 pi 配置。
+ * 要验证同步本身的用例（tests/pi-models.test.ts）自己改成 '1' 并指定临时 pi 目录。
+ */
+process.env.READER_PI_SYNC ??= '0';
