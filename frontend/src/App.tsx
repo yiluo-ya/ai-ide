@@ -138,7 +138,13 @@ export default function App() {
     setActiveView(side, id);
     if (side === 'left') setSidebarOpen(true);
     else setChangesDockOpen(true);
-    if (id === 'agent' && store.projectId) showAgent();
+    // 活动栏与主区联动：点 code 会话 → 主区看会话；从会话切到别的面板（文件 / 搜索…）→ 主区回代码视图。
+    // 只在当前确实停在会话视图时才回（不碰用户手动开的项目地图）。
+    if (id === 'agent') {
+      if (store.projectId) showAgent();
+    } else if (mainView === 'agent') {
+      backToCode();
+    }
   };
   const [quick, setQuick] = useState<QuickOpenMode>(null);
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
