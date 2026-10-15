@@ -190,8 +190,20 @@ unless you enter this mode.
   currently in the form (no need to save first) and reports ✓/✗, latency, or the provider’s error
 - The plaintext key is only stored in `~/.ide/model-config.json` (mode 0o600) and the UI only ever
   echoes a masked value
-- At most `READER_AGENT_MAX_STEPS` (default 24) tool calls per turn; session history lives in memory
-  only and is gone after a restart
+- At most `READER_AGENT_MAX_STEPS` (default 24) tool calls per turn
+- **Install pi without leaving the UI** (FR-0013): when a new pi session finds no pi, the error banner
+  shows an "Install in terminal" button next to "Got it" — it opens the bottom terminal and **types**
+  `npm install -g @earendil-works/pi-coding-agent` (typed, not executed: you review it and press Enter)
+- **Session records follow the project** (FR-0013): `~/.ide/sessions/<projectId>/<sessionId>.json`
+  keeps metadata plus the built-in agent's messages (pi writes its own history under `pi/` in the same
+  directory); after a restart the left panel still lists old sessions (marked "archived") and opening
+  one calls `POST …/resume` to bring the adapter back. Records live in this tool's data directory and
+  **never touch the repository being read**
+- **Model config is mirrored into pi** (FR-0013): saving or removing a provider also writes
+  `baseUrl / api / models` into `~/.pi/agent/models.json` and the key into `auth.json` (idempotent, and
+  only for entries we synced — pi's own providers, keys and `modelOverrides` are left alone; the ledger
+  is `~/.ide/pi-sync.json`). Server startup and saving a pi path in settings sync too, and the panel has
+  a "Sync to pi" button
 
 ## Sharing and export (the courier)
 
@@ -444,8 +456,10 @@ requests return 400. Routes marked **local** return 403 in share mode.
 | GET / POST | `/api/agent/model-config` | Model providers (masked keys) / add or update one |
 | POST | `/api/agent/model-config/remove` | Remove a provider |
 | POST | `/api/agent/model-config/default` | Set / clear the default model |
-| GET / POST | `/api/agent/sessions` | Session list / create (`{ projectId, name?, backend?, provider?, modelId?, readOnly? }`) |
-| GET / DELETE | `/api/agent/sessions/:id` | Session detail / delete |
+| GET / POST | `/api/agent/model-config/pi-sync` | pi sync status / manual re-push (idempotent, FR-0013) |
+| GET / POST | `/api/agent/sessions` | Session list (including on-disk ones with `loaded:false`) / create (`{ projectId, name?, backend?, provider?, modelId?, readOnly? }`; 400 `pi_not_found` + `installCommand` when pi is missing) |
+| GET / DELETE | `/api/agent/sessions/:id` | Session detail / delete (removes the on-disk record too) |
+| POST | `/api/agent/sessions/:id/resume` | Bring a session back from its on-disk record (idempotent, FR-0013) |
 | GET | `/api/agent/sessions/:id/messages` | Session history |
 | POST | `/api/agent/sessions/:id/prompt` | Send a message (progress over SSE) |
 | POST | `/api/agent/sessions/:id/abort` / `/model` / `/rename` | Abort the turn / switch model / rename |

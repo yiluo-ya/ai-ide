@@ -154,7 +154,19 @@
 - **先测试再保存**：「测试连接」用表单里当前的值（不必先保存）给每个模型 id 发一条最小请求，
   逐条给出 ✓/✗、耗时或对方返回的错误信息
 - 明文 key 只落 `~/.ide/model-config.json`（权限 0o600），界面只回显打码值
-- 一轮最多 `READER_AGENT_MAX_STEPS`（默认 24）次工具调用；会话历史只在内存，重启即清
+- **装 pi 不用离开界面**（FR-0013 需求 3）：新建 pi 会话时若没找到 pi，错误横幅里除了「知道了」
+  还多一个「在终端安装」——点了就展开底部终端并**填入** `npm install -g @earendil-works/pi-coding-agent`
+  （只填入不回车，命令可见可改，用户自己确认后再执行）
+- **会话记录跟随项目落盘**（FR-0013 需求 4）：`~/.ide/sessions/<projectId>/<sessionId>.json`
+  存元数据与内置 agent 的消息（pi 的历史由 pi 自己写进同目录的 `pi/` 下）；重启 / 刷新后
+  左栏仍能列出旧会话（标「已存档」），点开即 `POST …/resume` 拉起适配器继续聊。
+  写盘位置在本项目的数据目录，**不动被阅读的仓库**
+- **模型配置同步给 pi**（FR-0013 需求 5）：在顶栏「模型」里保存 / 删除 provider 时，
+  自动把 `baseUrl / api / models` 写进 `~/.pi/agent/models.json`、把 key 写进 `auth.json`
+  （幂等，且只动同步过的条目，pi 自己的 provider / key / modelOverrides 原样保留；
+  账本在 `~/.ide/pi-sync.json`）；后端启动与「设置 → Code Agent 后端」保存路径后也会同步一次，
+  面板上的「同步到 pi」可手动重推
+- 一轮最多 `READER_AGENT_MAX_STEPS`（默认 24）次工具调用
 - **会话内容按 Markdown 渲染**（助手正文 + 工具结果；工具结果只在带 Markdown 结构或 HTML 文档时渲染，
   其余原样，一键切回源码）：代码块带语言标签与复制按钮；```html 块与 HTML 文档用**沙箱 iframe** 预览
   （`sandbox` 不给 `allow-scripts`，agent 写的脚本不会执行）；顶行「导出 ▾」把当前会话存成 .md 或 .html
@@ -396,8 +408,10 @@ shared/types.ts    前后端共享的 API 契约（位置统一 1-based、列按
 | GET / POST | `/api/agent/model-config` | 模型 provider 列表（key 打码）/ 新增或更新 |
 | POST | `/api/agent/model-config/remove` | 删除 provider |
 | POST | `/api/agent/model-config/default` | 设 / 清默认模型 |
-| GET / POST | `/api/agent/sessions` | 会话列表 / 新建（`{ projectId, name?, backend?, provider?, modelId?, readOnly? }`） |
-| GET / DELETE | `/api/agent/sessions/:id` | 会话详情 / 删除 |
+| GET / POST | `/api/agent/model-config/pi-sync` | pi 同步状态 / 手动重推一次（幂等，FR-0013） |
+| GET / POST | `/api/agent/sessions` | 会话列表（含磁盘上未载入的，`loaded:false`）/ 新建（`{ projectId, name?, backend?, provider?, modelId?, readOnly? }`；没装 pi 时 400 `pi_not_found` + `installCommand`） |
+| GET / DELETE | `/api/agent/sessions/:id` | 会话详情 / 删除（连磁盘记录一起删） |
+| POST | `/api/agent/sessions/:id/resume` | 用磁盘记录把会话拉起来（幂等，FR-0013） |
 | GET | `/api/agent/sessions/:id/messages` | 会话历史 |
 | POST | `/api/agent/sessions/:id/prompt` | 发一条消息（进度走 SSE） |
 | POST | `/api/agent/sessions/:id/abort` / `/model` / `/rename` | 中止本轮 / 换模型 / 重命名 |
