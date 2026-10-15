@@ -639,7 +639,10 @@ export const zh: Record<string, string> = {
   'overview.fullMap': '完整地图',
   'overview.depGraph': '依赖图',
   'density.lineRange': '第 {start}-{end} 行',
-  'density.barTitle': '行密度（代码 / 注释 / 空白占比）：悬停看行区间与主要符号，点击跳到该段起始行',
+  'density.barTitle': '行密度（快速导航）：两种颜色相间便于分辨段落，悬停看行区间与主要符号，点击跳到该段起始行',
+  'density.tier.code': '代码',
+  'density.tier.comment': '注释多',
+  'density.tier.blank': '空白多',
   'density.expand': '展开行密度',
   'density.collapse': '收起行密度',
 

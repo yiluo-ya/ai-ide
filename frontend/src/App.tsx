@@ -1219,6 +1219,7 @@ export default function App() {
                     onCopySnippet={copySnippet}
                     onOpenAside={(file, line, col) => void useStore.getState().openInSecondary(file, line, col)}
                     blame={blameOn ? blame?.lines ?? null : null}
+                    symbols={store.symbols}
                     onExplain={openExplain}
                     onFlow={openFlow}
                     onRun={runFileInTerminal}

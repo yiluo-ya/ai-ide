@@ -72,10 +72,10 @@
   --wcr-hover-doc: #c3c8ce;
   --wcr-hover-note: #b9bec6;
 
-  /* 整文件密度条三档（02-lens §3.4）：代码密 / 注释堆 / 空壳 */
-  --wcr-density-code: #4f7d5b;
-  --wcr-density-comment: #8a7433;
-  --wcr-density-blank: #3a3a41;
+  /* 整文件密度条两档相间（2026-10-15 需求 7）：同一色系、只差一档透明度 ——
+     能看出段落边界就行，不喧宾夺主；用 --fg 调色，深浅主题自动跟随（亮色块不再单独覆盖）。 */
+  --wcr-density-band-a: color-mix(in srgb, var(--fg) 22%, transparent);
+  --wcr-density-band-b: color-mix(in srgb, var(--fg) 9%, transparent);
   --wcr-density-track: rgba(0, 0, 0, 0.3);
   --wcr-density-width: 12px;
 
@@ -206,9 +206,6 @@
   --wcr-hover-doc: #3a4250;
   --wcr-hover-note: #5b6470;
 
-  --wcr-density-code: #7fae8b;
-  --wcr-density-comment: #c9a94e;
-  --wcr-density-blank: #d0d3d8;
   --wcr-density-track: rgba(0, 0, 0, 0.06);
 
   --warn: #8a6116;
@@ -1279,6 +1276,64 @@ mark {
   inset: 0;
 }
 
+/* ---------------------------------------------------------------- 编辑器：定义行图标（7）
+  7（2026-10-15 用户要求）：类 / 方法 / 类型等定义行前一个图标（参考 IDEA）：
+  类 = 实心圆、接口 = 空心圆、方法 = 菱形、枚举 = 横矩形、类型 = 三角、模块 = 文件夹，
+  用背景色 + mask 上色（浅深主题都跟随）。变量一类（字段 / 常量 / 变量 / 枚举成员）不给图标。
+  同日澄清：两色相间说的是左侧「行密度条」那根快速导航树条，不是行底纹 —— 行底纹已撤。 */
+
+.monaco-editor .wcr-glyph-class,
+.monaco-editor .wcr-glyph-interface,
+.monaco-editor .wcr-glyph-method,
+.monaco-editor .wcr-glyph-type,
+.monaco-editor .wcr-glyph-enum,
+.monaco-editor .wcr-glyph-module {
+  width: 14px;
+  height: 14px;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: 12px 12px;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: 12px 12px;
+}
+
+.monaco-editor .wcr-glyph-class {
+  background-color: #4a9eea;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6.5'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6.5'/%3E%3C/svg%3E");
+}
+
+.monaco-editor .wcr-glyph-interface {
+  background-color: #3ecf8e;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5.5' fill='none' stroke='black' stroke-width='2.5'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5.5' fill='none' stroke='black' stroke-width='2.5'/%3E%3C/svg%3E");
+}
+
+.monaco-editor .wcr-glyph-method {
+  background-color: #c39ae8;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5 14.5 8 8 14.5 1.5 8Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5 14.5 8 8 14.5 1.5 8Z'/%3E%3C/svg%3E");
+}
+
+.monaco-editor .wcr-glyph-type {
+  background-color: #5cb8c4;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5 15 14.5H1Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5 15 14.5H1Z'/%3E%3C/svg%3E");
+}
+
+.monaco-editor .wcr-glyph-enum {
+  background-color: #d18f66;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1.5' y='4' width='13' height='8' rx='1.5'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1.5' y='4' width='13' height='8' rx='1.5'/%3E%3C/svg%3E");
+}
+
+.monaco-editor .wcr-glyph-module {
+  background-color: #94a3b3;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1.5 3.5h4.5l1.5 2h7v7h-13Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1.5 3.5h4.5l1.5 2h7v7h-13Z'/%3E%3C/svg%3E");
+}
+
 /* ---------------------------------------------------------------- 语义着色
    三档：本项目（最亮）> 局部变量 / 参数（次亮）> 外部依赖 / 标准库（略暗）。
    类名由 Monaco 的 decoration 注入，用 !important 盖过 token 自带色。 */
@@ -1570,16 +1625,13 @@ mark {
   filter: brightness(1.5);
 }
 
-.density-code {
-  background: var(--wcr-density-code);
+/* 段色交替：相邻两段颜色不同，扫的时候一眼分得开（段落性质改看 hover 提示） */
+.density-band-a {
+  background: var(--wcr-density-band-a);
 }
 
-.density-comment {
-  background: var(--wcr-density-comment);
-}
-
-.density-blank {
-  background: var(--wcr-density-blank);
+.density-band-b {
+  background: var(--wcr-density-band-b);
 }
 
 .loading-mask {

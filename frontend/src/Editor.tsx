@@ -8,7 +8,7 @@ import { shortAuthor } from './blame';
 import { translate } from './i18n';
 import { loadPrefs, resolvedTheme, usePrefs } from './prefs';
 import { reportCaret } from './bridge';
-import type { BlameLine } from '../../shared/types';
+import type { BlameLine, SymbolInfo } from '../../shared/types';
 import './agent-lines.css';
 import {
   monaco,
@@ -52,6 +52,11 @@ const agentLinePool = new Map<monaco.editor.ITextModel, string[]>();
  * 与着色、agent 行的刷新时机都不同。
  */
 const blamePool = new Map<monaco.editor.ITextModel, string[]>();
+/**
+ * 7（2026-10-15 用户要求）：model → 类 / 方法等定义行前的 gutter 图标装饰 id。
+ * 跟符号列表走（换文件时重取），与着色 / agent 行 / blame 的刷新时机都不同，单独一个池。
+ */
+const glyphPool = new Map<monaco.editor.ITextModel, string[]>();
 
 /** S7b：选区转成回发给宿主的最小形状（文本截断，不把整文件塞进消息）。 */
 function selectionOf(
@@ -138,6 +143,55 @@ function toBlameDecorations(model: monaco.editor.ITextModel, lines: BlameLine[])
   return out;
 }
 
+/**
+ * 7（2026-10-15 用户要求）：符号 kind → gutter 图标类名（形与色都在 CSS 里，见 styles.css）。
+ * 口径对齐大纲面板（SidePanel 的 KIND_ICON），只是这里画的是 SVG 而不是字母。
+ *
+ * 同日晚用户要求：变量一类的图标不要 —— field / property / constant / variable / enumMember
+ * 都归入「变量」而不给图标；只给类、接口、枚举、类型、函数 / 方法、模块这几类。
+ */
+const GLYPH_BY_KIND: Record<string, string> = {
+  class: 'wcr-glyph-class',
+  struct: 'wcr-glyph-class',
+  interface: 'wcr-glyph-interface',
+  enum: 'wcr-glyph-enum',
+  function: 'wcr-glyph-method',
+  method: 'wcr-glyph-method',
+  constructor: 'wcr-glyph-method',
+  type: 'wcr-glyph-type',
+  module: 'wcr-glyph-module',
+  namespace: 'wcr-glyph-module',
+  package: 'wcr-glyph-module',
+  file: 'wcr-glyph-module',
+};
+
+/** 一个行号槽图标都不画的行数上限：超大文件上符号也多，不抢渲染预算。 */
+const GLYPH_MAX_LINES = 20000;
+
+/**
+ * 7：把当前文件的符号定义行转成 gutter 图标装饰。
+ * 一行只留一个图标（同一行多个符号时取扫到的第一个），否则图标会叠在同一格上。
+ */
+function toGlyphDecorations(symbols: SymbolInfo[], lineCount: number): monaco.editor.IModelDeltaDecoration[] {
+  const out: monaco.editor.IModelDeltaDecoration[] = [];
+  if (lineCount > GLYPH_MAX_LINES) return out;
+  const seen = new Set<number>();
+  const walk = (list: SymbolInfo[]) => {
+    for (const s of list) {
+      // 「变量」一类（field / property / constant / variable / enumMember）没有图标 → 跳过
+      const cls = GLYPH_BY_KIND[s.kind];
+      const line = (s.range ?? s.location.range).start.line;
+      if (cls && line >= 1 && line <= lineCount && !seen.has(line)) {
+        seen.add(line);
+        out.push({ range: new monaco.Range(line, 1, line, 1), options: { glyphMarginClassName: cls } });
+      }
+      if (s.children?.length) walk(s.children);
+    }
+  };
+  walk(symbols);
+  return out;
+}
+
 interface Props {
   projectId: string | null;
   file: string | null;
@@ -169,6 +223,11 @@ interface Props {
   onFlow?: (file: string, line: number, col: number) => void;
   /** FR-0011：右键「在终端中运行」（整文件跑，不需要行列）。 */
   onRun?: (file: string) => void;
+  /**
+   * 7（2026-10-15 用户要求）：当前文件的符号表（行号槽图标的数据源）。
+   * 由 App 从 store 传入 —— 与大纲面板同源，不在这里重新拉。
+   */
+  symbols?: SymbolInfo[];
   /**
    * G7.5：历史版本（只读快照）所在的提交。存在时本窗格用 `wcr-history://` 建 model，
    * 并且不参与真实文件的一切：不拉着色 / agent 行 / 摘要 / 密度条，
@@ -210,6 +269,7 @@ export function Editor({
   onExplain,
   onFlow,
   onRun,
+  symbols,
   historyRev,
   blame,
   editable = false,
@@ -257,6 +317,8 @@ export function Editor({
   const positionTimerRef = useRef<number | null>(null);
   /** 密度条距编辑器右缘的像素：minimap + 纵向滚动条宽度。 */
   const [densityInset, setDensityInset] = useState(0);
+  /** 7：当前 model 的总行数（gutter 图标按它裁剪）。 */
+  const [rowCount, setRowCount] = useState(0);
   /** P24：主题与字号来自 wcr:prefs（单一真相）；Monaco 主题全局生效，两个窗格一起切。 */
   const prefs = usePrefs();
 
@@ -303,8 +365,11 @@ export function Editor({
       fixedOverflowWidgets: true,
       occurrencesHighlight: 'off',
       selectionHighlight: false,
+      // 7（2026-10-15 用户要求）：给类 / 方法等定义行留出图标槽（gutter）
+      glyphMargin: true,
     });
     editorRef.current = editor;
+    setRowCount(editor.getModel()?.getLineCount() ?? 0);
     // 悬停卡片里的「引用 N 处」需要拿到编辑器实例才能触发 Monaco 内置引用查找
     setProviderContext({ getEditor: () => editorRef.current });
     // N22：上报「光标 + 滚动位置」，只在用户操作后防抖写入本机存储
@@ -333,6 +398,8 @@ export function Editor({
     const subs = [
       // FR-0008：正文变化上报（App 负责 1 s 防抖落盘）；历史快照不上报
       editor.onDidChangeModelContent(() => {
+        // 7：行数变了（增删行）gutter 图标跟着重算
+        setRowCount(editor.getModel()?.getLineCount() ?? 0);
         if (historicalRef.current) return;
         onChangeRef.current?.(editor.getValue());
       }),
@@ -353,6 +420,8 @@ export function Editor({
       editor.onDidScrollChange(() => {
         reportPosition();
       }),
+      // 7：行数变化（换 model 也会触发）—— gutter 图标要跟着重算
+      editor.onDidChangeModel(() => setRowCount(editor.getModel()?.getLineCount() ?? 0)),
       // 在编辑器里点一下也进导航历史：位置本身就是一个可回退的点（App 侧压栈）。
       // 只认文本区左键——滚动条 / 行号槽 / 浮层部件 / 右键 / Ctrl+Click（跳转）| Alt+Click（多光标）都不算。
       editor.onMouseUp((e) => {
@@ -468,6 +537,7 @@ export function Editor({
       decorationPool.clear();
       agentLinePool.clear();
       blamePool.clear();
+      glyphPool.clear();
     };
   }, []);
 
@@ -563,6 +633,18 @@ export function Editor({
     const next = blame && !historical ? toBlameDecorations(model, blame) : [];
     blamePool.set(model, model.deltaDecorations(previous, next));
   }, [blame, historical, file]);
+
+  // 7（2026-10-15 用户要求）：类 / 方法等定义行前画一个 gutter 图标（参考 IDEA）。
+  // 只画「真实文件」：历史版本窗格不画（它的符号表不属于当前文件），
+  // 分屏第二窗格没有 symbols prop 也不画。
+  useEffect(() => {
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model || historical) return;
+    const next = toGlyphDecorations(symbols ?? [], model.getLineCount());
+    const previous = glyphPool.get(model) ?? [];
+    glyphPool.set(model, model.deltaDecorations(previous, next));
+  }, [symbols, historical, file, rowCount]);
 
   useEffect(() => {
     const editor = editorRef.current;

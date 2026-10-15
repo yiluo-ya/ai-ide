@@ -1,5 +1,8 @@
 /** 行密度概览条（02-lens §3.4 / L10）：贴 minimap 左缘，把整文件压成一条可扫的带子。
- *  只统计每段的代码 / 注释 / 空白行占比，与 01 地图的「符号密度（每文件定义数）」不是一个概念。 */
+ *  只统计每段的代码 / 注释 / 空白行占比，与 01 地图的「符号密度（每文件定义数）」不是一个概念。
+ *
+ * 2026-10-15（需求 7）：这条带子就是「用来快速导航的那根树条」—— 段落改为两种颜色相间，
+ * 相邻段一眼分得开；段落性质（代码 / 注释 / 空壳）改挂在 hover 提示里，不再用三种颜色表达。 */
 import { useEffect, useState } from 'react';
 import type { DensitySegment, FileDensity } from './api';
 import { api } from './api';
@@ -17,7 +20,7 @@ interface Props {
 }
 
 /**
- * 三档配色口径（只回答「这一段是什么」，不评价好坏）：
+ * 三档口径（只回答「这一段是什么」，不评价好坏），现在只用于 hover 提示：
  * - 注释堆 comment：注释占比 ≥ 0.45 且不低于代码占比；
  * - 空壳 blank：空白占比 ≥ 0.45 且不低于代码占比（声明多、实现少的段空白必然多）；
  * - 代码密 code：其余情况，含三项都低时的兜底。
@@ -28,10 +31,12 @@ function tierOf(seg: DensitySegment): 'code' | 'comment' | 'blank' {
   return 'code';
 }
 
-/** tooltip：段起止行 + 主要符号名（没有符号就只给行区间）。 */
+/** tooltip：段起止行 + 段落性质 + 主要符号名（没有符号就只给行区间与性质）。 */
 function segTitle(seg: DensitySegment): string {
   const range = translate('density.lineRange', { start: seg.startLine, end: seg.endLine });
-  return seg.symbols.length ? `${range} · ${seg.symbols.join('、')}` : range;
+  const tier = translate(`density.tier.${tierOf(seg)}`);
+  const head = `${range} · ${tier}`;
+  return seg.symbols.length ? `${head} · ${seg.symbols.join('、')}` : head;
 }
 
 export function FileDensityBar({ projectId, file, highlightsToken, rightInset, onJump }: Props) {
@@ -75,10 +80,10 @@ export function FileDensityBar({ projectId, file, highlightsToken, rightInset, o
       </button>
       {!collapsed && segments.length > 0 && (
         <div className="density-track">
-          {segments.map((seg) => (
+          {segments.map((seg, i) => (
             <div
               key={seg.startLine}
-              className={`density-seg density-${tierOf(seg)}`}
+              className={`density-seg ${i % 2 === 0 ? 'density-band-a' : 'density-band-b'}`}
               title={segTitle(seg)}
               onClick={() => onJump(seg.startLine)}
             />

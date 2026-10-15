@@ -647,7 +647,10 @@ export const en: Record<string, string> = {
   'overview.depGraph': 'Dependency graph',
   'density.lineRange': 'Lines {start}-{end}',
   'density.barTitle':
-    'Line density (code / comment / blank share): hover for line ranges and key symbols, click to jump to the segment start',
+    'Line density (quick navigation): alternate colors tell segments apart; hover for line ranges and key symbols; click to jump to the segment start',
+  'density.tier.code': 'code',
+  'density.tier.comment': 'comment-heavy',
+  'density.tier.blank': 'blank-heavy',
   'density.expand': 'Expand line density',
   'density.collapse': 'Collapse line density',
 
