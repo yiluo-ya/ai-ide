@@ -205,72 +205,96 @@
   text-decoration: underline;
 }
 
-/* ---------------------------------------------------------------- 编辑器摘要条 */
+/* ---------------------------------------------------------------- 编辑器摘要（2 / 2026-10-15）
 
-/* Monaco 的 .editor-host 默认是 absolute inset:0（styles.css）；
-   有摘要条时把 pane 改成纵向 flex：摘要条占位、编辑器占剩余高度。
-   没有摘要条（文件不在索引内）时 :has 不匹配，布局完全保持原样。 */
-.pane:has(> .summary-bar) {
-  display: flex;
-  flex-direction: column;
-}
-
-.pane:has(> .summary-bar) > .editor-host,
-.panes.split .pane.secondary:has(> .summary-bar) > .editor-host {
-  position: relative;
-  inset: auto;
-  top: auto;
-  flex: 1;
-  min-height: 0;
-}
-
+   摘要条现在住在编辑区顶条里（原来是编辑器内顶上一行），而且只剩「摘要」两个字；
+   明细全在一个居中弹窗里，尺寸与「变更」里点 `+N` 弹出的 diff 浮层一致（用户要求）。 */
 .summary-bar {
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-2);
+  position: relative;
   flex: none;
 }
 
 .summary-toggle {
-  width: 100%;
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: none;
-  border: none;
-  padding: 4px 10px;
-  color: var(--fg);
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--chip-bg);
+  color: var(--code-ref);
   cursor: pointer;
   text-align: left;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
 }
 
 .summary-toggle:hover {
-  background: var(--hover-soft);
+  border-color: var(--accent-2);
 }
 
-.summary-caret {
-  flex: none;
-  color: var(--fg-dim);
+.summary-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-strong);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px;
+  z-index: 60;
 }
 
-.summary-title {
-  flex: none;
-  color: var(--code-ref);
+/* 与 .diff-dialog（changes.css）同尺寸：min(1100px, 96vw) × min(760px, 86vh) */
+.summary-dialog {
+  width: min(1100px, 96vw);
+  height: min(760px, 86vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  outline: none;
 }
 
-.summary-line {
+.summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.summary-head-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-head-line,
+.summary-head-rev {
   color: var(--fg-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 12（2026-10-15）：弹窗头部的过滤框（按符号名 / 文件路径过滤两处列表） */
+.summary-filter {
+  flex: none;
+  width: 200px;
+  padding: 2px 8px;
+  font-size: var(--fs-sm);
+}
+
 .summary-body {
-  padding: 6px 10px 10px;
+  flex: 1;
+  min-height: 0;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: 40vh;
+  gap: 10px;
   overflow: auto;
 }
 
@@ -419,18 +443,6 @@
 .tree-menu button:disabled:hover {
   background: none;
 }
-
-.summary-bar {
-  position: relative;
-}
-
-.summary-rev {
-  margin-left: auto;
-  color: var(--fg-dim);
-  white-space: nowrap;
-}
-
-
 
 /* ---------------------------------------------------------------- 结构性解释面板（W4 / G5） */
 

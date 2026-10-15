@@ -37,6 +37,7 @@ import { SIDEBAR_MAX, SIDEBAR_MIN, loadPrefs, savePrefs } from './prefs';
 import { eventToGesture, resolveAction, sidePanelModifier } from './keymap';
 import { monaco, setProviderContext } from './monaco-setup';
 import { listenPopState, showFlash, showToast, useStore } from './state';
+import { SummaryBar } from './SummaryBar';
 import { Dialog } from './Dialog';
 import { initHostBridge } from './bridge';
 import { useMapStore } from './mapState';
@@ -1121,6 +1122,16 @@ export default function App() {
               >
                 →
               </button>
+              {/* 2（2026-10-15 用户要求）：文件摘要条从编辑区里搬进顶条，放在原来「分享 ▾」的位置。
+                  分享下拉已去掉（13），← → 导航留在原处（同日晚用户要求）。 */}
+              {!showMap && (
+                <SummaryBar
+                  projectId={store.projectId}
+                  file={store.openFile}
+                  onOpenFile={jump}
+                  onOpenHistory={openHistoryVersion}
+                />
+              )}
             </div>
           </div>
 
@@ -1212,9 +1223,7 @@ export default function App() {
                     onCopyLocation={copyLocation}
                     onCopySnippet={copySnippet}
                     onOpenAside={(file, line, col) => void useStore.getState().openInSecondary(file, line, col)}
-                    onOpenFile={jump}
                     blame={blameOn ? blame?.lines ?? null : null}
-                    onOpenHistory={openHistoryVersion}
                     onExplain={openExplain}
                     onFlow={openFlow}
                     onRun={runFileInTerminal}
@@ -1256,7 +1265,6 @@ export default function App() {
                       }
                       onCopyLocation={copyLocation}
                       onCopySnippet={copySnippet}
-                      onOpenFile={jump}
                       historyRev={secondaryDoc.rev}
                     />
                   </div>

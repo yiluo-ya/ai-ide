@@ -4,7 +4,6 @@ import type { RevealRequest } from './state';
 import { api } from './api';
 import { mapApi } from './mapApi';
 import { FileDensityBar } from './FileDensityBar';
-import { SummaryBar } from './SummaryBar';
 import { shortAuthor } from './blame';
 import { translate } from './i18n';
 import { loadPrefs, resolvedTheme, usePrefs } from './prefs';
@@ -170,8 +169,6 @@ interface Props {
   onFlow?: (file: string, line: number, col: number) => void;
   /** FR-0011：右键「在终端中运行」（整文件跑，不需要行列）。 */
   onRun?: (file: string) => void;
-  /** G6.1：摘要条里点导出符号 / 引用文件时打开（缺省则不跳）。 */
-  onOpenFile?: (file: string, line?: number, col?: number) => void;
   /**
    * G7.5：历史版本（只读快照）所在的提交。存在时本窗格用 `wcr-history://` 建 model，
    * 并且不参与真实文件的一切：不拉着色 / agent 行 / 摘要 / 密度条，
@@ -180,8 +177,6 @@ interface Props {
   historyRev?: string;
   /** G7.3：整文件 blame 数据（null / 缺省 = 不显示行尾作者）。 */
   blame?: BlameLine[] | null;
-  /** G7.5：从摘要条的提交历史里点某一次提交（App 负责取正文并在第二窗格打开）。 */
-  onOpenHistory?: (file: string, rev: string) => void;
   /**
    * FR-0008（2026-10-10）：本窗格可编辑。缺省 false —— 分屏第二窗格与历史快照保持只读。
    */
@@ -215,10 +210,8 @@ export function Editor({
   onExplain,
   onFlow,
   onRun,
-  onOpenFile,
   historyRev,
   blame,
-  onOpenHistory,
   editable = false,
   onChange,
   contentToken = 0,
@@ -604,11 +597,8 @@ export function Editor({
 
   return (
     <>
-      {/* G6.1：顶部可折叠的文件摘要条（拿不到摘要时整条不渲染）；G7.4：展开区列提交历史。
-          G7.5：历史版本窗格不显示摘要 / 密度条 —— 它们都属于「真实文件」。 */}
-      {!historical && (
-        <SummaryBar projectId={projectId} file={file} onOpenFile={onOpenFile} onOpenHistory={onOpenHistory} />
-      )}
+      {/* G6.1 的文件摘要条已搬到编辑区顶条（2，2026-10-15 用户要求），不再占编辑区一行。
+          G7.5：历史版本窗格不显示密度条 —— 它属于「真实文件」。 */}
       <div className="editor-host" ref={hostRef} />
       {!historical && file && projectId && (
         <FileDensityBar
