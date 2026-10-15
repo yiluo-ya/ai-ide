@@ -479,6 +479,22 @@
   margin-top: 12px;
 }
 
+/* pi 同步状态行（FR-0013）：目录 / 手动重推 / 结果 */
+.ms-sync {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.ms-sync .ms-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+
 .ms-presets-label {
   color: var(--fg-dim);
   font-size: var(--fs-xs);

@@ -109,7 +109,8 @@ export function AgentSessions({
                 {BACKEND_LABEL[s.backend] ? t(BACKEND_LABEL[s.backend]) : s.backend} ·{' '}
                 {t('agent.messageCount', { n: s.messageCount })}
                 {s.isStreaming ? ` · ${t('agent.running')}` : ''}
-                {s.alive ? '' : ` · ${t('agent.stopped')}`}
+                {!s.alive ? ` · ${t('agent.stopped')}` : ''}
+                {s.loaded === false ? ` · ${t('agent.archived')}` : ''}
               </span>
             </button>
             <button className="ag-session-x" title={t('agent.deleteSession')} onClick={() => void remove(s.id)}>

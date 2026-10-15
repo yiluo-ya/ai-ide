@@ -1075,6 +1075,8 @@ export const en: Record<string, string> = {
   'agent.sessionModelAria': 'Which model this session uses',
   'agent.backToReadingHint': 'Back to code reading (or click "Back to code" in the left panel)',
   'agent.gotIt': 'Got it',
+  'agent.installInTerminal': 'Install in terminal',
+  'agent.archived': 'archived',
   'agent.projectNoSessions': 'No sessions for this project yet',
   'agent.emptyLead':
     'The agent reads, edits, and writes code in the working directory; "where is it defined / who calls it" uses this reader\'s own index, not grep guesswork. Pick a model in the left panel, then click "New session".',
@@ -1150,7 +1152,7 @@ export const en: Record<string, string> = {
   'notice.dismiss': 'Got it',
   'model.title': 'Model (for the built-in code agent)',
   'model.intro':
-    'Applies only to the code agent inside this reader; pi keeps its own credentials file and is not affected.',
+    'Used by the built-in code agent; saving also mirrors it into pi (idempotent, see “pi sync” below).',
   'model.savedTo': ' Saved to {path}.',
   'model.defaultHint': 'Click a model name to make it the default (new sessions use it).',
   'model.missingKey': 'no key',
@@ -1177,6 +1179,15 @@ export const en: Record<string, string> = {
   'model.test': 'Test connection',
   'model.testing': 'Testing…',
   'model.testHint': 'Test before saving: it uses the values above, no need to save first.',
+  'model.piSync': 'pi sync',
+  'model.piSyncNow': 'Sync to pi',
+  'model.piSyncing': 'Syncing…',
+  'model.piSyncHint':
+    'Saving or removing a provider also mirrors it into pi’s ~/.pi/agent (idempotent); you can re-push it here.',
+  'model.piSyncOk': 'Synced {n} provider(s) ({dir})',
+  'model.piSyncUnchanged': 'Already up to date ({n} provider(s))',
+  'model.piSyncFailed': 'Sync failed: {error}',
+  'model.piSyncNoPi': 'pi not found: install it first via “Install in terminal” in Code Agent',
   'topbar.shortcutGotoDef': 'Go to definition (also Ctrl/Cmd+Click and the context menu)',
   'topbar.shortcutFindRefs': 'Find references',
   'topbar.shortcutFileSearch': 'File search',

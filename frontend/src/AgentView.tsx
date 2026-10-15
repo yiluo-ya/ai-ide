@@ -101,10 +101,13 @@ export function AgentView({
   projectId,
   projectName,
   onBack,
+  onInstallPi,
 }: {
   projectId: string;
   projectName: string;
   onBack: () => void;
+  /** FR-0013：错误里带了安装命令时，把「在终端安装」接进来（只填入，不回车）。 */
+  onInstallPi?: (command: string) => void;
 }) {
   const { t } = useI18n();
   const sessions = useAgent((s) => s.sessions);
@@ -126,6 +129,8 @@ export function AgentView({
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
   const hasSession = sessions.some((s) => s.projectId === projectId);
+  /** 还没装 pi：横幅里多一个「在终端安装」（在「知道了」左边）。 */
+  const installCommand = error?.installCommand;
 
   const options = useMemo(
     () =>
@@ -237,7 +242,12 @@ export function AgentView({
 
       {error && (
         <div className="ag-banner bad">
-          <span>{error}</span>
+          <span>{error.message}</span>
+          {installCommand && onInstallPi && (
+            <button className="btn ghost small" onClick={() => onInstallPi(installCommand)}>
+              {t('agent.installInTerminal')}
+            </button>
+          )}
           <button className="btn ghost small" onClick={() => setError(null)}>
             {t('agent.gotIt')}
           </button>

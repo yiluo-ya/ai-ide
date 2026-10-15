@@ -138,7 +138,7 @@ export default function App() {
     setActiveView(side, id);
     if (side === 'left') setSidebarOpen(true);
     else setChangesDockOpen(true);
-    if (id === 'agent' && store.projectId) setMainView('agent');
+    if (id === 'agent' && store.projectId) showAgent();
   };
   const [quick, setQuick] = useState<QuickOpenMode>(null);
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
@@ -280,6 +280,26 @@ export default function App() {
   const [bottomHeight, setBottomHeight] = useState(220);
 
   /**
+   * 2026-10-15 用户要求：进 Code Agent 时把底部面板收拢，回到代码时**还原进来前的样子**。
+   * 只在「在 Agent 里没自己动过底部面板」时还原 —— 用户为装 pi 特意开了终端，别抢他的状态。
+   */
+  const codeBottomRef = useRef<{ open: boolean; tab: BottomTab } | null>(null);
+  const showAgent = useCallback(() => {
+    codeBottomRef.current = { open: bottomOpen, tab: bottomTab };
+    setBottomOpen(false);
+    setMainView('agent');
+  }, [bottomOpen, bottomTab]);
+  const backToCode = useCallback(() => {
+    const saved = codeBottomRef.current;
+    codeBottomRef.current = null;
+    setMainView('auto');
+    if (saved && !bottomOpen) {
+      setBottomTab(saved.tab);
+      setBottomOpen(saved.open);
+    }
+  }, [bottomOpen]);
+
+  /**
    * FR-0011「在终端中运行」：token 自增的一次运行请求，交给 TerminalPanel 写进激活终端。
    * pythonEnvRef 缓存后端探测结果（每项目探一次）；prefs.pythonPath 非空时优先、不探测。
    */
@@ -367,6 +387,20 @@ export default function App() {
       }
       setRunRequest({ token: ++runTokenRef.current, file, pythonPath });
     })();
+  }, []);
+
+  /**
+   * FR-0013：把一条命令**填进**终端（不回车）。跟 runFileInTerminal 同一条通道，
+   * 差别只在 submit=false —— 安装在系统里落东西的命令，要用户自己看一眼再按回车。
+   */
+  const installPiInTerminal = useCallback((command: string) => {
+    if (!LOCAL_HOSTNAMES.has(window.location.hostname)) {
+      showFlash(translate('run.shareMode'));
+      return;
+    }
+    setBottomTab('terminal');
+    setBottomOpen(true);
+    setRunRequest({ token: ++runTokenRef.current, command, submit: false });
   }, []);
   /** W3 / G7.3：整文件 blame 视图开关 + 当前文件的 blame（按文件缓存，光标移动不重新拉）。 */
   const [blameOn, setBlameOn] = useState(false);
@@ -617,7 +651,7 @@ export default function App() {
           const last = useGuideStore.getState().readstate;
           if (last) {
             e.preventDefault();
-            setMainView('auto');
+            backToCode();
             void useStore.getState().openFileAt(last.file, last.line, last.col);
           }
           return;
@@ -757,7 +791,7 @@ export default function App() {
 
   /** 打开文件一律回到代码视图（地图不是终点，是入口）。 */
   const jump = (file: string, line?: number, col?: number, endLine?: number, endCol?: number) => {
-    setMainView('auto');
+    backToCode();
     void useStore.getState().openFileAt(file, line, col, endLine, endCol);
   };
 
@@ -1026,8 +1060,8 @@ export default function App() {
         return store.projectId ? (
           <AgentSessions
             projectId={store.projectId}
-            onBack={() => setMainView('auto')}
-            onOpen={() => setMainView('agent')}
+            onBack={backToCode}
+            onOpen={showAgent}
           />
         ) : (
           <div className="panel-empty">{t('app.noProject')}</div>
@@ -1183,7 +1217,8 @@ export default function App() {
             <AgentView
               projectId={store.projectId ?? ''}
               projectName={store.project?.name ?? store.projectId ?? ''}
-              onBack={() => setMainView('auto')}
+              onBack={backToCode}
+              onInstallPi={installPiInTerminal}
             />
           ) : (
             <>

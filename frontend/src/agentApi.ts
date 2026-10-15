@@ -50,7 +50,26 @@ export interface AgentSessionSummary {
   isStreaming: boolean;
   messageCount: number;
   model: { id?: string; name?: string; provider?: string } | null;
+  /** 适配器已在本进程里（false = 只在磁盘上，点开才续传；FR-0013）。 */
+  loaded?: boolean;
   lastError?: string;
+}
+
+/** 「模型」配置同步到 pi 的结果（FR-0013）。 */
+export interface PiSyncOutcomePublic {
+  ok: boolean;
+  dir: string;
+  synced: string[];
+  removed: string[];
+  changed: boolean;
+  error?: string;
+}
+
+export interface PiSyncStatusPublic {
+  dir: string;
+  installed: boolean;
+  keys: string[];
+  last: PiSyncOutcomePublic | null;
 }
 
 export interface AgentContentBlock {
@@ -126,6 +145,20 @@ export const agentApi = {
     }),
 
   sessions: () => request<{ sessions: AgentSessionSummary[] }>('/agent/sessions').then((r) => r.sessions),
+
+  /** 续传（FR-0013）：重启后的会话先拉起来再取消息；幂等，选中时总能调。 */
+  resumeSession: (id: string) =>
+    request<{ session: AgentSessionSummary }>(`/agent/sessions/${id}/resume`, { method: 'POST' }).then(
+      (r) => r.session,
+    ),
+
+  /** 模型配置同步到 pi：状态（状态行）与手动重推（幂等）。 */
+  piSyncStatus: () => request<PiSyncStatusPublic>('/agent/model-config/pi-sync'),
+
+  syncModelsToPi: () =>
+    request<PiSyncOutcomePublic & { status: Omit<PiSyncStatusPublic, 'last'> }>('/agent/model-config/sync-pi', {
+      method: 'POST',
+    }),
 
   createSession: (input: { projectId: string; name?: string; backend?: BackendKind; provider?: string; modelId?: string }) =>
     request<{ session: AgentSessionSummary }>('/agent/sessions', {

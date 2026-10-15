@@ -14,6 +14,7 @@ import {
   type ApiType,
   type ModelConfigPublic,
   type ModelProviderPublic,
+  type PiSyncStatusPublic,
   type ProbeResultPublic,
 } from './agentApi';
 import { useI18n } from './i18n';
@@ -63,12 +64,23 @@ export function ModelSettings() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResults, setTestResults] = useState<ProbeResultPublic[] | null>(null);
+  /** FR-0013：pi 同步状态（目录 / 装没装 / 上次结果）。 */
+  const [piSync, setPiSync] = useState<PiSyncStatusPublic | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const refreshPiSync = () => {
+    agentApi
+      .piSyncStatus()
+      .then(setPiSync)
+      .catch(() => setPiSync(null));
+  };
 
   useEffect(() => {
     agentApi
       .modelConfig()
       .then(setConfig)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    refreshPiSync();
   }, []);
 
   const reset = () => {
@@ -121,6 +133,7 @@ export function ModelSettings() {
       setConfig(res.config);
       setNote(editing ? t('model.updated') : t('model.added'));
       reset();
+      refreshPiSync(); // 保存会顺带同步到 pi（FR-0013）
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -155,10 +168,43 @@ export function ModelSettings() {
       const res = await agentApi.removeProvider(id);
       setConfig(res.config);
       if (editing === id) reset();
+      refreshPiSync();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   };
+
+  /** 手动重推一次（幂等；装上 pi 之后点一下就行）。 */
+  const syncToPi = async () => {
+    setSyncing(true);
+    setError(null);
+    setNote(null);
+    try {
+      const res = await agentApi.syncModelsToPi();
+      setPiSync({ ...res.status, last: res });
+      if (!res.ok) setError(res.error ?? t('model.piSyncFailed', { error: '' }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  /** 状态行文案：上次结果优先，没有结果就看 pi 在不在。 */
+  const piSyncText = (() => {
+    const last = piSync?.last;
+    if (last && !last.ok) return { text: t('model.piSyncFailed', { error: last.error ?? '' }), bad: true };
+    if (last) {
+      const n = String(last.synced.length);
+      const dir = piSync?.dir ?? '';
+      return {
+        text: last.changed ? t('model.piSyncOk', { n, dir }) : t('model.piSyncUnchanged', { n }),
+        bad: false,
+      };
+    }
+    if (piSync && !piSync.installed) return { text: t('model.piSyncNoPi'), bad: true };
+    return { text: t('model.piSyncHint'), bad: false };
+  })();
 
   const setDefault = async (provider: string, modelId: string) => {
     try {
@@ -182,6 +228,17 @@ export function ModelSettings() {
       </p>
 
       {error && <div className="ms-error">{error}</div>}
+
+      <div className="ms-sync">
+        <span className="ms-presets-label">{t('model.piSync')}</span>
+        <span className="ms-hint" title={piSync?.dir ?? ''}>
+          {piSync?.dir ?? ''}
+        </span>
+        <button className="btn ghost small" disabled={syncing} onClick={() => void syncToPi()}>
+          {syncing ? t('model.piSyncing') : t('model.piSyncNow')}
+        </button>
+        <span className={piSyncText.bad ? 'ms-bad' : 'ms-hint'}>{piSyncText.text}</span>
+      </div>
 
       <ul className="ms-list">
         {(config?.providers ?? []).map((provider) => (

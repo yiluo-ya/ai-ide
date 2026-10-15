@@ -7,6 +7,7 @@
  * 与项目自身的 `state.ts` 分开：agent 是附加能力，不参与阅读器的核心状态与快照。
  */
 import { create } from 'zustand';
+import { ApiRequestError } from './api';
 import {
   agentApi,
   applyAssistantDelta,
@@ -22,6 +23,15 @@ import { translate } from './i18n';
 /** 当前会话的事件流订阅；切会话时换掉（模块级，保证只有一份）。 */
 let unsubscribe: (() => void) | null = null;
 
+/**
+ * 界面上的错误（FR-0013）：除了给人看的文案，还可能带着「怎么补救」的命令
+ * —— 没装 pi 时后端回 `installCommand`，横幅里据此多一个「在终端安装」按钮。
+ */
+export interface AgentError {
+  message: string;
+  installCommand?: string;
+}
+
 interface AgentStore {
   config: ModelConfigPublic | null;
   /** 所有项目的会话（左栏只显示当前项目的）。 */
@@ -34,7 +44,7 @@ interface AgentStore {
   toolNote: string | null;
   busy: boolean;
   loading: boolean;
-  error: string | null;
+  error: AgentError | null;
 
   init: (projectId: string) => Promise<void>;
   refreshConfig: () => Promise<void>;
@@ -45,10 +55,21 @@ interface AgentStore {
   send: (text: string) => Promise<void>;
   stop: () => Promise<void>;
   setModel: (provider: string, modelId: string) => Promise<void>;
-  setError: (error: string | null) => void;
+  setError: (error: AgentError | null) => void;
 }
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** 后端错误 → 界面错误（没装 pi 时带上可执行的安装命令）。 */
+function toError(e: unknown): AgentError {
+  if (e instanceof ApiRequestError) {
+    const body = (e.body ?? {}) as { installCommand?: unknown };
+    if (typeof body.installCommand === 'string' && body.installCommand) {
+      return { message: e.message, installCommand: body.installCommand };
+    }
+  }
+  return { message: errText(e) };
+}
 
 export const useAgent = create<AgentStore>((set, get) => ({
   config: null,
@@ -72,7 +93,7 @@ export const useAgent = create<AgentStore>((set, get) => ({
       const keep = current && mine.some((s) => s.id === current) ? current : (mine[mine.length - 1]?.id ?? null);
       await get().select(keep);
     } catch (e) {
-      set({ error: errText(e) });
+      set({ error: toError(e) });
     } finally {
       set({ loading: false });
     }
@@ -98,7 +119,7 @@ export const useAgent = create<AgentStore>((set, get) => ({
       set((s) => ({ sessions: [...s.sessions, session] }));
       await get().select(session.id);
     } catch (e) {
-      set({ error: errText(e) });
+      set({ error: toError(e) });
       throw e;
     }
   },
@@ -110,11 +131,16 @@ export const useAgent = create<AgentStore>((set, get) => ({
     if (!sessionId) return;
 
     try {
+      // FR-0013：重启后会话只在磁盘上，先把适配器拉起来（幂等）
+      const session = await agentApi.resumeSession(sessionId);
+      if (get().activeId !== sessionId) return; // 期间又切走了
+      set((s) => ({ sessions: s.sessions.map((x) => (x.id === sessionId ? session : x)) }));
       const messages = await agentApi.messages(sessionId);
       if (get().activeId !== sessionId) return; // 期间又切走了
       set({ messages });
     } catch (e) {
-      set({ error: errText(e) });
+      set({ error: toError(e) });
+      return;
     }
 
     unsubscribe = subscribeAgentEvents(sessionId, (event: AgentEvent) => {
@@ -131,7 +157,7 @@ export const useAgent = create<AgentStore>((set, get) => ({
       set({ sessions: rest });
       if (get().activeId === sessionId) await get().select(rest[rest.length - 1]?.id ?? null);
     } catch (e) {
-      set({ error: errText(e) });
+      set({ error: toError(e) });
     }
   },
 
@@ -142,7 +168,7 @@ export const useAgent = create<AgentStore>((set, get) => ({
     try {
       await agentApi.prompt(id, text);
     } catch (e) {
-      set({ error: errText(e) });
+      set({ error: toError(e) });
     }
   },
 
@@ -152,7 +178,7 @@ export const useAgent = create<AgentStore>((set, get) => ({
     try {
       await agentApi.abort(id);
     } catch (e) {
-      set({ error: errText(e) });
+      set({ error: toError(e) });
     }
   },
 
@@ -163,7 +189,7 @@ export const useAgent = create<AgentStore>((set, get) => ({
       const res = await agentApi.setSessionModel(id, provider, modelId);
       set((s) => ({ sessions: s.sessions.map((x) => (x.id === id ? res.session : x)) }));
     } catch (e) {
-      set({ error: errText(e) });
+      set({ error: toError(e) });
     }
   },
 

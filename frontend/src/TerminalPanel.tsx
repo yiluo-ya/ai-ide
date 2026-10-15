@@ -39,7 +39,7 @@ interface Pane {
   failed: boolean;
   /** 后端回传过 title（shell 已 spawn 完成）；此前写入会被后端丢弃，见 pending。 */
   ready: boolean;
-  /** FR-0011：待写入的运行命令（shell 就绪前挂起，收到 title 后补发）。 */
+  /** FR-0011：待写入的数据（已含末尾是否回车的口径，shell 就绪后原样发出）。 */
   pending?: string;
 }
 
@@ -134,24 +134,27 @@ function destroyPane(pane: Pane): void {
  * FR-0011：把一行命令写进 pane 的 shell（末尾补 \r 触发执行，对应 VS Code sendText 的
  * shouldExecute=true）。shell 还没 spawn 完（pane.ready=false）就挂起 —— 后端在 spawn 之前
  * 会丢弃 input（backend/src/api/terminal.ts 的 `if (!session.pty) return`）。
+ *
+ * FR-0013：`submit=false` 时只填入不回车（安装 pi 的命令要用户自己确认后再跑）。
  */
-function sendToPane(pane: Pane, command: string): void {
+function sendToPane(pane: Pane, command: string, submit = true): void {
   if (pane.exited || pane.failed) return;
+  const data = submit ? `${command}\r` : command;
   if (pane.ready && pane.ws?.readyState === WebSocket.OPEN) {
-    pane.ws.send(JSON.stringify({ type: 'input', data: `${command}\r` }));
+    pane.ws.send(JSON.stringify({ type: 'input', data }));
     pane.term.focus();
   } else {
-    pane.pending = command;
+    pane.pending = data;
   }
 }
 
-/** shell 就绪（收到 title）后补发挂起的命令。 */
+/** shell 就绪（收到 title）后补发挂起的数据（内容已含回车口径，原样发出）。 */
 function flushPending(ws: WebSocket, pane: Pane): void {
-  const command = pane.pending;
-  if (!command) return;
+  const data = pane.pending;
+  if (!data) return;
   pane.pending = undefined;
   if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'input', data: `${command}\r` }));
+    ws.send(JSON.stringify({ type: 'input', data }));
     pane.term.focus();
   }
 }
@@ -322,14 +325,25 @@ function TabPanels({
   );
 }
 
-/** FR-0011：一次「在终端中运行」请求（token 自增；展开面板由 App 负责）。 */
+/** FR-0011：一次「在终端中写入一行」请求（token 自增；展开面板由 App 负责）。 */
 export interface RunRequest {
-  /** 每次运行自增：token 变了才算一次新请求（effect 重跑不会重复执行）。 */
+  /** 每次请求自增：token 变了才算一次新请求（effect 重跑不会重复执行）。 */
   token: number;
+  /** 直接给一整行命令（FR-0013「在终端安装」）；给了它就不看 file / pythonPath。 */
+  command?: string;
   /** 目标文件（项目相对路径，正斜杠）。 */
-  file: string;
+  file?: string;
   /** Python 解释器绝对路径（prefs 指定或后端探测）；空 = PATH 上的 python。 */
   pythonPath?: string | null;
+  /** 写入后是否立刻回车执行（默认 true；安装类命令只填入，由用户自己按回车）。 */
+  submit?: boolean;
+}
+
+/** 请求 → 要写进终端的整行命令（识别不出语言 / 没给目标时返回 null）。 */
+function commandOf(request: RunRequest, pane: Pane): string | null {
+  if (request.command) return request.command;
+  if (!request.file) return null;
+  return buildRunCommand({ file: request.file, shellKind: pane.shellKind, pythonPath: request.pythonPath });
 }
 
 /** 底部终端面板：多标签 + 工具栏。所有标签常驻 DOM，非激活的隐藏。 */
@@ -422,28 +436,20 @@ export function TerminalPanel({ projectId, runRequest }: { projectId: string | n
     const tab = tabsRef.current.find((tb) => tb.id === activeTabRef.current) ?? tabsRef.current[0];
     const pane = tab?.panes[0];
     if (!pane) return; // 没有标签：交给下面的 auto-open effect
-    const command = buildRunCommand({
-      file: runRequest.file,
-      shellKind: pane.shellKind,
-      pythonPath: runRequest.pythonPath,
-    });
+    const command = commandOf(runRequest, pane);
     if (!command) return; // 未识别语言（界面本已置灰，这里兜底）
     consumedTokenRef.current = runRequest.token;
-    sendToPane(pane, command);
+    sendToPane(pane, command, runRequest.submit !== false);
   }, [runRequest, projectId]);
 
-  // 首次进入（有项目）自动开一个标签；若此刻带着运行请求，命令挂到新 pane 上等 shell 就绪
+  // 首次进入（有项目）自动开一个标签；若此刻带着写入请求，命令挂到新 pane 上等 shell 就绪
   useEffect(() => {
     if (!projectId || tabs.length > 0) return;
     const pane = makePane(defaultShell);
     if (runRequest && runRequest.token > consumedTokenRef.current) {
-      const command = buildRunCommand({
-        file: runRequest.file,
-        shellKind: pane.shellKind,
-        pythonPath: runRequest.pythonPath,
-      });
+      const command = commandOf(runRequest, pane);
       if (command) {
-        pane.pending = command;
+        pane.pending = runRequest.submit === false ? command : `${command}\r`;
         consumedTokenRef.current = runRequest.token;
       }
     }
