@@ -26,7 +26,7 @@ assistance.)
 |---|---|
 | **Top bar** | Project dropdown, Add project (type a path or pick from a folder dialog), Reindex, Remove, project root, indexing progress, Copy file link, Model, Settings, `?` (shortcuts & highlight legend) |
 | **Left panel** (4 permanent tabs, drag-resizable 240–560) | Files / Outline / Search / Code sessions |
-| **Main area** (three states) | Code · Project map · Agent; the code top bar holds tabs on the left (max 8) and “← → · Share ▾” on the right; the project-map toggle sits in the bottom-right rail, above the layout toggles |
+| **Main area** (three states) | Code · Project map · Agent; the code top bar holds tabs on the left (max 8) and “▶ · ← → · Summary” on the right (Summary opens a centered dialog); the project-map toggle sits in the bottom-right rail, above the layout toggles; the breadcrumb of the current file lives at the far left of the bottom status bar |
 | **Right dock** (permanent, expanded by default, drag-resizable 220–560, collapsible) | Changes / Commands / Overview |
 | **Bottom panel** (Output / Terminal, collapsible, drag-resizable) | Output = command run history; Terminal = a persistent interactive shell (local only). Right-click a file in the tree or press `Ctrl+F5` to infer a language-appropriate command and run it in the terminal (“Run in Terminal”, no debug) |
 
@@ -120,8 +120,8 @@ volume holding only the project list, index snapshots and command plans.
 ### Sharing on the same machine / LAN
 
 By default the server only binds `127.0.0.1` (local access only). To let a colleague on the same
-machine or LAN read too, restart with `HOST=0.0.0.0 npm start` — the startup log and “Share with a
-colleague” will show a reachable address (`http://<host-ip>:8787/?project=<id>`); tighten origins
+machine or LAN read too, restart with `HOST=0.0.0.0 npm start` — the startup log prints the reachable
+address (`http://<host-ip>:8787/?project=<id>`); tighten origins
 with `READER_CORS_ORIGIN=https://host-a,https://host-b` when needed. In share mode, command
 execution, directory browsing, git writes and restarting / stopping the reader itself are all
 disabled at the endpoint level (403).

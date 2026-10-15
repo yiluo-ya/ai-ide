@@ -37,7 +37,6 @@ import { SIDEBAR_MAX, SIDEBAR_MIN, loadPrefs, savePrefs } from './prefs';
 import { eventToGesture, resolveAction, sidePanelModifier } from './keymap';
 import { monaco, setProviderContext } from './monaco-setup';
 import { listenPopState, showFlash, showToast, useStore } from './state';
-import { ShareMenu } from './ShareMenu';
 import { Dialog } from './Dialog';
 import { initHostBridge } from './bridge';
 import { useMapStore } from './mapState';
@@ -1122,8 +1121,6 @@ export default function App() {
               >
                 →
               </button>
-              {/* 05 信使：分享 / 导出 / 批注 / 给 agent 用（一个下拉收口） */}
-              <ShareMenu cursor={cursor} searchQuery={searchQuery} />
             </div>
           </div>
 

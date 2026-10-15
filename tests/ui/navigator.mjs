@@ -301,40 +301,28 @@ async function main() {
     return `${where} + 围栏 ts`;
   });
 
-  await step('S1：分享菜单复制带行号的深链', async () => {
+  await step('S1：分享入口已去掉，摘要条住进编辑区顶条（2026-10-15 需求 13 / 2）', async () => {
     await openFile('util.ts');
-    await gotoLine(12);
-    await page.locator('button', { hasText: '分享' }).first().click();
-    await page.waitForSelector('.share-menu');
-    await page.locator('.share-item', { hasText: '复制分享链接' }).first().click();
-    await page.waitForTimeout(500);
-    const clip = await readClipboard();
-    assert(/\?project=[^&]+&file=src%2Futil\.ts&line=12/.test(clip), `深链没带行号：${clip}`);
-    await page.keyboard.press('Escape');
-    await page.mouse.click(8, 500);
-    await page.waitForTimeout(300);
-    return clip.slice(0, 90);
+    await page.waitForTimeout(400);
+    const menus = await page.locator('.editor-topbar .share-wrap, .share-menu').count();
+    assert(menus === 0, `编辑区顶条不该再有分享入口（剩 ${menus} 个）`);
+    const summary = await page.locator('.editor-topbar .summary-bar').count();
+    assert(summary === 1, `摘要条应住在编辑区顶条里（找到 ${summary} 个）`);
+    return '分享入口已移除，摘要条在顶条';
   });
 
-  await step('S4c：打印视图页眉与 @media print 规则已就绪', async () => {
-    const header = await page.locator('.wcr-print-header .wcr-print-title').first().innerText();
-    assert(header.includes('util.ts'), `打印页眉没带文件名：${header}`);
-    const onScreen = await page.evaluate(() => {
-      const el = document.querySelector('.wcr-print-header');
-      return el ? getComputedStyle(el).display : 'missing';
-    });
+  await step('S4c：@media print 规则仍随样式加载', async () => {
     const hasRule = await page.evaluate(() =>
       [...document.styleSheets].some((sheet) => {
         try {
-          return [...sheet.cssRules].some((r) => String(r.cssText).includes('wcr-printing .wcr-print-header'));
+          return [...sheet.cssRules].some((r) => String(r.cssText).includes('@media print'));
         } catch {
           return false;
         }
       }),
     );
-    assert(onScreen === 'none', `打印页眉在屏幕上不该显示：${onScreen}`);
     assert(hasRule, '打印样式（@media print）没有加载');
-    return '页眉 + @media print 规则就位';
+    return '@media print 规则就位';
   });
 
   await step('CMD：右侧栏「命令」tab 显示的是当前项目状态（不是阅读器服务）', async () => {

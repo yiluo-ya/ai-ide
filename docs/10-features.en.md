@@ -195,18 +195,22 @@ unless you enter this mode.
 
 ## Sharing and export (the courier)
 
-“Share ▾” in the main area’s top row is a single entry point, so no more buttons pile up in the toolbar:
+**2026-10-15, per the user’s request: the “Share ▾” entry point is gone** from the code top bar
+(the screenshot export and the print header went with it); the top bar now holds “← → · Summary”.
+The table below stays as the **capability list**: rows marked “kept” are still in the UI, rows marked
+“entry removed” still have their implementation — they simply have no UI entry (same disposition as the
+Guide / References panels).
 
 | What | How | What travels with it |
 |---|---|---|
-| Share a location | “Copy share link” or `Ctrl/Cmd+Alt+C` | `http://…/?project=…&file=…&line=…&col=…`, opening straight at the same line |
-| Paste a snippet | Select in the editor → right-click “Copy selection with provenance” | First line `path:line-range`, followed by a fenced code block with the language |
-| Paste an interface | ⧉ at the end of an outline row | `name (kind) path:line:col` + signature, without the whole implementation |
-| Give a colleague context | “Markdown: current file / current search results / project overview” | Outline + **numbered source** + highlight verdicts (project vs external) |
-| Paste into docs / a PR | “Screenshot PNG” or “Screenshot and copy to clipboard” | Self-drawn canvas: line-number gutter + syntax colours + the three-tier semantic palette + provenance footer |
-| Archive before review | “Print / save as PDF” | The print view keeps only code and a header (`path:line` + project name), legible in black and white |
-| Send to a colleague | “Share with a colleague” (reachable address) | A URL reachable on the same machine / LAN |
-| Hand to an agent | “For agents” | The `/api/agent/tools` manifest URL, so agents query symbols instead of guessing with grep |
+| Share a location | Editor context menu “Copy location” or `Ctrl/Cmd+Alt+C` (**kept**) | `path:line:col`; the line-numbered deep link went down with the entry point |
+| Paste a snippet | Select in the editor → right-click “Copy selection with provenance” (**kept**) | First line `path:line-range`, followed by a fenced code block with the language |
+| Paste an interface | ⧉ at the end of an outline row (**kept**) | `name (kind) path:line:col` + signature, without the whole implementation |
+| Give a colleague context | “Markdown: current file / current search results / project overview” | Outline + **numbered source** + highlight verdicts (project vs external) (entry removed) |
+| Paste into docs / a PR | “Screenshot PNG” or “Screenshot and copy to clipboard” | Self-drawn canvas: line-number gutter + syntax colours + the three-tier semantic palette + provenance footer (entry removed) |
+| Archive before review | Print straight from the browser with `Ctrl/Cmd+P` | The print styles remain (code only, no chrome); the header went down with the entry point |
+| Send to a colleague | `HOST=0.0.0.0 npm start` + reachable address | A URL reachable on the same machine / LAN (entry removed; see the startup log) |
+| Hand to an agent | `/api/agent/tools` | The manifest URL, so agents query symbols instead of guessing with grep (entry removed; the endpoint remains) |
 
 **Exports never degrade**: reports and screenshots keep the “which is a project symbol, which is an
 external dependency” verdict.
@@ -323,7 +327,8 @@ frontend/src/
   ChangesPanel.tsx / changesState.ts                       right-dock “Changes” (git)
   CommandPanel.tsx / service.css                           right-dock “Commands” (FR-0005)
   AgentView.tsx / AgentSessions.tsx / agentStore.ts / agentApi.ts   Code Agent
-  ShareMenu.tsx / share.ts / report.ts / snapshot.ts / bridge.ts    share / export / host bridge
+  ShareMenu.tsx removed (2026-10-15, share entry dropped) · share.ts / report.ts / snapshot.ts / bridge.ts
+                                                   snippet format / reports / screenshots (entry dropped, code kept) / host bridge
   SettingsPanel.tsx / ModelSettings.tsx / ModelDialog.tsx / prefs.ts   settings / model / preferences
   Dialog.tsx / Notice.tsx / Welcome.tsx / FolderBrowser.tsx            dialogs / notices / welcome / folder picker
   i18n/            zh.ts / en.ts / index.ts (Chinese & English strings)

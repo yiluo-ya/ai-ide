@@ -1,6 +1,8 @@
-/* 05 信使 Share 的样式：分享下拉 + 批注面板。单独成文件，避免与 03/06 共用 styles.css 打架。
+/* 05 信使 Share 的样式。单独成文件，避免与 03/06 共用 styles.css 打架。
    2026-10-03 统一：颜色全走变量（原来写死深色，亮色主题下会黑底白字），
-   尺寸 / 字号 / 圆角沿用 styles.css 的设计令牌。 */
+   尺寸 / 字号 / 圆角沿用 styles.css 的设计令牌。
+   2026-10-15：「分享 ▾」下拉已去掉，这套样式现在同时服务 code 会话的「导出 ▾」菜单
+   与标签右键菜单；它专属的 .share-note / .share-flash 随入口一并删除。 */
 
 .share-wrap {
   position: relative;
@@ -65,34 +67,6 @@
   color: var(--fg-dim);
   font-size: var(--fs-xs);
   line-height: 1.45;
-}
-
-.share-note {
-  margin: 0 6px 6px;
-  padding: 8px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  color: var(--fg-dim);
-  font-size: var(--fs-xs);
-  line-height: var(--lh);
-}
-
-.share-note code {
-  padding: 0 3px;
-  border-radius: var(--r-xs);
-  background: var(--bg);
-  color: var(--fg);
-  font-family: var(--mono-font);
-}
-
-.share-flash {
-  margin: 6px;
-  padding: 6px 8px;
-  border-radius: var(--r-sm);
-  background: var(--row-active);
-  color: var(--fg);
-  font-size: var(--fs-xs);
 }
 
 /* 标签右键菜单：固定定位在鼠标处，复用 share-item 的菜单项视觉。 */
