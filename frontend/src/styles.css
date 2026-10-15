@@ -1122,18 +1122,23 @@ mark {
   min-height: 0;
 }
 
-/* FR-0012：面包屑 —— 当前打开文件的路径层级（点任一段下拉该目录下的条目） */
+/* FR-0012：面包屑 —— 当前打开文件的路径层级（点任一段下拉该目录下的条目）
+   2026-10-15（需求 1）：不再是编辑区上方独立一行，而是住在底部状态栏最左；
+   它只吃自己需要的那点宽度，装不下就截断（状态栏其余项优先）。 */
 .breadcrumbs {
   position: relative;
   display: flex;
   align-items: center;
   gap: 1px;
-  padding: 2px 8px 3px;
+  min-width: 0;
   font-size: var(--fs-sm);
   color: var(--fg-dim);
-  background: var(--bg-2);
-  border-bottom: 1px solid var(--border);
   overflow: hidden;
+}
+
+.statusbar .breadcrumbs {
+  flex: 0 1 auto;
+  padding: 0;
 }
 
 .breadcrumbs .crumb {
@@ -1149,6 +1154,12 @@ mark {
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+
+/* 在状态栏里：第一段（项目名）允许被压，其余段照旧 —— 窄窗口下不至于把状态栏挤爆 */
+.statusbar .breadcrumbs .crumb.root {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .breadcrumbs .crumb:hover,
@@ -1193,6 +1204,14 @@ mark {
   border-radius: var(--r-md);
   background: var(--bg-3);
   box-shadow: var(--elev-2);
+}
+
+/* 1（2026-10-15）：面包屑在底部状态栏里，下拉往上弹（否则会被视口底边裁掉） */
+.statusbar .breadcrumbs-menu {
+  top: auto;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
 }
 
 .crumb-item {

@@ -1193,11 +1193,6 @@ export default function App() {
             </>
           )}
 
-          {/* FR-0012：面包屑 —— 当前打开文件的路径层级，点一段下拉该目录下的条目 */}
-          {!showMap && store.openFile && (
-            <Breadcrumbs file={store.openFile} tree={store.tree} onOpen={(file) => jump(file)} />
-          )}
-
           <div className="editor-wrap">
             {showMap ? (
               <Overview
@@ -1357,6 +1352,11 @@ export default function App() {
           </div>
 
           <footer className="statusbar">
+            {/* 1（2026-10-15 用户要求）：文件路径导航（面包屑）从编辑区顶部一行的位置
+                挪到底部最左边 —— 不再单占一行，也不再顶在代码上方。 */}
+            {store.openFile && (
+              <Breadcrumbs file={store.openFile} tree={store.tree} onOpen={(file) => jump(file)} />
+            )}
             {saveLabel && <span className={`save-state ${store.saveStatus}`}>{saveLabel}</span>}
             {cursorBlame && (
               <span className="blame-status" title={t('blame.title')}>
