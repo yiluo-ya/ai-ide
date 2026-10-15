@@ -554,21 +554,28 @@ textarea.text-input {
   border-color: var(--accent-2);
 }
 
+/* 小号图标按钮（文件树的工具行动作）：无边框、紧凑 */
+.icon-btn.sm {
+  width: 22px;
+  height: 22px;
+  color: var(--fg-dim);
+  border-color: transparent;
+  background: transparent;
+}
+
+/* 文件树工具行（定位 / 收拢 / 展开 三个图标）：靠右收拢成一组 */
+.tree-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
 .hint-row {
   margin-top: 6px;
   color: var(--fg-dim);
   font-size: var(--fs-sm);
   line-height: var(--lh);
-}
-
-.project-root {
-  max-width: 340px;
-  color: var(--fg-dim);
-  font-size: var(--fs-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
 }
 
 .indexing {
@@ -601,10 +608,12 @@ textarea.text-input {
   font-variant-numeric: tabular-nums;
 }
 
+/* 快捷键浮层（2026-10-15 需求 3）：入口从左下进入，浮层就锚在左下角、向右上弹出。
+   定位包含块是 .rail-tools（position: relative）。 */
 .help-popover {
   position: absolute;
-  right: 10px;
-  top: 46px;
+  left: calc(100% + 8px);
+  bottom: 0;
   width: 340px;
   padding: 12px 14px;
   background: var(--bg-3);
@@ -3469,7 +3478,11 @@ mark {
   background: var(--bg);
 }
 
+/* 与左栏 .panel-body 同语义（2026-10-15 需求 6）：flex column 容器，
+   视图（如 .ag-side）在内部才能靠 flex:1 撑满侧栏高度。 */
 .right-body {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   min-width: 0;
@@ -3582,4 +3595,128 @@ mark {
   right: 2px;
   bottom: 2px;
   height: 5px;
+}
+
+/* 全屏状态下无效的那个按钮：压暗、不可点 */
+.region-toggle:disabled,
+.region-toggle:disabled:hover {
+  opacity: 0.35;
+  background: transparent;
+  cursor: default;
+}
+
+/* ------------------------------------------------- 左下角工具区（2026-10-15 需求 3）
+   最左侧竖轨：活动栏（上）+ 快捷键 / 模型 / 设置 三个图标（下），与右下竖轨的区域开关对称。 */
+.left-rail {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 48px;
+  background: var(--bg-2);
+  border-right: 1px solid var(--border);
+}
+
+/* 活动栏已入 left-rail，去掉它自带的右边框（由 left-rail 统一提供） */
+.left-rail > .activitybar {
+  border-right: 0;
+}
+
+/* 左下角工具区：竖排三个图标；同时是快捷键浮层的定位包含块 */
+.rail-tools {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+  width: 100%;
+}
+
+/* 窗口按钮（最大化 / 还原）：2026-10-15 用户要求放**顶栏最右端**，横排。 */
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+/* 顶栏里的小图标按钮（比 .btn 紧凑、与顶栏控件高度对齐） */
+.topbar-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.topbar-icon-btn:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--row-hover);
+}
+
+/* 已在全屏里就不能再「最大化」，反之不能「还原」 */
+.topbar-icon-btn:disabled,
+.topbar-icon-btn:disabled:hover {
+  opacity: 0.35;
+  background: transparent;
+  cursor: default;
+}
+
+/* ------------------------------------------------- 文件树根目录行（2026-10-15）
+   与下面的目录行同构（.tree-row.dir）：只显示名字，点击折叠 / 展开，右键同菜单；
+   右侧一组常用操作图标（悬停才显示）：新建文件 / 新建文件夹 / 粘贴 / 复制项目链接。 */
+.tree-root-row {
+  position: relative;
+}
+
+.tree-root-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  opacity: 0;
+}
+
+/* 悬停该行（或键盘 Tab 到按钮）才露出，避免平时干扰目录名的阅读 */
+.tree-root-row:hover .tree-root-actions,
+.tree-root-actions:focus-within {
+  opacity: 1;
+}
+
+.tree-root-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.tree-root-act:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--hover-soft-2);
+}
+
+.tree-root-act:disabled {
+  opacity: 0.4;
+  cursor: default;
 }

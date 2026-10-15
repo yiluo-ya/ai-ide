@@ -1,4 +1,12 @@
-/** 顶栏：项目选择 / 添加项目 / 索引进度 / 模型与设置 / 帮助。 */
+/**
+ * 顶栏：项目选择 / 添加项目 / 索引状态。
+ *
+ * 2026-10-15 用户要求（需求 3 / 4）：原先挤在右侧的三类入口各自归位 ——
+ * - 「模型」「设置」「快捷键」→ 左下活动栏底部（竖排图标，见 App.tsx 的 left-rail）；
+ * - 「复制文件链接」「移除」「项目根路径显示」→ 文件树顶部的根目录行（见 FileTree.tsx）。
+ * 顶栏只留「跟项目有关」的事：切项目 / 加项目 / 重建索引 / 索引进度，
+ * 最右端额外放「最大化 / 还原」两个窗口按钮（需求 5，等价浏览器 F11 全屏）。
+ */
 import { useEffect, useState } from 'react';
 import type { IndexStatus, ProjectInfo } from './api';
 import { FolderBrowser } from './FolderBrowser';
@@ -8,53 +16,40 @@ interface Props {
   projects: ProjectInfo[];
   project: ProjectInfo | null;
   status: IndexStatus | null;
-  openFile: string | null;
   onSelect: (id: string) => void;
   onOpenFolder: (root: string) => void;
+  /** 2026-10-15：移除项目仍留在顶栏（用户要求：不该放到文件里）；复制与目录显示去了文件树根行。 */
   onForget: (id: string) => void;
   onReindex: () => void;
-  onOpenSettings: () => void;
-  /** 模型配置入口（与设置平级，2026-10-03 用户要求）。 */
-  onOpenModel: () => void;
 }
 
-export function TopBar({
-  projects,
-  project,
-  status,
-  openFile,
-  onSelect,
-  onOpenFolder,
-  onForget,
-  onReindex,
-  onOpenSettings,
-  onOpenModel,
-}: Props) {
+export function TopBar({ projects, project, status, onSelect, onOpenFolder, onForget, onReindex }: Props) {
   const { t } = useI18n();
   const [input, setInput] = useState('');
   const [showOpen, setShowOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
-
-  const deepLink =
-    project && openFile
-      ? `${window.location.origin}/?project=${project.id}&file=${encodeURIComponent(openFile)}`
-      : null;
 
   const progress = Math.round((status?.progress ?? 0) * 100);
+  /** 2026-10-15 需求 5：是否处于全屏（两个按钮按它禁用无效的那个）。 */
+  const [fullscreen, setFullscreen] = useState(false);
 
-  // 浮层统一 Esc 关闭（P25 无障碍）
+  // 全屏状态跟随浏览器（用户按 F11 / Esc 退出时按钮要跟着变）
   useEffect(() => {
-    if (!showHelp && !showOpen) return;
+    const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    onChange();
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // 浮层 Esc 关闭（P25 无障碍）
+  useEffect(() => {
+    if (!showOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setShowHelp(false);
-        setShowOpen(false);
-      }
+      if (e.key === 'Escape') setShowOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [showHelp, showOpen]);
+  }, [showOpen]);
 
   return (
     <header className="topbar">
@@ -156,12 +151,6 @@ export function TopBar({
 
       <span className="spacer" />
 
-      {project && (
-        <span className="project-root" title={project.root}>
-          {project.root}
-        </span>
-      )}
-
       {status?.indexing ? (
         <span className="indexing">
           {t('topbar.indexing', {
@@ -184,92 +173,35 @@ export function TopBar({
         )
       )}
 
-      {deepLink && (
-        <button className="btn ghost" title={deepLink} onClick={() => void navigator.clipboard.writeText(deepLink)}>
-          {t('topbar.copyLink')}
+      {/* 2026-10-15 需求 5：顶栏最右边的两个按钮 —— 最大化 / 还原（等价浏览器 F11 全屏）。 */}
+      <div className="window-controls">
+        <button
+          type="button"
+          className="topbar-icon-btn"
+          disabled={fullscreen}
+          title={t('app.maximize')}
+          aria-label={t('app.maximize')}
+          onClick={() => void document.documentElement.requestFullscreen().catch(() => {})}
+        >
+          {/* 四角向外（最大化 = 进全屏） */}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M16 21h3a2 2 0 0 0 2-2v-3M8 21H5a2 2 0 0 1-2-2v-3" />
+          </svg>
         </button>
-      )}
-
-      <button className="btn ghost" onClick={onOpenModel} title={t('topbar.modelTitle')}>
-        {t('topbar.model')}
-      </button>
-
-      <button className="btn ghost" onClick={onOpenSettings} title={t('topbar.settings')}>
-        {t('topbar.settings')}
-      </button>
-
-      <button
-        className="btn ghost"
-        onClick={() => setShowHelp((v) => !v)}
-        title={t('topbar.help')}
-        aria-expanded={showHelp}
-        aria-haspopup="dialog"
-        aria-label={t('topbar.help')}
-      >
-        ?
-      </button>
-
-      {showHelp && (
-        <div className="help-popover" role="dialog" aria-label={t('topbar.help')}>
-          <div className="help-title">{t('topbar.helpTitle')}</div>
-          <ul>
-            <li>
-              <kbd>F12</kbd> / <kbd>Ctrl</kbd>+<kbd>F12</kbd> {t('topbar.shortcutGotoDef')}
-            </li>
-            <li>
-              <kbd>Shift</kbd>+<kbd>F12</kbd> {t('topbar.shortcutFindRefs')}
-            </li>
-            <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>P</kbd> {t('topbar.shortcutFileSearch')}
-            </li>
-            <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>T</kbd> {t('topbar.shortcutSymbolSearch')}
-            </li>
-            <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> {t('topbar.shortcutProjectSearch')}
-            </li>
-            <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> {t('topbar.shortcutOutline')}
-            </li>
-            <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>1..9</kbd> {t('topbar.shortcutSidePanels')}
-            </li>
-            <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>0</kbd> {t('topbar.shortcutAnnotations')}
-            </li>
-            <li>
-              <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>Alt</kbd>+<kbd>→</kbd> {t('topbar.shortcutBackForward')}
-            </li>
-            <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>G</kbd> {t('topbar.shortcutGotoLine')}
-            </li>
-            <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>F</kbd> {t('topbar.shortcutFileSearchIn')}
-            </li>
-          </ul>
-          <div className="help-title legend-title">{t('topbar.legendTitle')}</div>
-          <ul className="legend">
-            <li>
-              <span className="swatch swatch-project">name</span>
-              {t('topbar.legendProject')}
-            </li>
-            <li>
-              <span className="swatch swatch-local">local_var</span>
-              {t('topbar.legendLocal')}
-            </li>
-            <li>
-              <span className="swatch swatch-external">os.path</span>
-              {t('topbar.legendExternal')}
-            </li>
-          </ul>
-          <div className="help-title legend-title">{t('topbar.helpSectionMore')}</div>
-          <ul>
-            <li>
-              <kbd>Ctrl/Cmd</kbd>+<kbd>,</kbd> {t('topbar.shortcutSettings')}
-            </li>
-          </ul>
-        </div>
-      )}
+        <button
+          type="button"
+          className="topbar-icon-btn"
+          disabled={!fullscreen}
+          title={t('app.restore')}
+          aria-label={t('app.restore')}
+          onClick={() => void document.exitFullscreen().catch(() => {})}
+        >
+          {/* 四角向内（还原 = 退全屏） */}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M9 3v4a2 2 0 0 1-2 2H3M21 9h-4a2 2 0 0 1-2-2V3M3 15h4a2 2 0 0 1 2 2v4M15 21v-4a2 2 0 0 1 2-2h4" />
+          </svg>
+        </button>
+      </div>
     </header>
   );
 }

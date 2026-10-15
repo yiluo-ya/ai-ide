@@ -30,6 +30,7 @@ import { ApiPanel } from './ApiPanel';
 import { GotoNoticeBar, gotoFailureMessage } from './Notice';
 import { QuickOpen, type QuickOpenMode } from './QuickOpen';
 import { TopBar } from './TopBar';
+import { HelpPopover } from './HelpPopover';
 import { SettingsPanel } from './SettingsPanel';
 import { ModelDialog } from './ModelDialog';
 import { Welcome } from './Welcome';
@@ -54,17 +55,7 @@ import { translate, useI18n } from './i18n';
 import type { BlameResult, FileNode, FileOrigin } from '../../shared/types';
 import type { HotMetric } from './mapApi';
 
-type PanelTab =
-  | 'guide'
-  | 'files'
-  | 'refs'
-  | 'hierarchy'
-  | 'outline'
-  | 'search'
-  | 'changes'
-  | 'git'
-  | 'agent'
-  | 'api';
+type PanelTab = 'guide' | 'files' | 'refs' | 'hierarchy' | 'outline' | 'search' | 'changes' | 'git' | 'agent' | 'api';
 
 /**
  * 底部面板的入口（VS Code 布局迁移 2026-10-08）：输出 / 终端。
@@ -120,7 +111,6 @@ function collectFiles(node: FileNode | null): string[] {
   return (node.children ?? []).flatMap(collectFiles);
 }
 
-
 export default function App() {
   const store = useStore();
   const { t } = useI18n();
@@ -135,9 +125,20 @@ export default function App() {
   // 变更计数 = git 报的未提交改动条数（2026-10-03：变更以 git 为准，不再自记录）
   const changesCount = useChangesStore((s) => s.result?.entries.length ?? 0);
 
-  /** 选中某侧视图；点「code会话」时主区切到 Agent。 */
+  /**
+   * 选中某侧视图；点「code会话」时主区切到 Agent。
+   * 2026-10-15 需求 8：再点该侧已激活的图标 = 收拢那一侧；该侧收拢时点图标 = 展开并选中。
+   */
   const onSelectView = (side: 'left' | 'right', id: ViewId) => {
+    const open = side === 'left' ? sidebarOpen : changesDockOpen;
+    if (layout.active[side] === id && open) {
+      if (side === 'left') setSidebarOpen(false);
+      else setChangesDockOpen(false);
+      return;
+    }
     setActiveView(side, id);
+    if (side === 'left') setSidebarOpen(true);
+    else setChangesDockOpen(true);
     if (id === 'agent' && store.projectId) setMainView('agent');
   };
   const [quick, setQuick] = useState<QuickOpenMode>(null);
@@ -161,7 +162,9 @@ export default function App() {
 
   // 项目地图：主区视图（map = 强制看地图）、依赖图浮层、文件树叠加过滤（M9/M10）
   // 2026-10-03：主区可在「代码 / 地图 / Agent 会话」之间切；agent 不入 URL
-  const [mainView, setMainView] = useState<'auto' | 'map' | 'agent'>(() => (snapshot.get('view') === 'map' ? 'map' : 'auto'));
+  const [mainView, setMainView] = useState<'auto' | 'map' | 'agent'>(() =>
+    snapshot.get('view') === 'map' ? 'map' : 'auto',
+  );
   const [graphOpen, setGraphOpen] = useState(() => snapshot.get('graph') === '1');
   /** 2026-10-03：code-agent 会话（左栏管会话 + 中间看内容，见 mainView === 'agent'）。 */
   /** W5：流视图浮层的焦点（null = 关着）。 */
@@ -174,9 +177,14 @@ export default function App() {
   /** FR-0012：文件树的两条外部信号（自增触发；FileTree 侧监听）。 */
   const [treeRevealToken, setTreeRevealToken] = useState(0);
   const [treeCollapseToken, setTreeCollapseToken] = useState(0);
-  /** P24 的浮层：设置 · 模型（模型与设置平级，2026-10-03 用户要求）。 */
+  /** 2026-10-15：展开全部（与收拢对称的第三条信号）。 */
+  const [treeExpandToken, setTreeExpandToken] = useState(0);
+  /** P24 的浮层：设置 · 模型（模型与设置平级，2026-10-03 用户要求）。
+   *  2026-10-15 需求 3：三者的入口从左下活动栏底部进（竖排图标）。 */
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  /** 左下角「快捷键」图标弹出的浮层（内容与原先顶栏的 ? 一致）。 */
+  const [helpOpen, setHelpOpen] = useState(false);
   /** W3 / G7.2：只读 diff 浮层的目标文件（null = 关着）；点变更行的增删行数触发。 */
   const [diffFile, setDiffFile] = useState<string | null>(null);
   /**
@@ -268,8 +276,8 @@ export default function App() {
    * 「总览」= 规模 / 起点 / 结构告警 / 本轮产出；「大纲」「搜索」2026-10-03 从左栏搬来。
    * 初值兼容旧链接：URL 里 tab=outline / search 时直接打开右栏对应入口。
    */
-  /** 底部面板：默认展开、默认「输出」页。 */
-  const [bottomOpen, setBottomOpen] = useState(true);
+  /** 底部面板：默认收拢（2026-10-15 需求 9）、默认「输出」页。 */
+  const [bottomOpen, setBottomOpen] = useState(false);
   const [bottomTab, setBottomTab] = useState<BottomTab>('output');
   /** 底部面板高度（px），拖动顶边调整。 */
   const [bottomHeight, setBottomHeight] = useState(220);
@@ -317,6 +325,13 @@ export default function App() {
     setTreeCollapseToken((n) => n + 1);
   }, [openPanel]);
 
+  /** 2026-10-15：展开文件树所有文件夹（与收拢对称，工具行图标触发）。 */
+  const expandAllInTree = useCallback(() => {
+    setSidebarOpen(true);
+    openPanel('files');
+    setTreeExpandToken((n) => n + 1);
+  }, [openPanel]);
+
   /**
    * FR-0011：在终端里运行一个文件（文件树右键 / 编辑器右键 / 标签栏 ▶ / Ctrl+F5 共用）。
    * - prefs.pythonPath 非空 → 直接用（完全覆盖探测）；
@@ -362,10 +377,7 @@ export default function App() {
   const blameOnRef = useRef(false);
   blameOnRef.current = blameOn;
   /** W3 / G7.3：光标所在行的 blame（只在开着 blame 视图时取）。 */
-  const cursorBlame = useMemo(
-    () => (blameOn ? blameAt(blame, cursor.line) : null),
-    [blameOn, blame, cursor.line],
-  );
+  const cursorBlame = useMemo(() => (blameOn ? blameAt(blame, cursor.line) : null), [blameOn, blame, cursor.line]);
   /** 状态栏：整份文档的总字符数 / 总行数（以编辑器当前内容为准）。 */
   const docStats = useMemo(() => {
     const text = store.fileContent;
@@ -425,8 +437,6 @@ export default function App() {
       },
     });
   }, [store.projectId]);
-
-  
 
   // no-symbol 不弹条（Q1），但也不能毫无反馈：状态栏轻提示几秒后自动消失
   useEffect(() => {
@@ -711,7 +721,10 @@ export default function App() {
     const startWidth = loadPrefs().sidebarWidth;
     target.setPointerCapture(e.pointerId);
     const onMove = (ev: PointerEvent) => {
-      document.documentElement.style.setProperty('--sidebar-width', `${clampSidebar(startWidth + ev.clientX - startX)}px`);
+      document.documentElement.style.setProperty(
+        '--sidebar-width',
+        `${clampSidebar(startWidth + ev.clientX - startX)}px`,
+      );
     };
     const onUp = (ev: PointerEvent) => {
       target.removeEventListener('pointermove', onMove);
@@ -844,8 +857,7 @@ export default function App() {
     useStore.getState().rememberPosition(file, { line, col, scrollTop });
 
   /** 判据 6：复制位置 `path:line:col`（状态栏会给一句轻反馈）。 */
-  const copyLocation = (file: string, line: number, col: number) =>
-    useStore.getState().copyLocation(file, line, col);
+  const copyLocation = (file: string, line: number, col: number) => useStore.getState().copyLocation(file, line, col);
 
   /** S3a：选中的一段代码 → 带出处的片段（出处行 + 围栏代码块）。 */
   const copySnippet = (file: string, startLine: number, endLine: number, text: string) =>
@@ -881,39 +893,81 @@ export default function App() {
                 <option value="7d">{t('app.recent7d')}</option>
               </select>
               <label title={t('app.onlyOrphansTitle')}>
-                <input
-                  type="checkbox"
-                  checked={onlyOrphans}
-                  onChange={(e) => setOnlyOrphans(e.target.checked)}
-                />
+                <input type="checkbox" checked={onlyOrphans} onChange={(e) => setOnlyOrphans(e.target.checked)} />
                 {t('app.orphan')}
               </label>
               <label title={t('app.indexedOnlyTitle')}>
-                <input
-                  type="checkbox"
-                  checked={indexedOnly}
-                  onChange={(e) => setIndexedOnly(e.target.checked)}
-                />
+                <input type="checkbox" checked={indexedOnly} onChange={(e) => setIndexedOnly(e.target.checked)} />
                 {t('app.indexedOnly')}
               </label>
-              {/* FR-0012：树的两个工具动作（与右键 / 快捷键同源） */}
+              {/* FR-0012：树的三个工具动作（与右键 / 快捷键同源）；2026-10-15 用户要求改为图标。 */}
               <span className="tree-actions">
                 <button
-                  className="btn ghost"
+                  className="icon-btn sm"
                   disabled={!store.openFile}
                   onClick={() => revealFileInTree(store.openFile)}
                   title={`${t('filetree.revealActive')} (Alt+F)`}
+                  aria-label={t('filetree.revealActive')}
                 >
-                  {t('filetree.revealActive')}
+                  {/* 准星（定位到当前文件） */}
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="7" />
+                    <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+                  </svg>
                 </button>
                 <button
-                  className="btn ghost"
+                  className="icon-btn sm"
                   onClick={collapseAllInTree}
                   title={`${t('filetree.collapseAll')} (${
                     loadPrefs().keymap === 'idea' ? 'Ctrl+Alt+-' : 'Ctrl+Shift+-'
                   })`}
+                  aria-label={t('filetree.collapseAll')}
                 >
-                  {t('filetree.collapseAll')}
+                  {/* 收拢（上下两横 + 向内合拢的箭头） */}
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 6h16M4 18h16M8 13l4-3 4 3" />
+                  </svg>
+                </button>
+                <button
+                  className="icon-btn sm"
+                  onClick={expandAllInTree}
+                  title={t('filetree.expandAll')}
+                  aria-label={t('filetree.expandAll')}
+                >
+                  {/* 展开（上下两横 + 向外张开的箭头） */}
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 6h16M4 18h16M8 11l4 3 4-3" />
+                  </svg>
                 </button>
               </span>
             </div>
@@ -942,6 +996,7 @@ export default function App() {
               projectId={store.projectId}
               revealToken={treeRevealToken}
               collapseAllToken={treeCollapseToken}
+              expandAllToken={treeExpandToken}
               indexedOnly={indexedOnly}
             />
           </>
@@ -996,7 +1051,11 @@ export default function App() {
           />
         );
       case 'api':
-        return store.projectId ? <ApiPanel projectId={store.projectId} /> : <div className="panel-empty">{t('app.noProject')}</div>;
+        return store.projectId ? (
+          <ApiPanel projectId={store.projectId} />
+        ) : (
+          <div className="panel-empty">{t('app.noProject')}</div>
+        );
     }
   };
 
@@ -1006,45 +1065,126 @@ export default function App() {
         projects={store.projects}
         project={store.project}
         status={store.status}
-        openFile={store.openFile}
         onSelect={(id) => void useStore.getState().selectProject(id)}
         onOpenFolder={(root) => void useStore.getState().openFolder(root)}
         onForget={(id) => setConfirmAction({ kind: 'forget', id })}
         onReindex={() => setConfirmAction({ kind: 'reindex' })}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenModel={() => setModelOpen(true)}
       />
 
       <div className="body">
-        {/* 最左活动栏：竖排图标，驱动左栏切换（VS Code 布局迁移 2026-10-08） */}
-        <ActivityBar
-          side="left"
-          views={viewsOn('left')}
-          active={tab}
-          onSelect={(id) => onSelectView('left', id)}
-          onMove={moveView}
-          onReorder={(id, idx) => reorderView('left', id, idx)}
-          gitCount={changesCount}
-        />
+        {/* 最左活动栏（VS Code 布局迁移 2026-10-08）+ 左下角工具区。
+            2026-10-15 需求 3：模型 / 设置 / 快捷键从左下进 —— 竖排图标，从上到下：快捷键、模型、设置
+            （与右下竖轨底部的区域开关对称）。 */}
+        <div className="left-rail">
+          <ActivityBar
+            side="left"
+            views={viewsOn('left')}
+            active={tab}
+            onSelect={(id) => onSelectView('left', id)}
+            onMove={moveView}
+            onReorder={(id, idx) => reorderView('left', id, idx)}
+            gitCount={changesCount}
+          />
+          <div className="rail-bottom">
+            <div className="rail-tools">
+              <button
+                type="button"
+                className={`region-toggle${helpOpen ? ' active' : ''}`}
+                title={t('topbar.help')}
+                aria-label={t('topbar.help')}
+                aria-expanded={helpOpen}
+                onClick={() => setHelpOpen((v) => !v)}
+              >
+                {/* 键盘（快捷键） */}
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="2.5" y="6" width="19" height="12" rx="2" />
+                  <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="region-toggle"
+                title={t('topbar.modelTitle')}
+                aria-label={t('topbar.model')}
+                onClick={() => setModelOpen(true)}
+              >
+                {/* 芯片（模型） */}
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="7" y="7" width="10" height="10" rx="1.5" />
+                  <path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="region-toggle"
+                title={t('topbar.settings')}
+                aria-label={t('topbar.settings')}
+                onClick={() => setSettingsOpen(true)}
+              >
+                {/* 齿轮（设置） */}
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="3.2" />
+                  <path d="M12 2.8v2.4M12 18.8v2.4M4.6 7.2l2 1.2M17.4 15.6l2 1.2M4.6 16.8l2-1.2M17.4 8.4l2-1.2" />
+                </svg>
+              </button>
+              {helpOpen && <HelpPopover onClose={() => setHelpOpen(false)} />}
+            </div>
+          </div>
+        </div>
 
         {sidebarOpen && (
-        <aside className="sidebar">
-          {/* P24：侧栏宽拖拽把手（键盘 ←/→ 同效） */}
-          <div
-            className="sidebar-resizer"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={t('app.resizeSidebar')}
-            tabIndex={0}
-            onPointerDown={onSidebarResizeStart}
-            onKeyDown={onSidebarResizeKey}
-          />
+          <aside className="sidebar">
+            {/* P24：侧栏宽拖拽把手（键盘 ←/→ 同效） */}
+            <div
+              className="sidebar-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t('app.resizeSidebar')}
+              tabIndex={0}
+              onPointerDown={onSidebarResizeStart}
+              onKeyDown={onSidebarResizeKey}
+            />
 
-          {/* P25：面板容器补 tabpanel 语义（aria-labelledby 指向活动栏当前项） */}
-          <div className="panel-body" role="tabpanel" id="wcr-side-panel" aria-labelledby={`wcr-activity-left-${tab}`}>
-            {renderView(tab)}
-          </div>
-        </aside>
+            {/* P25：面板容器补 tabpanel 语义（aria-labelledby 指向活动栏当前项） */}
+            <div
+              className="panel-body"
+              role="tabpanel"
+              id="wcr-side-panel"
+              aria-labelledby={`wcr-activity-left-${tab}`}
+            >
+              {renderView(tab)}
+            </div>
+          </aside>
         )}
 
         <main className="main">
@@ -1056,224 +1196,223 @@ export default function App() {
             />
           ) : (
             <>
-          {/* 代码展示区顶条（2026-10-08 用户要求）：左边标签条，右边 ← → 与分享。
+              {/* 代码展示区顶条（2026-10-08 用户要求）：左边标签条，右边 ← → 与分享。
               原来的导航条（总览 / 面包屑 / 复制位置 / 旁边打开 / 项目地图）整行去掉：
               复制位置与旁边打开进代码右键菜单，项目地图落到右下角竖轨的「布局」上方。 */}
-          <div className="editor-topbar">
-            {/* N19：标签条（上限 8 + LRU + 同文件合并） */}
-            {!showMap && store.tabs.length > 0 && (
-              <div className="tabbar">
-              {store.tabs.map((t) => (
-                <span
-                  key={t.file}
-                  className={`tab ${t.file === store.openFile ? 'active' : ''}`}
-                  onClick={() => jump(t.file, t.line, t.col)}
-                  onAuxClick={(e) => {
-                    // 只有中键才「在旁边打开」；右键走下面的 contextmenu，不误触发。
-                    if (e.button === 1) void useStore.getState().openInSecondary(t.file);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setTabMenu({ x: e.clientX, y: e.clientY, file: t.file });
-                  }}
-                  title={translate('app.tabTooltip', { file: t.file, line: t.line })}
-                >
-                  <span className="tab-name">{t.file.split('/').pop()}</span>
-                  <span
-                    className="tab-close"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      useStore.getState().closeTab(t.file);
-                      if (t.file === store.openFile && store.tabs.length > 1) {
-                        const next = store.tabs.find((x) => x.file !== t.file);
-                        if (next) jump(next.file, next.line, next.col);
-                      }
-                    }}
-                  >
-                    ✕
-                  </span>
-                </span>
-              ))}
-              </div>
-            )}
-            <div className="editor-actions">
-              <button
-                className="btn ghost"
-                disabled={!store.openFile || !isRunnable(store.openFile)}
-                onClick={() => store.openFile && runFileInTerminal(store.openFile)}
-                title={t('run.title')}
-                aria-label={t('run.title')}
-              >
-                ▶
-              </button>
-              <button
-                className="btn ghost"
-                disabled={!canBack}
-                onClick={() => void useStore.getState().goBack()}
-                title={loadPrefs().keymap === 'idea' ? 'Ctrl+Alt+←' : 'Alt+←'}
-              >
-                ←
-              </button>
-              <button
-                className="btn ghost"
-                disabled={!canForward}
-                onClick={() => void useStore.getState().goForward()}
-                title={loadPrefs().keymap === 'idea' ? 'Ctrl+Alt+→' : 'Alt+→'}
-              >
-                →
-              </button>
-              {/* 2（2026-10-15 用户要求）：文件摘要条从编辑区里搬进顶条，放在原来「分享 ▾」的位置。
-                  分享下拉已去掉（13），← → 导航留在原处（同日晚用户要求）。 */}
-              {!showMap && (
-                <SummaryBar
-                  projectId={store.projectId}
-                  file={store.openFile}
-                  onOpenFile={jump}
-                  onOpenHistory={openHistoryVersion}
-                />
-              )}
-            </div>
-          </div>
-
-          {/* 标签右键菜单：固定定位在鼠标处，点别处 / Esc 收起。 */}
-          {tabMenu && (
-            <>
-              <div className="tab-menu-backdrop" onClick={() => setTabMenu(null)} />
-              <div className="tab-menu" style={{ left: tabMenu.x, top: tabMenu.y }}>
-                <button
-                  className="share-item"
-                  onClick={() => {
-                    revealFileInTree(tabMenu.file);
-                    setTabMenu(null);
-                  }}
-                >
-                  {translate('filetree.revealActive')}
-                </button>
-                <button
-                  className="share-item"
-                  onClick={() => {
-                    useStore.getState().closeTab(tabMenu.file);
-                    afterCloseTabs(tabMenu.file);
-                    setTabMenu(null);
-                  }}
-                >
-                  {translate('app.tabClose')}
-                </button>
-                <button
-                  className="share-item"
-                  onClick={() => {
-                    useStore.getState().closeOthers(tabMenu.file);
-                    afterCloseTabs(tabMenu.file);
-                    setTabMenu(null);
-                  }}
-                >
-                  {translate('app.tabCloseOthers')}
-                </button>
-                <button
-                  className="share-item"
-                  onClick={() => {
-                    useStore.getState().closeRight(tabMenu.file);
-                    afterCloseTabs(tabMenu.file);
-                    setTabMenu(null);
-                  }}
-                >
-                  {translate('app.tabCloseRight')}
-                </button>
-                <button
-                  className="share-item"
-                  onClick={() => {
-                    useStore.getState().closeLeft(tabMenu.file);
-                    afterCloseTabs(tabMenu.file);
-                    setTabMenu(null);
-                  }}
-                >
-                  {translate('app.tabCloseLeft')}
-                </button>
-              </div>
-            </>
-          )}
-
-          <div className="editor-wrap">
-            {showMap ? (
-              <Overview
-                onOpenFile={(file, line) => jump(file, line ?? 1, 1)}
-                onOpenGraph={() => setGraphOpen(true)}
-                onOpenChanges={() => openPanel('git')}
-              />
-            ) : store.openFile ? (
-              <div className={`panes ${store.secondary ? 'split' : ''}`}>
-                <div className="pane">
-                  <Editor
-                    projectId={store.projectId}
-                    file={store.openFile}
-                    lang={store.fileLang}
-                    content={store.fileContent}
-                    contentToken={store.contentToken}
-                    reveal={store.reveal}
-                    highlightsToken={store.highlightsToken}
-                    onCursor={(line, col) => setCursor({ line, col })}
-                    onSelection={setSelection}
-                    onPosition={(line, col, scrollTop) => rememberPosition(store.openFile!, line, col, scrollTop)}
-                    onClickPosition={(line, col) => useStore.getState().noteCursorAt(store.openFile!, line, col)}
-                    onCopyLocation={copyLocation}
-                    onCopySnippet={copySnippet}
-                    onOpenAside={(file, line, col) => void useStore.getState().openInSecondary(file, line, col)}
-                    blame={blameOn ? blame?.lines ?? null : null}
-                    symbols={store.symbols}
-                    onExplain={openExplain}
-                    onFlow={openFlow}
-                    onRun={runFileInTerminal}
-                    editable
-                    onChange={(text) => useStore.getState().editorChanged(text)}
-                  />
-                </div>
-                {store.secondary && secondaryDoc && secondaryDoc.file === store.secondary.file && (
-                  <div className="pane secondary">
-                    <div className="pane-head">
-                      <span className="pane-title" title={secondaryDoc.file}>
-                        {secondaryDoc.file}
-                        {secondaryDoc.rev && (
-                          <span className="pane-rev">
-                            {t('history.badge', { rev: secondaryDoc.rev.slice(0, 7) })}
-                          </span>
-                        )}
-                      </span>
-                      <button
-                        className="btn ghost small"
-                        onClick={() => useStore.getState().closeSecondary()}
-                        title={t('app.closePane')}
+              <div className="editor-topbar">
+                {/* N19：标签条（上限 8 + LRU + 同文件合并） */}
+                {!showMap && store.tabs.length > 0 && (
+                  <div className="tabbar">
+                    {store.tabs.map((t) => (
+                      <span
+                        key={t.file}
+                        className={`tab ${t.file === store.openFile ? 'active' : ''}`}
+                        onClick={() => jump(t.file, t.line, t.col)}
+                        onAuxClick={(e) => {
+                          // 只有中键才「在旁边打开」；右键走下面的 contextmenu，不误触发。
+                          if (e.button === 1) void useStore.getState().openInSecondary(t.file);
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setTabMenu({ x: e.clientX, y: e.clientY, file: t.file });
+                        }}
+                        title={translate('app.tabTooltip', { file: t.file, line: t.line })}
                       >
-                        ✕
-                      </button>
-                    </div>
-                    <Editor
-                      projectId={store.projectId}
-                      file={secondaryDoc.file}
-                      lang={secondaryDoc.lang}
-                      content={secondaryDoc.text}
-                      reveal={store.secondary}
-                      highlightsToken={store.highlightsToken}
-                      onPosition={
-                        secondaryDoc.rev
-                          ? undefined
-                          : (line, col, scrollTop) =>
-                              rememberPosition(secondaryDoc.file, line, col, scrollTop)
-                      }
-                      onCopyLocation={copyLocation}
-                      onCopySnippet={copySnippet}
-                      historyRev={secondaryDoc.rev}
-                    />
+                        <span className="tab-name">{t.file.split('/').pop()}</span>
+                        <span
+                          className="tab-close"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            useStore.getState().closeTab(t.file);
+                            if (t.file === store.openFile && store.tabs.length > 1) {
+                              const next = store.tabs.find((x) => x.file !== t.file);
+                              if (next) jump(next.file, next.line, next.col);
+                            }
+                          }}
+                        >
+                          ✕
+                        </span>
+                      </span>
+                    ))}
                   </div>
                 )}
+                <div className="editor-actions">
+                  <button
+                    className="btn ghost"
+                    disabled={!store.openFile || !isRunnable(store.openFile)}
+                    onClick={() => store.openFile && runFileInTerminal(store.openFile)}
+                    title={t('run.title')}
+                    aria-label={t('run.title')}
+                  >
+                    ▶
+                  </button>
+                  <button
+                    className="btn ghost"
+                    disabled={!canBack}
+                    onClick={() => void useStore.getState().goBack()}
+                    title={loadPrefs().keymap === 'idea' ? 'Ctrl+Alt+←' : 'Alt+←'}
+                  >
+                    ←
+                  </button>
+                  <button
+                    className="btn ghost"
+                    disabled={!canForward}
+                    onClick={() => void useStore.getState().goForward()}
+                    title={loadPrefs().keymap === 'idea' ? 'Ctrl+Alt+→' : 'Alt+→'}
+                  >
+                    →
+                  </button>
+                  {/* 2（2026-10-15 用户要求）：文件摘要条从编辑区里搬进顶条，放在原来「分享 ▾」的位置。
+                  分享下拉已去掉（13），← → 导航留在原处（同日晚用户要求）。 */}
+                  {!showMap && (
+                    <SummaryBar
+                      projectId={store.projectId}
+                      file={store.openFile}
+                      onOpenFile={jump}
+                      onOpenHistory={openHistoryVersion}
+                    />
+                  )}
+                </div>
               </div>
-            ) : (
-              // 死分支留给兜底：无项目时同样是三步引导（正常路径下主区总是项目地图）
-              <div className="welcome">
-                <Welcome variant={store.projectId ? 'empty' : 'first'} />
+
+              {/* 标签右键菜单：固定定位在鼠标处，点别处 / Esc 收起。 */}
+              {tabMenu && (
+                <>
+                  <div className="tab-menu-backdrop" onClick={() => setTabMenu(null)} />
+                  <div className="tab-menu" style={{ left: tabMenu.x, top: tabMenu.y }}>
+                    <button
+                      className="share-item"
+                      onClick={() => {
+                        revealFileInTree(tabMenu.file);
+                        setTabMenu(null);
+                      }}
+                    >
+                      {translate('filetree.revealActive')}
+                    </button>
+                    <button
+                      className="share-item"
+                      onClick={() => {
+                        useStore.getState().closeTab(tabMenu.file);
+                        afterCloseTabs(tabMenu.file);
+                        setTabMenu(null);
+                      }}
+                    >
+                      {translate('app.tabClose')}
+                    </button>
+                    <button
+                      className="share-item"
+                      onClick={() => {
+                        useStore.getState().closeOthers(tabMenu.file);
+                        afterCloseTabs(tabMenu.file);
+                        setTabMenu(null);
+                      }}
+                    >
+                      {translate('app.tabCloseOthers')}
+                    </button>
+                    <button
+                      className="share-item"
+                      onClick={() => {
+                        useStore.getState().closeRight(tabMenu.file);
+                        afterCloseTabs(tabMenu.file);
+                        setTabMenu(null);
+                      }}
+                    >
+                      {translate('app.tabCloseRight')}
+                    </button>
+                    <button
+                      className="share-item"
+                      onClick={() => {
+                        useStore.getState().closeLeft(tabMenu.file);
+                        afterCloseTabs(tabMenu.file);
+                        setTabMenu(null);
+                      }}
+                    >
+                      {translate('app.tabCloseLeft')}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              <div className="editor-wrap">
+                {showMap ? (
+                  <Overview
+                    onOpenFile={(file, line) => jump(file, line ?? 1, 1)}
+                    onOpenGraph={() => setGraphOpen(true)}
+                    onOpenChanges={() => openPanel('git')}
+                  />
+                ) : store.openFile ? (
+                  <div className={`panes ${store.secondary ? 'split' : ''}`}>
+                    <div className="pane">
+                      <Editor
+                        projectId={store.projectId}
+                        file={store.openFile}
+                        lang={store.fileLang}
+                        content={store.fileContent}
+                        contentToken={store.contentToken}
+                        reveal={store.reveal}
+                        highlightsToken={store.highlightsToken}
+                        onCursor={(line, col) => setCursor({ line, col })}
+                        onSelection={setSelection}
+                        onPosition={(line, col, scrollTop) => rememberPosition(store.openFile!, line, col, scrollTop)}
+                        onClickPosition={(line, col) => useStore.getState().noteCursorAt(store.openFile!, line, col)}
+                        onCopyLocation={copyLocation}
+                        onCopySnippet={copySnippet}
+                        onOpenAside={(file, line, col) => void useStore.getState().openInSecondary(file, line, col)}
+                        blame={blameOn ? (blame?.lines ?? null) : null}
+                        symbols={store.symbols}
+                        onExplain={openExplain}
+                        onFlow={openFlow}
+                        onRun={runFileInTerminal}
+                        editable
+                        onChange={(text) => useStore.getState().editorChanged(text)}
+                      />
+                    </div>
+                    {store.secondary && secondaryDoc && secondaryDoc.file === store.secondary.file && (
+                      <div className="pane secondary">
+                        <div className="pane-head">
+                          <span className="pane-title" title={secondaryDoc.file}>
+                            {secondaryDoc.file}
+                            {secondaryDoc.rev && (
+                              <span className="pane-rev">
+                                {t('history.badge', { rev: secondaryDoc.rev.slice(0, 7) })}
+                              </span>
+                            )}
+                          </span>
+                          <button
+                            className="btn ghost small"
+                            onClick={() => useStore.getState().closeSecondary()}
+                            title={t('app.closePane')}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        <Editor
+                          projectId={store.projectId}
+                          file={secondaryDoc.file}
+                          lang={secondaryDoc.lang}
+                          content={secondaryDoc.text}
+                          reveal={store.secondary}
+                          highlightsToken={store.highlightsToken}
+                          onPosition={
+                            secondaryDoc.rev
+                              ? undefined
+                              : (line, col, scrollTop) => rememberPosition(secondaryDoc.file, line, col, scrollTop)
+                          }
+                          onCopyLocation={copyLocation}
+                          onCopySnippet={copySnippet}
+                          historyRev={secondaryDoc.rev}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  // 死分支留给兜底：无项目时同样是三步引导（正常路径下主区总是项目地图）
+                  <div className="welcome">
+                    <Welcome variant={store.projectId ? 'empty' : 'first'} />
+                  </div>
+                )}
+                {store.fileLoading && <div className="loading-mask">{t('app.loading')}</div>}
               </div>
-            )}
-            {store.fileLoading && <div className="loading-mask">{t('app.loading')}</div>}
-          </div>
             </>
           )}
 
@@ -1355,9 +1494,7 @@ export default function App() {
           <footer className="statusbar">
             {/* 1（2026-10-15 用户要求）：文件路径导航（面包屑）从编辑区顶部一行的位置
                 挪到底部最左边 —— 不再单占一行，也不再顶在代码上方。 */}
-            {store.openFile && (
-              <Breadcrumbs file={store.openFile} tree={store.tree} onOpen={(file) => jump(file)} />
-            )}
+            {store.openFile && <Breadcrumbs file={store.openFile} tree={store.tree} onOpen={(file) => jump(file)} />}
             {saveLabel && <span className={`save-state ${store.saveStatus}`}>{saveLabel}</span>}
             {cursorBlame && (
               <span className="blame-status" title={t('blame.title')}>
@@ -1368,15 +1505,11 @@ export default function App() {
             {store.flash && <span className="flash-text">{store.flash}</span>}
             {store.notice?.reason === 'no-symbol' && <span className="notice-hint">{store.notice.message}</span>}
             {store.fileLoading && <span>{t('app.loading')}</span>}
-            {store.openFile && (
-              <span>{t('app.docStats', { chars: docStats.chars, lines: docStats.lines })}</span>
-            )}
+            {store.openFile && <span>{t('app.docStats', { chars: docStats.chars, lines: docStats.lines })}</span>}
             <span>
               Ln {cursor.line}, Col {cursor.col}
             </span>
-            {selection && (
-              <span>{t('app.selectionInfo', { chars: selection.chars, lines: selection.lines })}</span>
-            )}
+            {selection && <span>{t('app.selectionInfo', { chars: selection.chars, lines: selection.lines })}</span>}
             <span>utf-8</span>
             <span>{store.fileLang}</span>
           </footer>
@@ -1385,83 +1518,83 @@ export default function App() {
         {/* 右侧栏（VS Code 布局迁移 2026-10-08）：右活动栏 + 右侧栏内容，视图可在左右两侧拖拽换侧。 */}
         {store.projectId && (
           <>
-          {changesDockOpen && (
-            <aside className="right-sidebar" style={{ width: changesDockWidth }} aria-label={t('app.dockAria')}>
-              <div
-                className="dock-resizer"
-                role="separator"
-                aria-orientation="vertical"
-                aria-label={t('app.resizeDock')}
-                tabIndex={0}
-                onPointerDown={onChangesDockResizeStart}
+            {changesDockOpen && (
+              <aside className="right-sidebar" style={{ width: changesDockWidth }} aria-label={t('app.dockAria')}>
+                <div
+                  className="dock-resizer"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={t('app.resizeDock')}
+                  tabIndex={0}
+                  onPointerDown={onChangesDockResizeStart}
+                />
+                <div className="right-body">{renderView(dockTab)}</div>
+              </aside>
+            )}
+            <div className="right-rail">
+              <ActivityBar
+                side="right"
+                views={viewsOn('right')}
+                active={dockTab}
+                onSelect={(id) => onSelectView('right', id)}
+                onMove={moveView}
+                onReorder={(id, idx) => reorderView('right', id, idx)}
+                gitCount={changesCount}
               />
-              <div className="right-body">{renderView(dockTab)}</div>
-            </aside>
-          )}
-          <div className="right-rail">
-            <ActivityBar
-              side="right"
-              views={viewsOn('right')}
-              active={dockTab}
-              onSelect={(id) => onSelectView('right', id)}
-              onMove={moveView}
-              onReorder={(id, idx) => reorderView('right', id, idx)}
-              gitCount={changesCount}
-            />
-            {/* 右下角竖轨的底部：项目地图开关（搬自顶部导航条）+ 左/右/下 三区域开关 */}
-            <div className="rail-bottom">
-              {store.openFile && (
-                <button
-                  type="button"
-                  className={`region-toggle${mainView === 'map' ? ' active' : ''}`}
-                  title={t('app.mapToggleTitle')}
-                  aria-pressed={mainView === 'map'}
-                  onClick={() => setMainView(mainView === 'map' ? 'auto' : 'map')}
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
+              {/* 右下角竖轨的底部：项目地图开关（搬自顶部导航条）+ 左/右/下 三区域开关 */}
+              <div className="rail-bottom">
+                {store.openFile && (
+                  <button
+                    type="button"
+                    className={`region-toggle${mainView === 'map' ? ' active' : ''}`}
+                    title={t('app.mapToggleTitle')}
+                    aria-pressed={mainView === 'map'}
+                    onClick={() => setMainView(mainView === 'map' ? 'auto' : 'map')}
                   >
-                    <path d="M3 6.4 9 4l6 2.4L21 4v13.6L15 20l-6-2.4L3 20V6.4Z" />
-                    <path d="M9 4v13.6M15 6.4V20" />
-                  </svg>
-                </button>
-              )}
-            <div className="region-toggles" role="group" aria-label={t('app.regionToggles')}>
-              <button
-                type="button"
-                className={`region-toggle${sidebarOpen ? ' active' : ''}`}
-                title={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')}
-                onClick={() => setSidebarOpen((v) => !v)}
-              >
-                <span className="region-glyph region-glyph-left" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className={`region-toggle${changesDockOpen ? ' active' : ''}`}
-                title={changesDockOpen ? t('app.collapseDock') : t('app.expandDock')}
-                onClick={() => setChangesDockOpen((v) => !v)}
-              >
-                <span className="region-glyph region-glyph-right" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className={`region-toggle${bottomOpen ? ' active' : ''}`}
-                title={bottomOpen ? t('app.collapseBottom') : t('app.expandBottom')}
-                onClick={() => setBottomOpen((v) => !v)}
-              >
-                <span className="region-glyph region-glyph-bottom" aria-hidden="true" />
-              </button>
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M3 6.4 9 4l6 2.4L21 4v13.6L15 20l-6-2.4L3 20V6.4Z" />
+                      <path d="M9 4v13.6M15 6.4V20" />
+                    </svg>
+                  </button>
+                )}
+                <div className="region-toggles" role="group" aria-label={t('app.regionToggles')}>
+                  <button
+                    type="button"
+                    className={`region-toggle${sidebarOpen ? ' active' : ''}`}
+                    title={sidebarOpen ? t('app.collapseSidebar') : t('app.expandSidebar')}
+                    onClick={() => setSidebarOpen((v) => !v)}
+                  >
+                    <span className="region-glyph region-glyph-left" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className={`region-toggle${changesDockOpen ? ' active' : ''}`}
+                    title={changesDockOpen ? t('app.collapseDock') : t('app.expandDock')}
+                    onClick={() => setChangesDockOpen((v) => !v)}
+                  >
+                    <span className="region-glyph region-glyph-right" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className={`region-toggle${bottomOpen ? ' active' : ''}`}
+                    title={bottomOpen ? t('app.collapseBottom') : t('app.expandBottom')}
+                    onClick={() => setBottomOpen((v) => !v)}
+                  >
+                    <span className="region-glyph region-glyph-bottom" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
             </div>
-            </div>
-          </div>
           </>
         )}
       </div>
@@ -1643,10 +1776,7 @@ export default function App() {
       {/* FR-0008：保存冲突 —— 磁盘被外部改过，而本地还有没落盘的改动。
           Esc / 点遮罩 = 「稍后再说」：本地改动留着，不丢。 */}
       {store.conflict && (
-        <Dialog
-          title={t('conflict.title')}
-          onClose={() => void useStore.getState().resolveConflict('later')}
-        >
+        <Dialog title={t('conflict.title')} onClose={() => void useStore.getState().resolveConflict('later')}>
           <p className="confirm-text">{t('conflict.body', { file: store.conflict.file })}</p>
           <div className="confirm-actions">
             <button className="btn ghost" onClick={() => void useStore.getState().resolveConflict('disk')}>

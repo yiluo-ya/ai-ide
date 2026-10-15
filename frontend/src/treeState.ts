@@ -62,7 +62,7 @@ export function ancestorDirs(file: string): string[] {
   return out;
 }
 
-/** 「收拢所有文件夹」用：树里全部目录路径（含嵌套；项目根 `''` 不算，它不是一行）。 */
+/** 「收拢所有文件夹」用：树里全部目录路径（含嵌套；项目根 `''` 由调用方决定要不要带上 —— 2026-10-15 起根目录也是一行）。 */
 export function allDirPaths(node: FileNode | null): string[] {
   const out: string[] = [];
   const walk = (n: FileNode) => {

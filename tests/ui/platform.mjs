@@ -106,14 +106,19 @@ async function main() {
   await page.goto(`${BASE}/?project=${PROJECT}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.waitForTimeout(1500);
 
-  await step('顶栏「模型」与设置并列，点开是模型配置', async () => {
+  await step('左下图标（快捷键 / 模型 / 设置）：模型入口开模型配置', async () => {
+    // 2026-10-15 需求 3：模型 / 设置 / 快捷键从左下竖轨进（不再是顶栏文字按钮）。
+    const tools = await page
+      .locator('.rail-tools button')
+      .evaluateAll((els) => els.map((b) => b.getAttribute('aria-label')));
+    assert(tools.join(',') === '快捷键与帮助,模型,设置', `左下图标顺序不对：${tools.join(',')}`);
     const clicked = await page.evaluate(() => {
-      const btn = [...document.querySelectorAll('header button')].find((b) => b.innerText.trim() === '模型');
+      const btn = document.querySelector(".rail-tools button[aria-label='模型']");
       if (!btn) return false;
       btn.click();
       return true;
     });
-    assert(clicked, '顶栏找不到「模型」按钮');
+    assert(clicked, '左下找不到「模型」按钮');
     await page.waitForTimeout(500);
     const title = await page.evaluate(() => document.querySelector('.wcr-dialog-title')?.textContent ?? '');
     assert(title.includes('模型'), `浮层标题不符：${title}`);
@@ -121,16 +126,26 @@ async function main() {
     assert(/provider|Base URL|模型/.test(body), `模型面板内容可疑：${body.slice(0, 80)}`);
     await page.evaluate(() => document.querySelector('.wcr-dialog-head button')?.click());
     await page.waitForTimeout(300);
-    return `标题「${title}」`;
+    return `左下 ${tools.join(' / ')}；标题「${title}」`;
   });
 
   await step('设置面板：外观 / 编辑器 / 界面 / 索引 / 关于 都在', async () => {
     await page.evaluate(() => {
-      [...document.querySelectorAll('header button')].find((b) => b.innerText.trim() === '设置')?.click();
+      document.querySelector(".rail-tools button[aria-label='设置']")?.click();
     });
     await page.waitForTimeout(600);
     const text = await page.evaluate(() => document.querySelector('.wcr-dialog-body')?.innerText ?? '');
-    for (const key of ['外观', '编辑器', '自动换行', '缩进宽度', '界面', '动效减弱', '索引', '自定义忽略规则', '关于']) {
+    for (const key of [
+      '外观',
+      '编辑器',
+      '自动换行',
+      '缩进宽度',
+      '界面',
+      '动效减弱',
+      '索引',
+      '自定义忽略规则',
+      '关于',
+    ]) {
       assert(text.includes(key), `设置缺「${key}」`);
     }
     await page.evaluate(() => document.querySelector('.wcr-dialog-head button')?.click());
@@ -138,10 +153,120 @@ async function main() {
     return '五个分组齐全';
   });
 
+  await step('左下「快捷键」图标弹出快捷键浮层（Esc 可关）', async () => {
+    await page.evaluate(() => {
+      document.querySelector(".rail-tools button[aria-label='快捷键与帮助']")?.click();
+    });
+    await page.waitForTimeout(400);
+    assert((await page.locator('.help-popover').count()) === 1, '快捷键浮层没弹出来');
+    const title = await page.locator('.help-popover .help-title').first().innerText();
+    assert(title.includes('快捷键'), `浮层标题不对：${title}`);
+    // 锚在左下角：浮层右边界应在图标右侧（不是被挤出视口）
+    const box = await page.locator('.help-popover').boundingBox();
+    assert(box && box.x > 0 && box.y > 0, `浮层跑到视口外了：${JSON.stringify(box)}`);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    assert((await page.locator('.help-popover').count()) === 0, 'Esc 没关掉快捷键浮层');
+    return '弹出 + Esc 关闭';
+  });
+
+  await step('顶栏最右：最大化 / 还原（全屏按钮）', async () => {
+    // 2026-10-15 需求 5：这两个按钮在顶栏最右端（不是右轨底部）。
+    const btns = await page
+      .locator('.topbar .window-controls button')
+      .evaluateAll((els) => els.map((b) => b.getAttribute('aria-label')));
+    assert(btns.join(',') === '最大化（全屏）,还原', `顶栏窗口按钮不对：${btns.join(',')}`);
+    const disabled = await page.evaluate(() =>
+      [...document.querySelectorAll('.topbar .window-controls button')].map((b) => b.disabled),
+    );
+    assert(disabled[0] === false && disabled[1] === true, `未全屏时应只能点「最大化」：${disabled}`);
+    return btns.join(' / ');
+  });
+
+  await step('文件树工具行：定位 / 收拢 / 展开 三个图标按钮', async () => {
+    // 2026-10-15 用户要求：这三个动作改成图标（原来是文字按钮）。
+    const labels = await page
+      .locator('.tree-actions button')
+      .evaluateAll((els) => els.map((b) => b.getAttribute('aria-label')));
+    assert(labels.join(',') === '定位,收拢,展开全部', `工具行图标不对：${labels.join(',')}`);
+    // 点「展开全部」→ 能看到的文件行变多（目录默认是折叠的）；再点「收拢」→ 变回去
+    const countFiles = () => page.locator('.file-tree .tree-row.file').count();
+    const before = await countFiles();
+    await page.locator('.tree-actions button[aria-label="展开全部"]').click();
+    await page.waitForTimeout(500);
+    const expanded = await countFiles();
+    assert(expanded > before, `「展开全部」没生效：${before} → ${expanded} 个文件行`);
+    await page.locator('.tree-actions button[aria-label="收拢"]').click();
+    await page.waitForTimeout(500);
+    const back = await countFiles();
+    assert(back < expanded, `「收拢」没生效：${expanded} → ${back} 个文件行`);
+
+    // 2026-10-15 用户要求：收拢状态下「定位」也要能用 —— 点一下要把当前文件重新展开出来
+    await page.locator('.tree-actions button[aria-label="展开全部"]').click();
+    await page.waitForTimeout(500);
+    await page.locator('.file-tree .tree-row.file').first().click();
+    await page.waitForTimeout(800);
+    const opened = await page.evaluate(() => new URL(location.href).searchParams.get('file'));
+    assert(opened, '没有打开任何文件，无法验证收拢后的定位');
+    await page.locator('.tree-actions button[aria-label="收拢"]').click();
+    await page.waitForTimeout(500);
+    assert((await countFiles()) === 0, `收拢后不该还能看到文件行`);
+    await page.locator('.tree-actions button[aria-label="定位"]').click();
+    await page.waitForTimeout(700);
+    const afterReveal = await countFiles();
+    assert(afterReveal >= 1, `收拢后点「定位」没把文件放出来：${afterReveal} 行`);
+    const active = await page.locator('.file-tree .tree-row.active').count();
+    assert(active >= 1, '定位后当前文件没有高亮在树里');
+    return `${labels.join(' / ')}；可见文件行 ${before}→${expanded}→${back}；收拢后定位 ${afterReveal} 行（active ${active}）`;
+  });
+
+  await step('文件树根目录行：与目录行同构（只显名字 + 同菜单），复制入口在此', async () => {
+    // 2026-10-15：根目录行按用户要求与下面的目录行一致 —— 只显示名字（不铺完整路径）。
+    await page.waitForSelector('.tree-root-row', { timeout: 8000 });
+    const row = await page.locator('.tree-root-row').count();
+    assert(row === 1, `文件树顶部没有根目录行（找到 ${row} 个）`);
+    const name = await page.locator('.tree-root-row .tree-name').innerText();
+    const fixture = await page.evaluate(() => document.querySelector('.tree-root-row')?.getAttribute('title') ?? '');
+    assert(name.length > 0 && !name.includes('/') && !name.includes('\\'), `根目录行应只显示名字：${name}`);
+    // 根行要能折叠 / 展开：点一下子树显隐就变（方向不预设，前一条用例刚把树收拢过）
+    const countDirs = () => page.locator('.file-tree .tree-row.dir').count();
+    const before = await countDirs();
+    await page.locator('.tree-root-row').click();
+    await page.waitForTimeout(400);
+    const after = await countDirs();
+    assert(after !== before, `点根行没反应（子树显隐没变）：${before} → ${after}`);
+    await page.locator('.tree-root-row').click();
+    await page.waitForTimeout(400);
+    assert((await countDirs()) === before, '再点一次根行没有回到原状态');
+    // 右键 = 本目录菜单（有「新建文件」）
+    await page.locator('.tree-root-row').click({ button: 'right' });
+    await page.waitForSelector('.tree-menu', { timeout: 5000 });
+    const items = await page.locator('.tree-menu button').allInnerTexts();
+    assert(
+      items.some((s) => s.includes('新建文件')),
+      `根行右键菜单不对：${items.join('/')}`,
+    );
+    await page.keyboard.press('Escape');
+    await page
+      .locator('.tree-menu-backdrop')
+      .click({ force: true })
+      .catch(() => {});
+    const copy = await page.locator('.tree-root-row button[aria-label="复制项目链接"]').count();
+    assert(copy === 1, '复制项目链接不在根目录行上');
+    // 2026-10-15：「根目录上的功能太少了」—— 行上补齐常用操作（新建文件 / 新建文件夹）
+    for (const label of ['新建文件', '新建文件夹']) {
+      const n = await page.locator(`.tree-root-row button[aria-label="${label}"]`).count();
+      assert(n === 1, `根目录行缺少「${label}」按钮（找到 ${n} 个）`);
+    }
+    const inTree = await page.locator('.tree-root-row button[aria-label="移除"]').count();
+    assert(inTree === 0, '「移除」不该在文件树里（用户要求留在顶栏）');
+    return `${name}（${fixture}）`;
+  });
+
   await step('P24 设置：切亮色真的换主题', async () => {
     const before = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     await page.evaluate(() => {
-      [...document.querySelectorAll('header button')].find((b) => b.innerText.trim() === '设置')?.click();
+      document.querySelector(".rail-tools button[aria-label='设置']")?.click();
     });
     await page.waitForTimeout(600);
     await page.evaluate(() => {
@@ -265,7 +390,10 @@ async function main() {
 
   await step('AP：「添加项目」= 顶栏图标 → 弹窗选目录（Shadow DOM 隔离 + 手敲路径跳转）', async () => {
     // 前一条用例把语言切成了英文，两种文案都认
-    await page.locator('header button', { hasText: /添加项目|Add project/ }).first().click();
+    await page
+      .locator('header button', { hasText: /添加项目|Add project/ })
+      .first()
+      .click();
     const icon = page.locator('.open-folder .icon-btn');
     await icon.waitFor({ state: 'visible', timeout: 8000 });
     await icon.click();
@@ -283,7 +411,10 @@ async function main() {
     assert(root, '拿不到夹具项目的根目录');
     await page.locator('.fb-input').fill(root.split(path.sep).join('/'));
     await page.locator('.fb-input').press('Enter');
-    await page.locator('.fb-picked').filter({ hasText: path.basename(root) }).waitFor({ timeout: 8000 });
+    await page
+      .locator('.fb-picked')
+      .filter({ hasText: path.basename(root) })
+      .waitFor({ timeout: 8000 });
     const picked = await page.locator('.fb-picked').innerText();
     const norm = (s) => s.replace(/\\/g, '/').toLowerCase();
     assert(norm(picked).includes(norm(root)), `确认区不是真实路径：${picked}`);

@@ -66,6 +66,8 @@ interface Props {
   revealToken?: number;
   /** FR-0012：每次 +1 就收拢所有文件夹。 */
   collapseAllToken?: number;
+  /** 2026-10-15：每次 +1 就展开所有文件夹（与收拢对称）。 */
+  expandAllToken?: number;
   /** FR-0012：只显示可索引文件（隐藏二进制 / 被规则忽略的文件）。 */
   indexedOnly?: boolean;
 }
@@ -209,12 +211,23 @@ function FileBadges({ file, decor }: { file: string; decor?: TreeDecor }) {
         />
       )}
       {origin && (
-        <span className="badge" title={`${t(origin.titleKey)}${fact ? t('filetree.confidence', { n: fact.confidence }) : ''}`}>
+        <span
+          className="badge"
+          title={`${t(origin.titleKey)}${fact ? t('filetree.confidence', { n: fact.confidence }) : ''}`}
+        >
           {origin.mark}
         </span>
       )}
-      {decor?.hot?.has(file) && <span className="badge hot" title={t('filetree.hotTitle')}>★</span>}
-      {decor?.orphans?.has(file) && <span className="badge orphan" title={t('filetree.orphanTitle')}>?</span>}
+      {decor?.hot?.has(file) && (
+        <span className="badge hot" title={t('filetree.hotTitle')}>
+          ★
+        </span>
+      )}
+      {decor?.orphans?.has(file) && (
+        <span className="badge orphan" title={t('filetree.orphanTitle')}>
+          ?
+        </span>
+      )}
     </>
   );
 }
@@ -394,6 +407,7 @@ export function FileTree({
   projectId,
   revealToken = 0,
   collapseAllToken = 0,
+  expandAllToken = 0,
   indexedOnly = false,
 }: Props) {
   const { t } = useI18n();
@@ -476,9 +490,13 @@ export function FileTree({
     });
   };
 
-  /** FR-0012：把某个文件定位到树里 —— 展开它整条祖先链，并排队滚动到它那一行。 */
+  /**
+   * FR-0012：把某个文件定位到树里 —— 展开它整条祖先链（含项目根那行），并排队滚动到它那一行。
+   * 2026-10-15：根目录行也是一行且会参与「收拢」，所以这里必须把 `''` 一起放出来 ——
+   * 否则「收拢 → 定位」看不到东西（根还折着）。
+   */
   const revealPath = useCallback((path: string) => {
-    const dirs = ancestorDirs(path);
+    const dirs = ['', ...ancestorDirs(path)];
     setExpanded((prev) => {
       const next = new Set(prev);
       for (const d of dirs) next.add(d);
@@ -496,9 +514,15 @@ export function FileTree({
   /** FR-0012：收拢所有文件夹 —— 清空展开集合，并把全部目录压进「显式折叠」集合（过滤状态下也收得动）。 */
   const collapseAll = useCallback(() => {
     setExpanded(new Set());
-    setCollapsed(new Set(allDirPaths(tree)));
+    setCollapsed(new Set([...allDirPaths(tree), '']));
     setPendingReveal(null);
     setFlashPath(null);
+  }, [tree]);
+
+  /** 2026-10-15：展开所有文件夹（含项目根）。 */
+  const expandAll = useCallback(() => {
+    setCollapsed(new Set());
+    setExpanded(new Set(['', ...allDirPaths(tree)]));
   }, [tree]);
 
   // FR-0012：展开 / 折叠状态写回（挂载时多写一次，无副作用）。
@@ -515,6 +539,11 @@ export function FileTree({
   useEffect(() => {
     if (collapseAllToken > 0) collapseAll();
   }, [collapseAllToken, collapseAll]);
+
+  // 2026-10-15：外部信号 —— 每次 +1 就展开所有文件夹。
+  useEffect(() => {
+    if (expandAllToken > 0) expandAll();
+  }, [expandAllToken, expandAll]);
 
   // FR-0012：打开文件自动跟随（可在设置里关掉）；同一个文件只跟随一次，别跟「用户手动收拢」抢。
   useEffect(() => {
@@ -561,6 +590,27 @@ export function FileTree({
 
   const children = useMemo(() => sortNodes(tree?.children ?? []), [tree]);
 
+  /** 根目录行的名字：只显示最后一段（与下面的目录一样），不铺完整路径。 */
+  const rootName =
+    (projectRoot ?? '')
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() ||
+    tree?.name ||
+    t('filetree.projectRoot');
+  /** 根行默认展开；用户点过就折叠（过滤 / 只看时自动展开，和目录行同一口径）。 */
+  const rootAuto = Boolean(filter || decor?.visible);
+  const rootOpen = rootAuto || !collapsed.has('');
+  /** 点根行 = 与目录行一样折叠 / 展开（key 用空串，即项目根）。 */
+  const toggleRoot = () => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has('')) next.delete('');
+      else next.add('');
+      return next;
+    });
+  };
+
   if (!tree) return <div className="panel-empty">{t('filetree.noProject')}</div>;
   // 空树 / 被过滤空也要渲染容器：空白处右键才能对项目根新建（否则空项目里无路可走）
   const empty = !children.length || Boolean(decor?.visible && !children.some((c) => matchesVisible(c, decor.visible)));
@@ -586,28 +636,173 @@ export function FileTree({
       onDragLeave={() => setDropTarget((prev) => (prev === '' ? null : prev))}
       onDrop={dnd.dropOn('')}
     >
-      {empty ? (
-        <div className="panel-empty">{children.length ? t('filetree.noFilesFiltered') : t('filetree.noFiles')}</div>
-      ) : (
-        children.map((c) => (
-          <TreeNode
-            key={c.path}
-            node={c}
-            depth={0}
-            activeFile={activeFile}
-            onOpen={onOpen}
-            filter={filter}
-            decor={decor}
-            expanded={expanded}
-            collapsed={collapsed}
-            indexedOnly={indexedOnly}
-            flashPath={flashPath}
-            toggle={toggle}
-            dnd={dnd}
-            onMenu={(e, path, isDir) => setMenu({ path, isDir, x: e.clientX, y: e.clientY })}
-          />
-        ))
-      )}
+      {/* 根目录行（2026-10-15 用户要求）：与下面的目录行同构 —— 只显示名字（不铺完整路径）、
+          点击折叠 / 展开、右键是本目录的菜单（新建文件 / 新建文件夹 / 粘贴到这里）。
+          右侧额外保留「复制项目链接」（此前明确要求复制入口在根目录上）。 */}
+      <div
+        className={`tree-row dir tree-root-row${dnd.target === '' ? ' drop-target' : ''}`}
+        data-path=""
+        onClick={toggleRoot}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setMenu({ path: '', isDir: true, x: e.clientX, y: e.clientY });
+        }}
+        title={projectRoot ?? t('filetree.projectRoot')}
+        onDragOver={(e) => {
+          if (!canDrop('')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          dnd.setTarget('');
+        }}
+        onDragLeave={() => dnd.clearTarget('')}
+        onDrop={dnd.dropOn('')}
+      >
+        <span className={`chevron ${rootOpen ? 'open' : ''}`} aria-hidden>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M6 4l4 4-4 4V4z" />
+          </svg>
+        </span>
+        <FileIcon fileName={rootName} isDirectory size={16} />
+        <span className="tree-name">
+          <Highlight text={rootName} term={filter} />
+        </span>
+        <span className="tree-count">{tree?.count ?? 0}</span>
+        {/* 2026-10-15 用户要求「根目录上的功能太少了」：把目录最常用的几个操作直接放到行上
+            （悬停才显示）：新建文件 / 新建文件夹 / 粘贴到这里 / 复制项目链接；
+            其余（复制路径、重命名类不做）仍在右键菜单里。 */}
+        <span className="tree-root-actions">
+          <button
+            type="button"
+            className="tree-root-act"
+            title={t('filetree.newFile')}
+            aria-label={t('filetree.newFile')}
+            onClick={(e) => {
+              e.stopPropagation();
+              onNewFile?.('');
+            }}
+          >
+            {/* 新建文件：文档 + 加号 */}
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8" />
+              <path d="M13 3v6h6M18 2v5M15.5 4.5h5" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="tree-root-act"
+            title={t('filetree.newDir')}
+            aria-label={t('filetree.newDir')}
+            onClick={(e) => {
+              e.stopPropagation();
+              onNewDir?.('');
+            }}
+          >
+            {/* 新建文件夹：文件夹 + 加号 */}
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 7.2A1.7 1.7 0 0 1 4.7 5.5h4.4l1.7 2h8.5A1.7 1.7 0 0 1 21 9.2v7.6A1.7 1.7 0 0 1 19.3 18.5H4.7A1.7 1.7 0 0 1 3 16.8V7.2Z" />
+              <path d="M12 12v4M10 14h4" />
+            </svg>
+          </button>
+          {hasClipboard && (
+            <button
+              type="button"
+              className="tree-root-act"
+              title={t('filetree.paste')}
+              aria-label={t('filetree.paste')}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPaste?.('');
+              }}
+            >
+              {/* 粘贴：剪贴板 */}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="8" y="4" width="8" height="4" rx="1" />
+                <path d="M8 6H7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1" />
+              </svg>
+            </button>
+          )}
+          <button
+            type="button"
+            className="tree-root-act tree-root-copy"
+            disabled={!projectId}
+            title={t('filetree.copyProjectLink')}
+            aria-label={t('filetree.copyProjectLink')}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCopy?.(`${window.location.origin}/?project=${projectId ?? ''}`);
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M10 13.5a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 0 0-5.7-5.7L11.5 6.3" />
+              <path d="M14 10.5a4 4 0 0 0-5.7 0L5.5 13.3a4 4 0 0 0 5.7 5.7l1.3-1.3" />
+            </svg>
+          </button>
+        </span>
+      </div>
+      {rootOpen &&
+        (empty ? (
+          <div className="panel-empty">{children.length ? t('filetree.noFilesFiltered') : t('filetree.noFiles')}</div>
+        ) : (
+          children.map((c) => (
+            <TreeNode
+              key={c.path}
+              node={c}
+              depth={1}
+              activeFile={activeFile}
+              onOpen={onOpen}
+              filter={filter}
+              decor={decor}
+              expanded={expanded}
+              collapsed={collapsed}
+              indexedOnly={indexedOnly}
+              flashPath={flashPath}
+              toggle={toggle}
+              dnd={dnd}
+              onMenu={(e, path, isDir) => setMenu({ path, isDir, x: e.clientX, y: e.clientY })}
+            />
+          ))
+        ))}
       {menu && (
         <>
           {/* 点空白关掉菜单：透明遮罩比全局监听更稳，也不与编辑器的手势抢 */}
@@ -654,6 +849,29 @@ export function FileTree({
                   >
                     {t('filetree.paste')}
                   </button>
+                )}
+                {/* 项目根：路径类操作（与普通目录同一套菜单的口径） */}
+                {!menu.path && (
+                  <>
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        onCopy?.(projectRoot ?? rootName);
+                        setMenu(null);
+                      }}
+                    >
+                      {t('filetree.copyPath')}
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        onCopy?.(rootName);
+                        setMenu(null);
+                      }}
+                    >
+                      {t('filetree.copyFileName')}
+                    </button>
+                  </>
                 )}
                 <div className="tree-menu-sep" />
               </>
@@ -738,9 +956,7 @@ export function FileTree({
                 <button
                   role="menuitem"
                   onClick={() => {
-                    const abs = projectRoot
-                      ? projectRoot.replace(/\/+$/, '') + '/' + menu.path
-                      : menu.path;
+                    const abs = projectRoot ? projectRoot.replace(/\/+$/, '') + '/' + menu.path : menu.path;
                     onCopy?.(abs);
                     setMenu(null);
                   }}
