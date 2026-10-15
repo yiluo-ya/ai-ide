@@ -9,7 +9,8 @@ import { DATA_DIR, HOST, PORT, CORS_ORIGINS, SHARE_NOTE_LOCAL, SHARE_NOTE_SHARED
 import { installNoWatch, installProjectHint, migrateLegacyDataDir } from './bootstrap';
 import { setShutdownTask } from './services';
 import { primeUserIgnore } from './indexer/user-ignore';
-import { logError, logInfo } from './log';
+import { syncModelsToPiNow } from './agent/model-config';
+import { logError, logInfo, logWarn } from './log';
 
 export interface ServerOptions {
   port: number;
@@ -41,6 +42,12 @@ export async function createServer(opts: ServerOptions): Promise<ServerHandle> {
   await migrateLegacyDataDir(dataDir);
   const registry = new ProjectRegistry(dataDir);
   await registry.load();
+
+  // FR-0013：启动时把「模型」同步一份给 pi —— 覆盖「装完 pi 之后的第一次」
+  // （pi 没装 / 没配 provider 时它自己会跳过，不影响启动）
+  const piSync = await syncModelsToPiNow();
+  if (piSync?.ok && piSync.changed) logInfo('agent.pi-sync', { dir: piSync.dir, synced: piSync.synced });
+  else if (piSync && !piSync.ok) logWarn('agent.pi-sync.skipped', { error: piSync.error });
 
   const app = createApp(registry);
   const server = serve({ fetch: app.fetch, port: opts.port, hostname: opts.host });

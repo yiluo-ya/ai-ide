@@ -12,6 +12,7 @@ import fss from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { DATA_DIR } from '../config';
+import { syncModelsToPi, type PiSyncOutcome } from './pi-models';
 import { isApiType, type ApiType, type ModelRef, type ResolvedLlm } from './types';
 
 export interface ModelProvider {
@@ -87,6 +88,38 @@ export async function saveModelConfig(next: ModelConfig): Promise<void> {
   } catch {
     /* 忽略 */
   }
+  // FR-0013：跟着把 pi 那边也同步一份（失败不影响本次保存）
+  await syncModelsToPiNow();
+}
+
+let lastSync: PiSyncOutcome | null = null;
+
+/** 最近一次同步的结果（界面上的状态行用）。 */
+export function lastPiSync(): PiSyncOutcome | null {
+  return lastSync;
+}
+
+/**
+ * 把当前配置同步进 pi（幂等）。`READER_PI_SYNC=0` 时整个跳过（测试 / 排障）。
+ * 保存模型配置、保存 pi 路径、后端启动、「同步到 pi」按钮四条路都走它，口径只有一份。
+ * 返回 null = 本次被跳过。
+ */
+export async function syncModelsToPiNow(): Promise<PiSyncOutcome | null> {
+  if (process.env.READER_PI_SYNC === '0') return null;
+  try {
+    lastSync = await syncModelsToPi(await loadModelConfig());
+  } catch (error) {
+    // syncModelsToPi 自己不抛；这里兜底，绝不让同步问题影响模型配置本身
+    lastSync = {
+      ok: false,
+      dir: '',
+      synced: [],
+      removed: [],
+      changed: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return lastSync;
 }
 
 export function publicModelConfig(config: ModelConfig): PublicModelConfig {

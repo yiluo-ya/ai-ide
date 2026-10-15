@@ -137,6 +137,7 @@ import {
 } from '../languages';
 import { agentsDir, openhandsAgentsDir, piInstallHint, probePi, resolvePiRuntime } from '../agent/runtime';
 import { readAgentRuntimeConfig, writeAgentRuntimeConfig } from '../agent/runtime-config';
+import { syncModelsToPiNow } from '../agent/model-config';
 import { deleteApi, ensureApi, exportApis, readApiTree, renameApi, saveApi, sendRequest } from './apipanel';
 
 const VERSION = '0.1.0';
@@ -321,6 +322,8 @@ export function createApp(
     const body = await readJson<{ piPath?: unknown }>(c);
     const piPath = typeof body?.piPath === 'string' ? body.piPath.trim() : '';
     await writeAgentRuntimeConfig({ piPath });
+    // 刚把 pi 指对了：顺手把模型配置同步过去（FR-0013；没装 pi 时它自己会跳过）
+    await syncModelsToPiNow();
     return c.json({ ok: true, ...(await agentRuntimeStatus()) });
   });
 
