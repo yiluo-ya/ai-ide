@@ -24,6 +24,27 @@ const IS_WIN = process.platform === 'win32';
 /** 探测超时：`pi --version` 正常是毫秒级，2 秒足够（D5 的指引不阻塞在探测上）。 */
 export const PROBE_TIMEOUT_MS = 2_000;
 
+/**
+ * 「压根没装 pi」的专用错误（FR-0013）：带上可执行的安装命令，界面据此给出
+ * 「在终端安装」按钮。用 code 而不是文案匹配 —— 文案会随 i18n 变。
+ */
+export class PiNotFoundError extends Error {
+  readonly code = 'pi_not_found';
+  /** 可直接写进终端的一行命令。 */
+  readonly installCommand: string;
+
+  constructor(message = piNotFoundMessage()) {
+    super(message);
+    this.name = 'PiNotFoundError';
+    this.installCommand = piInstallHint().globalCommand;
+  }
+}
+
+/** 是不是「没装 pi」这一类错误（跨模块判定，不依赖 instanceof 的模块实例）。 */
+export function isPiNotFound(error: unknown): error is PiNotFoundError {
+  return Boolean(error && typeof error === 'object' && (error as { code?: unknown }).code === 'pi_not_found');
+}
+
 /** 安装指引里用的 npm 包名（本机实测：全局装的就是它，命令名是 `pi`）。 */
 export const PI_PACKAGE = '@earendil-works/pi-coding-agent';
 
