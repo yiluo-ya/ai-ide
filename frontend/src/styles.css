@@ -2011,6 +2011,53 @@ mark {
   cursor: pointer;
 }
 
+/* 12（2026-10-15 用户要求）：引用列表的过滤条件 —— 路径关键字 + 范围 + 测试开关 */
+.refs-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.refs-filters .refs-filter {
+  margin-top: 0;
+  flex: none;
+  white-space: nowrap;
+}
+
+.refs-search {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--fs-sm);
+}
+
+.refs-search:focus {
+  outline: none;
+  border-color: var(--accent-2);
+}
+
+.refs-scope {
+  flex: none;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+}
+
+.refs-filter-note {
+  margin-top: 4px;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 右侧常驻栏（2026-10-03）：变更与命令并排，默认显示变更 */
 .dock-changes {
   position: relative;

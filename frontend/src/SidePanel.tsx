@@ -283,6 +283,10 @@ export function RefsPanel({
 }) {
   const { t } = useI18n();
   const [hideTests, setHideTests] = useState(false);
+  /** 12（2026-10-15 用户要求）：按文件路径子串过滤引用。 */
+  const [fileFilter, setFileFilter] = useState('');
+  /** 12：范围过滤 —— 全部 / 只看声明 / 只看使用。 */
+  const [scope, setScope] = useState<'all' | 'decl' | 'use'>('all');
   const [active, setActive] = useState(0);
 
   const rows = useMemo<RefRow[]>(() => {
@@ -303,7 +307,17 @@ export function RefsPanel({
     });
   }, [data]);
 
-  const visible = useMemo(() => (hideTests ? rows.filter((r) => !r.isTest) : rows), [rows, hideTests]);
+  // 12（2026-10-15 用户要求）：过滤条件叠加 —— 隐藏测试 / 路径关键字 / 声明或使用
+  const visible = useMemo(() => {
+    const q = fileFilter.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (hideTests && r.isTest) return false;
+      if (scope === 'decl' && !r.isDeclaration) return false;
+      if (scope === 'use' && r.isDeclaration) return false;
+      if (q && !r.file.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [rows, hideTests, fileFilter, scope]);
 
   useEffect(() => {
     setActive(0);
@@ -376,10 +390,35 @@ export function RefsPanel({
           {declCount > 0 && t('side.declCount', { n: declCount })}
           {testFiles.size > 0 && t('side.testFileCount', { n: testFiles.size })}
         </div>
-        <label className="refs-filter">
-          <input type="checkbox" checked={hideTests} onChange={(e) => setHideTests(e.target.checked)} />
-          {t('side.onlyProject')}
-        </label>
+        {/* 12（2026-10-15 用户要求）：引用处的过滤条件 —— 路径关键字 / 范围 / 测试 */}
+        <div className="refs-filters">
+          <input
+            className="refs-search"
+            value={fileFilter}
+            onChange={(e) => setFileFilter(e.target.value)}
+            placeholder={t('side.filterFiles')}
+            aria-label={t('side.filterFiles')}
+            spellCheck={false}
+          />
+          <select
+            className="refs-scope"
+            value={scope}
+            onChange={(e) => setScope(e.target.value as 'all' | 'decl' | 'use')}
+            aria-label={t('side.filterScope')}
+            title={t('side.filterScope')}
+          >
+            <option value="all">{t('side.scopeAll')}</option>
+            <option value="decl">{t('side.scopeDecl')}</option>
+            <option value="use">{t('side.scopeUse')}</option>
+          </select>
+          <label className="refs-filter">
+            <input type="checkbox" checked={hideTests} onChange={(e) => setHideTests(e.target.checked)} />
+            {t('side.hideTests')}
+          </label>
+        </div>
+        {(fileFilter.trim() !== '' || scope !== 'all' || hideTests) && (
+          <div className="refs-filter-note">{t('side.filteredCount', { n: visible.length, total: rows.length })}</div>
+        )}
       </div>
       {/* 家族：引用列表只说「谁提到它」，这里补「它在继承体系里的位置」 */}
       {(() => {
