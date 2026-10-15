@@ -1,13 +1,14 @@
 {
-  "name": "web-code-reader",
+  "name": "ai-ide",
   "version": "0.1.0",
-  "description": "浏览器里的代码阅读器：后端 tree-sitter 索引 + Monaco 前端（可选内置 code-agent）",
+  "description": "浏览器里的代码 IDE：后端 tree-sitter 索引 + Monaco 前端（可选内置 code-agent）",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/yiluo-ya/ai-ide.git"
   },
   "bin": {
+    "ai-ide": "bin/ai-ide.mjs",
     "wcr": "bin/wcr.mjs"
   },
   "engines": {

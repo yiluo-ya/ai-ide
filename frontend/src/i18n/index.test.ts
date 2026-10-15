@@ -23,8 +23,8 @@ describe('i18n', () => {
 
   it('默认中文：按键命中中文文案', async () => {
     const { translate } = await loadI18n();
-    expect(translate('app.title')).toBe('代码阅读器');
-    expect(translate('app.title', undefined, 'en')).toBe('Web Code Reader');
+    expect(translate('app.title')).toBe('ai-ide');
+    expect(translate('app.title', undefined, 'en')).toBe('ai-ide');
   });
 
   it('缺 key 时回落到 key 本身，而不是空白', async () => {
@@ -52,8 +52,8 @@ describe('i18n', () => {
     expect(loadPrefs().locale).toBe('en');
     expect(document.documentElement.lang).toBe('en');
     expect(JSON.parse(window.localStorage.getItem(PREFS_KEY) ?? '{}').locale).toBe('en');
-    expect(translate('app.title')).toBe('Web Code Reader'); // 默认 locale 已跟随
+    expect(translate('app.title')).toBe('ai-ide'); // 默认 locale 已跟随
     setLocale('zh');
-    expect(translate('app.title')).toBe('代码阅读器');
+    expect(translate('app.title')).toBe('ai-ide');
   });
 });

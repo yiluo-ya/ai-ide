@@ -78,7 +78,7 @@
 ### 形态 B：agent 从「猜代码」变成「查代码」
 
 ```
-Agent（Claude / 其它宿主）                    代码阅读器后端
+Agent（Claude / 其它宿主）                       ai-ide 后端
    │  可用工具：index_project / find_symbol /        │
    │            goto_definition / find_references /   │
    │            file_outline / search_text            │

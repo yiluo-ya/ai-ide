@@ -1,8 +1,8 @@
-# 网页版代码阅读器（web-code-reader）
+# ai-ide
 
 [English](README.md) | **中文**
 
-浏览器里的代码阅读器：后端用 tree-sitter 建索引，前端用 Monaco 只做渲染与查询，
+浏览器里的代码 IDE：后端用 tree-sitter 建索引，前端用 Monaco 只做渲染与查询，
 F12 / Shift+F12 / Ctrl+Shift+O 等 VS Code 习惯的导航全部可用。
 
 定位见 `FR/FR-0002-fr.md`：**面向阅读** —— 不做编译、调试、重构与类型检查。
@@ -18,8 +18,9 @@ F12 / Shift+F12 / Ctrl+Shift+O 等 VS Code 习惯的导航全部可用。
 
 | 区域 | 内容 |
 |---|---|
-| **顶栏** | 项目下拉、添加项目（手输路径或弹目录选择窗）、重建索引、移除、项目根路径、索引进度、复制文件链接、模型、设置、`?`（快捷键与配色说明） |
-| **左栏**（常驻 4 个 tab，宽度可拖 240–560） | 文件 / 大纲 / 搜索 / code 会话 |
+| **顶栏** | 项目下拉、添加项目（手输路径或弹目录选择窗）、重建索引、索引进度，最右端是**最大化 / 还原**（全屏，与浏览器 F11 同效） |
+| **左侧竖轨** | 活动栏（上）+ **快捷键 / 模型 / 设置** 三个图标（左下竖排）；文件树顶部是一个**根目录行**：项目根路径 + *复制项目链接* + *移除项目* |
+| **右侧竖轨** | 活动栏（上）+ 左/右/下 三区域收放开关（下） |
 | **主区**（三态） | 代码 · 项目地图 · Agent；代码区顶条左侧是标签条（上限 8）、右侧是「▶ · ← → · 摘要」（摘要点开是居中弹窗）；项目地图开关在右下角竖轨里、布局开关之上；当前文件的面包屑在底部状态栏最左 |
 | **右栏**（常驻 dock，默认展开，宽度可拖 220–560，可收起） | 变更 / 命令 / 总览 |
 | **底部面板**（输出 / 终端，可收起、高度可拖） | 输出 = 命令运行历史；终端 = 常驻交互式 shell（本机专用）。文件树右键或 `Ctrl+F5` 可把当前文件按语言推断命令后送进终端执行（「在终端中运行」，不做 debug） |
@@ -66,15 +67,15 @@ http://127.0.0.1:8787/?project=<项目id>&file=src/app.py&line=42&col=5
 **A. npx / tarball（对方装了 Node）**
 
 ```bash
-npm run build && npm pack              # 产出 web-code-reader-0.1.0.tgz
-npx ./web-code-reader-0.1.0.tgz D:/code/my-project
+npm run build && npm pack              # 产出 ai-ide-0.1.0.tgz
+npx ./ai-ide-0.1.0.tgz D:/code/my-project
 ```
 
 **B. Docker（对方不需要 Node；容器内只读挂载最硬）**
 
 ```bash
-docker build -t web-code-reader .
-docker run --rm -p 8787:8787 -v D:/code:/work:ro web-code-reader
+docker build -t ai-ide .
+docker run --rm -p 8787:8787 -v D:/code:/work:ro ai-ide
 # 浏览器打开 http://127.0.0.1:8787，项目路径填 /work/my-project
 ```
 
@@ -139,17 +140,17 @@ Shell 另有函数 / 变量跳转与 `source` 依赖。SQL 的库对象（表 / 
 
 #### 装一门新语言（语言插件）
 
-`wcr` 就是本包的 CLI（`bin/wcr.mjs`，`npm i -g .` 或解包 tarball 后得到）；没全局装的话，
+`ai-ide` 就是本包的 CLI（`bin/ai-ide.mjs`，`wcr` 仍作为兼容别名保留；`npm i -g .` 或解包 tarball 后得到）；没全局装的话，
 在仓库根用 `npm run cli -- lang <子命令>` 跑同一份代码。语言做成**独立插件包**：装一个 + 重启，
 不改本仓库源码、也不重新构建前端。
 
 ```bash
-wcr lang list                            # 已加载语言 + 来源 + 加载失败
-wcr lang add wcr-lang-zig                # 装一个语言包（写到 <数据目录>/languages）
-wcr lang add D:/my-langs/demo-lang       # 或本地目录
-wcr lang link D:/my-langs/demo-lang      # 软链正在开发的插件（改完重启即生效）
-wcr lang new zig --dir ../wcr-lang-zig   # 生成插件项目骨架（含契约自测脚本）
-wcr lang remove wcr-lang-zig             # 卸掉（也可以用语言 id）
+ai-ide lang list                            # 已加载语言 + 来源 + 加载失败
+ai-ide lang add wcr-lang-zig                # 装一个语言包（写到 <数据目录>/languages）
+ai-ide lang add D:/my-langs/demo-lang       # 或本地目录
+ai-ide lang link D:/my-langs/demo-lang      # 软链正在开发的插件（改完重启即生效）
+ai-ide lang new zig --dir ../wcr-lang-zig   # 生成插件项目骨架（含契约自测脚本）
+ai-ide lang remove wcr-lang-zig             # 卸掉（也可以用语言 id）
 ```
 
 插件目录默认 `<数据目录>/languages`（`READER_PLUGINS_DIR` 可覆盖）；`READER_PLUGINS=0` 一个插件都不加载。

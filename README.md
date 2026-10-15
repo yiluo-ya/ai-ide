@@ -1,4 +1,4 @@
-# Web-based Code Reader (web-code-reader)
+# ai-ide
 
 **English** | [中文](README.zh-CN.md)
 
@@ -24,8 +24,9 @@ assistance.)
 
 | Area | Contents |
 |---|---|
-| **Top bar** | Project dropdown, Add project (type a path or pick from a folder dialog), Reindex, Remove, project root, indexing progress, Copy file link, Model, Settings, `?` (shortcuts & highlight legend) |
-| **Left panel** (4 permanent tabs, drag-resizable 240–560) | Files / Outline / Search / Code sessions |
+| **Top bar** | Project dropdown, Add project (type a path or pick from a folder dialog), Reindex, indexing progress, and at the far right **Maximize / Restore** (fullscreen, same as the browser's F11) |
+| **Left rail** | Activity bar (top) + **Shortcuts / Model / Settings** icons (bottom-left, stacked); the file tree opens with a **project-root row** holding the root path, *copy project link* and *remove project* |
+| **Right rail** | Activity bar (top) + left/right/bottom region toggles (bottom) |
 | **Main area** (three states) | Code · Project map · Agent; the code top bar holds tabs on the left (max 8) and “▶ · ← → · Summary” on the right (Summary opens a centered dialog); the project-map toggle sits in the bottom-right rail, above the layout toggles; the breadcrumb of the current file lives at the far left of the bottom status bar |
 | **Right dock** (permanent, expanded by default, drag-resizable 220–560, collapsible) | Changes / Commands / Overview |
 | **Bottom panel** (Output / Terminal, collapsible, drag-resizable) | Output = command run history; Terminal = a persistent interactive shell (local only). Right-click a file in the tree or press `Ctrl+F5` to infer a language-appropriate command and run it in the terminal (“Run in Terminal”, no debug) |
@@ -73,15 +74,15 @@ http://127.0.0.1:8787/?project=<project-id>&file=src/app.py&line=42&col=5
 **A. npx / tarball (they have Node)**
 
 ```bash
-npm run build && npm pack              # produces web-code-reader-0.1.0.tgz
-npx ./web-code-reader-0.1.0.tgz D:/code/my-project
+npm run build && npm pack              # produces ai-ide-0.1.0.tgz
+npx ./ai-ide-0.1.0.tgz D:/code/my-project
 ```
 
 **B. Docker (no Node needed; a read-only mount is the strongest guarantee)**
 
 ```bash
-docker build -t web-code-reader .
-docker run --rm -p 8787:8787 -v D:/code:/work:ro web-code-reader
+docker build -t ai-ide .
+docker run --rm -p 8787:8787 -v D:/code:/work:ro ai-ide
 # open http://127.0.0.1:8787 and enter /work/my-project as the project path
 ```
 
@@ -152,18 +153,18 @@ lives in `languages/manifests.ts`, separate from `specForFile`.
 
 #### Installing another language (language plugins)
 
-`wcr` is this package's CLI (`bin/wcr.mjs`, from `npm i -g .` or the packed tarball); without a
-global install, run the same thing from the repo root as `npm run cli -- lang <subcommand>`. A
-language is a **standalone plugin package**: install one and restart — no change to this repo's
-source, no frontend rebuild.
+`ai-ide` is this package's CLI (`bin/ai-ide.mjs`; `wcr` remains a compatible alias), from `npm i -g .` or the packed tarball; without a
+ global install, run the same thing from the repo root as `npm run cli -- lang <subcommand>`. A
+ language is a **standalone plugin package**: install one and restart — no change to this repo's
+ source, no frontend rebuild.
 
 ```bash
-wcr lang list                            # loaded languages + origin + load failures
-wcr lang add wcr-lang-zig                # install a language package (into <data dir>/languages)
-wcr lang add D:/my-langs/demo-lang       # or a local directory
-wcr lang link D:/my-langs/demo-lang      # symlink a plugin you are developing (restart reloads it)
-wcr lang new zig --dir ../wcr-lang-zig   # scaffold a plugin project (skeleton + self-check)
-wcr lang remove wcr-lang-zig             # uninstall (by package name or language id)
+ai-ide lang list                            # loaded languages + origin + load failures
+ai-ide lang add wcr-lang-zig                # install a language package (into <data dir>/languages)
+ai-ide lang add D:/my-langs/demo-lang       # or a local directory
+ai-ide lang link D:/my-langs/demo-lang      # symlink a plugin you are developing (restart reloads it)
+ai-ide lang new zig --dir ../wcr-lang-zig   # scaffold a plugin project (skeleton + self-check)
+ai-ide lang remove wcr-lang-zig             # uninstall (by package name or language id)
 ```
 
 The plugin directory defaults to `<data dir>/languages` (`READER_PLUGINS_DIR` overrides it);

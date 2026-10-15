@@ -5,7 +5,7 @@
  * 不得随意改动（tests/ui/navigator.mjs 的中文选择器依赖它们）。
  */
 export const zh: Record<string, string> = {
-  'app.title': '代码阅读器',
+  'app.title': 'ai-ide',
   'dialog.close': '关闭',
 
   // ---------------------------------------------------------------- 顶栏

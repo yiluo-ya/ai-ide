@@ -184,10 +184,10 @@ export function httpJson(
 }
 
 /** 该端口上跑的是不是本工具（用 `/api/health` 的 name 判定，避免误认别的服务）。 */
-export async function isWebCodeReaderAt(host: string, port: number): Promise<boolean> {
+export async function isAiIdeAt(host: string, port: number): Promise<boolean> {
   const res = await httpJson(`http://${dialableHost(host)}:${port}/api/health`);
   if (!res || !res.status || res.status >= 400) return false;
-  return (res.json as { name?: string } | null)?.name === 'web-code-reader';
+  return (res.json as { name?: string } | null)?.name === 'ai-ide';
 }
 
 /**
@@ -201,13 +201,13 @@ export async function findLiveInstance(
 ): Promise<{ port: number; pid: number } | null> {
   const rt = await readRuntime(dataDir);
   if (rt) {
-    if (isProcessAlive(rt.pid) && (await isWebCodeReaderAt(rt.host ?? host, rt.port))) {
+    if (isProcessAlive(rt.pid) && (await isAiIdeAt(rt.host ?? host, rt.port))) {
       return { port: rt.port, pid: rt.pid };
     }
     // 陈旧记录：清掉，避免下次又读到
     await clearRuntime(dataDir);
   }
-  if (preferred > 0 && (await isWebCodeReaderAt(host, preferred))) {
+  if (preferred > 0 && (await isAiIdeAt(host, preferred))) {
     return { port: preferred, pid: 0 };
   }
   return null;

@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 # ---------------------------------------------------------------------------
-# web-code-reader 镜像（06-platform P14 / P3 路径 C）
+# ai-ide 镜像（06-platform P14 / P3 路径 C）
 #
 # 构建：
-#   docker build -t web-code-reader .
+#   docker build -t ai-ide .
 #
 # 运行（把本机目录**只读**挂进容器）：
-#   docker run --rm -p 8787:8787 -v <本机目录>:/work:ro web-code-reader
+#   docker run --rm -p 8787:8787 -v <本机目录>:/work:ro ai-ide
 #   然后浏览器打开 http://127.0.0.1:8787 ，项目路径填 /work/<本机目录名>
 #
 # 三件事必须记住：

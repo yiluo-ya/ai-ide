@@ -149,7 +149,7 @@ describe('prefs', () => {
     expect(root.style.getPropertyValue('--sidebar-width')).toBe('400px');
     expect(root.dataset.motion).toBe('reduced');
     expect(root.lang).toBe('en');
-    expect(document.title).toBe('Web Code Reader');
+    expect(document.title).toBe('ai-ide');
   });
 
   it('订阅者在 savePrefs 后收到一次最新值，取消订阅后不再收到', async () => {

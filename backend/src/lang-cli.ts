@@ -1,10 +1,11 @@
 /**
- * `wcr lang` 子命令（07-languages-plugin P5）：语言包的查看 / 安装 / 卸载。
+ * `lang` 子命令（07-languages-plugin P5）：语言包的查看 / 安装 / 卸载。
  *
- *   wcr lang list                     已加载语言 + 来源 + 加载失败
- *   wcr lang add <pkg|目录>           装一个语言包到 <DATA_DIR>/languages
- *   wcr lang remove <包名|语言 id>    卸掉一个语言包
+ *   ai-ide lang list                     已加载语言 + 来源 + 加载失败
+ *   ai-ide lang add <pkg|目录>           装一个语言包到 <DATA_DIR>/languages
+ *   ai-ide lang remove <包名|语言 id>    卸掉一个语言包
  *
+ * 命令名 `wcr` 是长期沿用的兼容别名（`bin/wcr.mjs` 转发到 `bin/ai-ide.mjs`），两种写法等价。
  * 装卸都**只改插件目录**，语言集在下次启动时生效（不做热加载，见 docs/07-languages-plugin-plan.md）。
  */
 import fsp from 'node:fs/promises';
@@ -16,14 +17,14 @@ import { LANGUAGE_SPECS, pluginErrors, BUILTIN_LANGUAGE_IDS } from './languages'
 import { discoverPlugins, type PluginCandidate } from './languages/loader';
 
 const USAGE = [
-  'wcr lang —— 语言包管理',
+  'ai-ide lang —— 语言包管理（`wcr lang` 是等价别名）',
   '',
   '用法：',
-  '  wcr lang list                    列出已加载语言、来源与加载失败',
-  '  wcr lang add <包名|目录>         安装语言包（npm install 到语言插件目录）',
-  '  wcr lang link <插件目录>         软链一个正在开发的插件目录（改完重启即生效）',
-  '  wcr lang new <语言 id> [目录]    生成插件项目骨架（默认 ./wcr-lang-<id>）',
-  '  wcr lang remove <包名|语言 id>   卸载语言包',
+  '  ai-ide lang list                    列出已加载语言、来源与加载失败',
+  '  ai-ide lang add <包名|目录>         安装语言包（npm install 到语言插件目录）',
+  '  ai-ide lang link <插件目录>         软链一个正在开发的插件目录（改完重启即生效）',
+  '  ai-ide lang new <语言 id> [目录]    生成插件项目骨架（默认 ./wcr-lang-<id>）',
+  '  ai-ide lang remove <包名|语言 id>   卸载语言包',
   '',
   '说明：装 / 卸 / 链接之后重启服务生效；插件目录可用 READER_PLUGINS_DIR 覆盖。',
   '      插件标准（十项能力与自测清单）见 docs/08-language-plugin-spec.md。',

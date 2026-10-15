@@ -1,4 +1,4 @@
-# Features and implementation details (web-code-reader)
+# Features and implementation details (ai-ide)
 
 > For getting started (install / run / add a project) see [README](../README.md).
 > This is the full version of the capability list, API, shortcuts and known limitations,

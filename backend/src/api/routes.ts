@@ -168,7 +168,7 @@ export function createApp(
   const shareNote = shareHint ? SHARE_NOTE_SHARED : SHARE_NOTE_LOCAL;
 
   const manifest: IntegrationManifest = {
-    name: 'web-code-reader',
+    name: 'ai-ide',
     version: VERSION,
     apiBase: '/api',
     viewerUrlTemplate: '/?project={projectId}&file={path}&line={line}&col={col}',

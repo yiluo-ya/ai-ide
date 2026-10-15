@@ -1,4 +1,4 @@
-# 功能与实现细节（web-code-reader）
+# 功能与实现细节（ai-ide）
 
 > 快速上手（安装 / 启动 / 加项目）见 [README](../README.zh-CN.md)。
 > 本文是功能清单、API、快捷键与已知限制的完整版 —— 从 README 搬出来，让 README 保持简短。

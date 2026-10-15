@@ -1,7 +1,7 @@
 /**
- * wcr 命令行（06-platform P13 / P15 / P22）：
+ * ai-ide 命令行（06-platform P13 / P15 / P22）：
  *
- *   wcr [目录] [--port <n>] [--no-open] [--no-watch] [--workers <n>] [--host <h>] [--help] [--version]
+ *   ai-ide [目录] [--port <n>] [--no-open] [--no-watch] [--workers <n>] [--host <h>] [--help] [--version]
  *
  * 行为：先探已有实例（runtime.json + /api/health）→ 命中就只给地址、复用它；
  * 未命中则自动选端口（占用往后让位，不再直接失败）→ 起服务 → 写 runtime.json → 打开浏览器。
@@ -14,10 +14,10 @@ import path from 'node:path';
 const VERSION = '0.1.0';
 
 const USAGE = [
-  'wcr —— 浏览器里的代码阅读器',
+  'ai-ide —— 浏览器里的代码 IDE（`wcr` 是同一命令的兼容别名）',
   '',
   '用法：',
-  '  wcr [目录] [选项]',
+  '  ai-ide [目录] [选项]',
   '',
   '选项：',
   '  --port <n>     监听端口（默认 8787；被占用会自动往后找，0 = 让系统分配）',
@@ -29,17 +29,17 @@ const USAGE = [
   '  --version      输出版本号',
   '',
   '子命令：',
-  '  wcr lang list                  列出已加载语言（含插件与加载失败）',
-  '  wcr lang add <包名|目录>       安装语言包（重启后生效）',
-  '  wcr lang link <插件目录>       软链一个正在开发的插件目录（改完重启即生效）',
-  '  wcr lang new <语言 id> [目录]  生成插件项目骨架（默认 ./wcr-lang-<id>）',
-  '  wcr lang remove <包名|语言 id> 卸载语言包（重启后生效）',
+  '  ai-ide lang list                  列出已加载语言（含插件与加载失败）',
+  '  ai-ide lang add <包名|目录>       安装语言包（重启后生效）',
+  '  ai-ide lang link <插件目录>       软链一个正在开发的插件目录（改完重启即生效）',
+  '  ai-ide lang new <语言 id> [目录]  生成插件项目骨架（默认 ./wcr-lang-<id>）',
+  '  ai-ide lang remove <包名|语言 id> 卸载语言包（重启后生效）',
   '  （语言插件标准见 docs/08-language-plugin-spec.md）',
   '',
   '示例：',
-  '  wcr                          # 起服务并打开浏览器，之后在页面里填目录',
-  '  wcr D:/code/my-project       # 起服务并直接注册打开该目录',
-  '  wcr lang new zig             # 生成一个语言插件项目骨架',
+  '  ai-ide                          # 起服务并打开浏览器，之后在页面里填目录',
+  '  ai-ide D:/code/my-project       # 起服务并直接注册打开该目录',
+  '  ai-ide lang new zig             # 生成一个语言插件项目骨架',
 ].join('\n');
 
 export interface CliArgs {
@@ -116,7 +116,7 @@ async function registerProject(
   }
 }
 
-// `wcr lang ...`（07-languages-plugin）：语言包管理子命令，不走服务启动流程。
+// `ai-ide lang ...`（07-languages-plugin）：语言包管理子命令，不走服务启动流程。
 if (process.argv[2] === 'lang') {
   const { runLangCommand } = await import('./lang-cli');
   process.exit(await runLangCommand(process.argv.slice(3)));
@@ -150,7 +150,7 @@ const dataDir = config.DATA_DIR;
 const root = args.dir ? path.resolve(args.dir) : null;
 for (const opt of args.unknown) logWarn('cli.arg.unknown', { arg: opt });
 
-say('web-code-reader');
+say('ai-ide');
 say();
 
 // 1) 单实例：已有实例就直接给地址，不起第二个进程（P15）

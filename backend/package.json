@@ -1,9 +1,9 @@
 {
-  "name": "code-reader-backend",
+  "name": "ai-ide-backend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Code Intelligence Service backend for the web code reader (tree-sitter based)",
+  "description": "Code Intelligence Service backend for ai-ide (tree-sitter based)",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",

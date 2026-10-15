@@ -2,7 +2,7 @@
  * English copy (P25). Keys match zh.ts one-to-one; missing keys fall back to Chinese.
  */
 export const en: Record<string, string> = {
-  'app.title': 'Web Code Reader',
+  'app.title': 'ai-ide',
   'dialog.close': 'Close',
 
   // ---------------------------------------------------------------- Top bar
