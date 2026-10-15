@@ -13,7 +13,6 @@ import { ensureLanguages, guessLangFor } from './languages';
 import { Editor } from './Editor';
 import { FileTree, type TreeDecor } from './FileTree';
 import { Breadcrumbs } from './Breadcrumbs';
-import { FileSearch, MIN_LEN } from './FileSearch';
 import { ActivityBar } from './ActivityBar';
 import { moveView, reorderView, setActiveView, useLayout, viewsOn, type ViewId } from './layout';
 import { OutputPanel } from './OutputPanel';
@@ -172,8 +171,6 @@ export default function App() {
   const [graphState, setGraphState] = useState<GraphViewState | null>(null);
   const [recentFilter, setRecentFilter] = useState<RecentFilter>('all');
   const [onlyOrphans, setOnlyOrphans] = useState(false);
-  /** FR-0012：只显示可索引文件（隐藏二进制 / 被规则忽略的文件）。 */
-  const [indexedOnly, setIndexedOnly] = useState(false);
   /** FR-0012：文件树的两条外部信号（自增触发；FileTree 侧监听）。 */
   const [treeRevealToken, setTreeRevealToken] = useState(0);
   const [treeCollapseToken, setTreeCollapseToken] = useState(0);
@@ -871,15 +868,14 @@ export default function App() {
           <>
             <input
               className="text-input sidebar-filter"
-              placeholder={t('app.filterPlaceholder', { min: MIN_LEN })}
+              placeholder={t('app.filterPlaceholder')}
               value={fileFilter}
               onChange={(e) => setFileFilter(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') setFileFilter('');
               }}
             />
-            {/* 2026-10-03：文件名过滤与内容搜索共用一个输入框（≥4 字才搜内容） */}
-            <FileSearch query={fileFilter} onOpen={(file, line, col) => jump(file, line, col)} />
+            {/* 2026-10-15 用户要求：这里只过滤文件名，不再顺带搜内容（要搜内容用「搜索」面板）。 */}
             <div className="tree-views">
               <select
                 className="ov-select"
@@ -895,10 +891,6 @@ export default function App() {
               <label title={t('app.onlyOrphansTitle')}>
                 <input type="checkbox" checked={onlyOrphans} onChange={(e) => setOnlyOrphans(e.target.checked)} />
                 {t('app.orphan')}
-              </label>
-              <label title={t('app.indexedOnlyTitle')}>
-                <input type="checkbox" checked={indexedOnly} onChange={(e) => setIndexedOnly(e.target.checked)} />
-                {t('app.indexedOnly')}
               </label>
               {/* FR-0012：树的三个工具动作（与右键 / 快捷键同源）；2026-10-15 用户要求改为图标。 */}
               <span className="tree-actions">
@@ -997,7 +989,6 @@ export default function App() {
               revealToken={treeRevealToken}
               collapseAllToken={treeCollapseToken}
               expandAllToken={treeExpandToken}
-              indexedOnly={indexedOnly}
             />
           </>
         );

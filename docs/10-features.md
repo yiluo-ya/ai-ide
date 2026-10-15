@@ -24,7 +24,7 @@
 - 搜索：`Ctrl/Cmd+P` 文件、`Ctrl/Cmd+T` 工作区符号、`Ctrl/Cmd+Shift+F` 全项目文本
   （正则 / 大小写 / 整词 / 目录限定 / **流式边出边看**、可随时停止）；`F3` / `Shift+F3` 在命中之间
   前后跳转（面板显示「第 k / 共 n 处」，点某条即同步游标）；「文件」面板的输入框
-  同时过滤文件名，输入 ≥4 字会一并搜文件内容（按文件分组）
+  只过滤文件名（2026-10-15 起不再顺带搜内容，要搜内容用上面那个搜索面板）
 - 标签页（上限 8，中键或「旁边打开」分屏）、最近打开（Ctrl+P 空查询）、
   位置记忆（切回文件回到上次的行与滚动位置）、前进 / 后退（`Alt+←` / `Alt+→`，可回退的位置含打开 / 跳转
   与「在编辑器里点过的位置」）
@@ -273,7 +273,7 @@ frontend/src/
   Editor.tsx       Monaco 封装（model 池、只读、定位、位置上报、右键动作、语义着色）
   monaco-setup.ts  worker 环境 + Definition/Reference/DocumentSymbol/Hover/Link Provider
   SidePanel.tsx    大纲 + 引用面板（引用面板已无界面入口）
-  FileTree.tsx / FileSearch.tsx / QuickOpen.tsx   文件树 / 文件+内容搜索 / 快速打开
+  FileTree.tsx / QuickOpen.tsx                    文件树（顶部输入框只过滤文件名） / 快速打开
   Overview.tsx / GraphView.tsx / mapApi.ts / mapState.ts   项目地图 / 依赖图 / 地图数据
   ChangesPanel.tsx / changesState.ts                       右栏「变更」（git）
   CommandPanel.tsx / service.css                           右栏「命令」（FR-0005）

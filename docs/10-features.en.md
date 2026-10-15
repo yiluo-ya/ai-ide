@@ -322,7 +322,7 @@ frontend/src/
   Editor.tsx       Monaco wrapper (model pool, read-only, positioning, position reporting, actions, highlighting)
   monaco-setup.ts  worker environment + Definition/Reference/DocumentSymbol/Hover/Link providers
   SidePanel.tsx    outline + references panel (references has no UI entry any more)
-  FileTree.tsx / FileSearch.tsx / QuickOpen.tsx   file tree / file+content search / quick open
+  FileTree.tsx / QuickOpen.tsx                    file tree (its top input filters names only) / quick open
   Overview.tsx / GraphView.tsx / mapApi.ts / mapState.ts   project map / graph / map data
   ChangesPanel.tsx / changesState.ts                       right-dock “Changes” (git)
   CommandPanel.tsx / service.css                           right-dock “Commands” (FR-0005)

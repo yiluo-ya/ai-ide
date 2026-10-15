@@ -68,8 +68,6 @@ interface Props {
   collapseAllToken?: number;
   /** 2026-10-15：每次 +1 就展开所有文件夹（与收拢对称）。 */
   expandAllToken?: number;
-  /** FR-0012：只显示可索引文件（隐藏二进制 / 被规则忽略的文件）。 */
-  indexedOnly?: boolean;
 }
 
 /** 右键菜单（视口坐标定位）：文件与目录都可开（目录用于复制路径 / 文件名）。 */
@@ -134,13 +132,6 @@ function matchesVisible(node: FileNode, visible: Set<string> | undefined): boole
   return (node.children ?? []).some((c) => matchesVisible(c, visible));
 }
 
-/** FR-0012：开了「只显示可索引文件」时，二进制 / 被规则忽略的文件整棵隐藏（目录靠子树存活）。 */
-function matchesIndexed(node: FileNode, indexedOnly: boolean): boolean {
-  if (!indexedOnly) return true;
-  if (node.type === 'file') return node.indexed !== false;
-  return (node.children ?? []).some((c) => matchesIndexed(c, true));
-}
-
 const ORIGIN_BADGE: Record<FileOrigin, { mark: string; titleKey: string } | null> = {
   // 2026-10-03 用户要求去掉「agent 产出」（没啥用）：不再在文件树上标它。
   agent: null,
@@ -159,18 +150,9 @@ function sortNodes(nodes: FileNode[]): FileNode[] {
   });
 }
 
-/** 过滤（搜索 / 只看 / 只含可索引）之后的子节点，按目录在前排序。 */
-function visibleChildren(
-  node: FileNode,
-  filter: string,
-  decor: TreeDecor | undefined,
-  indexedOnly: boolean,
-): FileNode[] {
-  return sortNodes(
-    (node.children ?? []).filter(
-      (c) => matchesFilter(c, filter) && matchesVisible(c, decor?.visible) && matchesIndexed(c, indexedOnly),
-    ),
-  );
+/** 过滤（搜索 / 只看）之后的子节点，按目录在前排序。 */
+function visibleChildren(node: FileNode, filter: string, decor: TreeDecor | undefined): FileNode[] {
+  return sortNodes((node.children ?? []).filter((c) => matchesFilter(c, filter) && matchesVisible(c, decor?.visible)));
 }
 
 /**
@@ -178,11 +160,11 @@ function visibleChildren(
  * 从 node 起，只要「过滤后唯一子节点还是目录」就一路并进来，直到出现分支（多个子项）或子项是文件。
  * 返回的链首是最外层目录、链尾是这条链真正代表的目录。
  */
-function compactChain(node: FileNode, filter: string, decor: TreeDecor | undefined, indexedOnly: boolean): FileNode[] {
+function compactChain(node: FileNode, filter: string, decor: TreeDecor | undefined): FileNode[] {
   const chain = [node];
   let cur = node;
   for (;;) {
-    const kids = visibleChildren(cur, filter, decor, indexedOnly);
+    const kids = visibleChildren(cur, filter, decor);
     if (kids.length === 1 && kids[0].type === 'directory') {
       cur = kids[0];
       chain.push(cur);
@@ -241,7 +223,6 @@ function TreeNode({
   decor,
   expanded,
   collapsed,
-  indexedOnly,
   flashPath,
   toggle,
   onMenu,
@@ -256,16 +237,13 @@ function TreeNode({
   expanded: Set<string>;
   /** 用户显式折叠过的目录：过滤自动展开时也压得住。 */
   collapsed: Set<string>;
-  /** FR-0012：只显示可索引文件。 */
-  indexedOnly: boolean;
   /** FR-0012：正在闪烁高亮的路径（刚定位到的那一行）。 */
   flashPath: string | null;
   toggle: (paths: string[]) => void;
   onMenu: (e: React.MouseEvent, path: string, isDir: boolean) => void;
   dnd: Dnd;
 }) {
-  if (!matchesFilter(node, filter) || !matchesVisible(node, decor?.visible) || !matchesIndexed(node, indexedOnly))
-    return null;
+  if (!matchesFilter(node, filter) || !matchesVisible(node, decor?.visible)) return null;
 
   if (node.type === 'directory') {
     // 过滤时自动展开，方便直接看到命中项；但用户显式折叠过的目录优先 ——
@@ -273,11 +251,11 @@ function TreeNode({
     const auto = Boolean(filter || decor?.visible);
     // 单链目录压缩（2026-10-05 用户要求）：唯一子目录并成一行 a/b/c 一直到分支处；
     // 折叠时只显示最外层名字，展开时才显示整条链。
-    const chain = compactChain(node, filter, decor, indexedOnly);
+    const chain = compactChain(node, filter, decor);
     const tail = chain[chain.length - 1];
     const open = !collapsed.has(node.path) && (expanded.has(node.path) || auto);
     const label = open ? chain.map((n) => n.name).join('/') : node.name;
-    const children = visibleChildren(tail, filter, decor, indexedOnly);
+    const children = visibleChildren(tail, filter, decor);
     return (
       <div className="tree-dir">
         <div
@@ -329,7 +307,6 @@ function TreeNode({
               decor={decor}
               expanded={expanded}
               collapsed={collapsed}
-              indexedOnly={indexedOnly}
               flashPath={flashPath}
               toggle={toggle}
               onMenu={onMenu}
@@ -408,7 +385,6 @@ export function FileTree({
   revealToken = 0,
   collapseAllToken = 0,
   expandAllToken = 0,
-  indexedOnly = false,
 }: Props) {
   const { t } = useI18n();
   const prefs = usePrefs();
@@ -567,7 +543,7 @@ export function FileTree({
     if (flashTimer.current) window.clearTimeout(flashTimer.current);
     flashTimer.current = window.setTimeout(() => setFlashPath(null), 1200);
     setPendingReveal(null);
-  }, [pendingReveal, expanded, collapsed, filter, decor, indexedOnly]);
+  }, [pendingReveal, expanded, collapsed, filter, decor]);
 
   useEffect(
     () => () => {
@@ -795,7 +771,6 @@ export function FileTree({
               decor={decor}
               expanded={expanded}
               collapsed={collapsed}
-              indexedOnly={indexedOnly}
               flashPath={flashPath}
               toggle={toggle}
               dnd={dnd}

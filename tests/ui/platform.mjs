@@ -263,6 +263,34 @@ async function main() {
     return `${name}（${fixture}）`;
   });
 
+  await step('文件面板：无「可索引」勾选，顶部输入框只过滤文件名', async () => {
+    // 2026-10-15 用户要求：勾选移除、搜索不再搜内容。
+    const boxes = await page.locator('.tree-views label').allInnerTexts();
+    const trimmed = boxes.map((s) => s.trim());
+    assert(!trimmed.some((s) => s.includes('可索引')), `「可索引」勾选还在：${trimmed.join('/')}`);
+    assert(
+      trimmed.some((s) => s.includes('孤立')),
+      `「孤立」勾选丢了：${trimmed.join('/')}`,
+    );
+    const input = page.locator('.text-input.sidebar-filter');
+    const ph = await input.getAttribute('placeholder');
+    assert(ph && !ph.includes('搜内容') && !ph.includes('内容'), `placeholder 还在提搜内容：${ph}`);
+    // 输一个长词（旧行为会去搜内容）：只应过滤文件名，不应出现结果块
+    await input.fill('util');
+    await page.waitForTimeout(1200);
+    const blocks = await page.locator('.file-search, .fs-result').count();
+    assert(blocks === 0, `内容搜索结果块不该出现（找到 ${blocks} 个）`);
+    const files = await page.locator('.file-tree .tree-row.file .tree-name').allInnerTexts();
+    assert(files.length > 0, '按文件名过滤后一个文件都没有（夹具里该有 src/util.ts）');
+    assert(
+      files.every((n) => n.toLowerCase().includes('util')),
+      `不是按文件名过滤：${files.join('/')}`,
+    );
+    await input.fill('');
+    await page.waitForTimeout(300);
+    return `${trimmed.join(' / ')}；placeholder «${ph}»；按名过滤 ${files.length} 个`;
+  });
+
   await step('P24 设置：切亮色真的换主题', async () => {
     const before = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     await page.evaluate(() => {
