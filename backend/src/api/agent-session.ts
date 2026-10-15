@@ -9,14 +9,18 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import {
+  lastPiSync,
   loadModelConfig,
   normalizeApiType,
   publicModelConfig,
   removeProvider,
   setDefaultModel,
+  syncModelsToPiNow,
   upsertProvider,
 } from '../agent/model-config';
+import { piSyncStatus } from '../agent/pi-models';
 import { probeLlm } from '../agent/probe';
+import { isPiNotFound } from '../agent/runtime';
 import { isBackendKind } from '../agent/types';
 import type { AgentSessions } from '../agent/sessions';
 
@@ -108,9 +112,35 @@ export function createAgentSessionRoutes(sessions: AgentSessions): Hono {
     return c.json({ ok: true, config: publicModelConfig(await loadModelConfig()) });
   });
 
+  // ----------------------------------------------------- 模型配置同步到 pi（FR-0013）
+
+  /** 同步状态：「模型」面板的状态行（pi 在哪、装没装、同步过哪几个）。 */
+  app.get('/model-config/pi-sync', async (c) => c.json({ ...(await piSyncStatus()), last: lastPiSync() }));
+
+  /**
+   * 手动重推（幂等）。装上 pi 之后点一下就行，不需要回去改模型配置。
+   * 与保存模型配置时的自动同步走同一个函数（`READER_PI_SYNC=0` 时两边都关）。
+   */
+  app.post('/model-config/sync-pi', async (c) => {
+    const outcome = await syncModelsToPiNow();
+    if (!outcome) return c.json({ error: 'disabled', message: 'pi 同步已关闭（READER_PI_SYNC=0）' }, 400);
+    return c.json({ ...outcome, status: await piSyncStatus() });
+  });
+
   // ----------------------------------------------------------------- 会话
 
-  app.get('/sessions', (c) => c.json({ sessions: sessions.list() }));
+  /** 会话未载入（重启后 / 刷新页面）就先按磁盘记录拉起来；拉不起来返回 false。 */
+  const ensureSession = async (id: string): Promise<boolean> => {
+    if (sessions.has(id)) return true;
+    try {
+      await sessions.resume(id);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  app.get('/sessions', async (c) => c.json({ sessions: await sessions.list() }));
 
   app.post('/sessions', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -132,19 +162,42 @@ export function createAgentSessionRoutes(sessions: AgentSessions): Hono {
       });
       return c.json({ session }, 201);
     } catch (error) {
+      // 没装 pi：给一条能直接写进终端的安装命令（FR-0013 需求 3）
+      if (isPiNotFound(error)) {
+        return c.json(
+          { error: 'pi_not_found', message: error.message, installCommand: error.installCommand },
+          400,
+        );
+      }
       return c.json({ error: 'agent_session_failed', message: message(error) }, 400);
     }
   });
 
   app.get('/sessions/:id', async (c) => {
     const id = c.req.param('id');
-    if (!sessions.has(id)) return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
-    return c.json({ session: await sessions.refresh(id) });
+    try {
+      return c.json({ session: await sessions.refresh(id) });
+    } catch {
+      return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
+    }
   });
 
-  app.delete('/sessions/:id', (c) => {
+  /**
+   * 续传（FR-0013 需求 4）：重启后进程里没有这个会话，用磁盘记录把它拉起来。
+   * 幂等（已经在跑就直接返回摘要），所以前端每次选中会话都可以调。
+   */
+  app.post('/sessions/:id/resume', async (c) => {
     const id = c.req.param('id');
-    const removed = sessions.remove(id);
+    try {
+      return c.json({ session: await sessions.resume(id) });
+    } catch (error) {
+      return c.json({ error: 'agent_resume_failed', message: message(error) }, 404);
+    }
+  });
+
+  app.delete('/sessions/:id', async (c) => {
+    const id = c.req.param('id');
+    const removed = await sessions.remove(id);
     return removed
       ? c.json({ ok: true })
       : c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
@@ -161,6 +214,7 @@ export function createAgentSessionRoutes(sessions: AgentSessions): Hono {
 
   app.post('/sessions/:id/prompt', async (c) => {
     const id = c.req.param('id');
+    if (!(await ensureSession(id))) return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
     const adapter = sessions.get(id);
     if (!adapter) return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -177,6 +231,7 @@ export function createAgentSessionRoutes(sessions: AgentSessions): Hono {
 
   app.post('/sessions/:id/abort', async (c) => {
     const id = c.req.param('id');
+    if (!(await ensureSession(id))) return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
     const adapter = sessions.get(id);
     if (!adapter) return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
     await adapter.abort();
@@ -185,6 +240,7 @@ export function createAgentSessionRoutes(sessions: AgentSessions): Hono {
 
   app.post('/sessions/:id/model', async (c) => {
     const id = c.req.param('id');
+    if (!(await ensureSession(id))) return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
     const adapter = sessions.get(id);
     if (!adapter) return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -201,7 +257,7 @@ export function createAgentSessionRoutes(sessions: AgentSessions): Hono {
 
   app.post('/sessions/:id/rename', async (c) => {
     const id = c.req.param('id');
-    if (!sessions.has(id)) return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
+    if (!(await ensureSession(id))) return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     const name = str(body.name);
     if (!name) return c.json({ error: 'bad_request', message: 'name 必填' }, 400);
@@ -213,9 +269,12 @@ export function createAgentSessionRoutes(sessions: AgentSessions): Hono {
    * agent_start / message_start|update|end / tool_execution_start|end / agent_settled，
    * 另有一发 `session_state` 让前端一订阅就有状态。
    */
-  app.get('/sessions/:id/events', (c) => {
+  app.get('/sessions/:id/events', async (c) => {
     const id = c.req.param('id');
-    if (!sessions.has(id)) return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
+    // 刷新页面后直接连事件流：会话还没载入就先拉起来（否则 404）
+    if (!(await ensureSession(id))) {
+      return c.json({ error: 'not_found', message: `会话不存在：${id}` }, 404);
+    }
     return streamSSE(c, async (stream) => {
       let closed = false;
       const unsubscribe = sessions.subscribe(id, (event) => {
