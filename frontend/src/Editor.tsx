@@ -661,8 +661,16 @@ export function Editor({
     const endLine = reveal.endLine ?? reveal.line;
     const endCol = reveal.endCol ?? reveal.col + 1;
     const selection = new monaco.Selection(reveal.line, reveal.col, endLine, endCol);
-    editor.setSelection(selection);
-    editor.revealRangeInCenterIfOutsideViewport(selection, monaco.editor.ScrollType.Smooth);
+    // 跨文件跳转时，setModel（上一个 effect）对编辑器光标/视口的重置是异步落地的：
+    // 若在这里同步 setSelection，会被 setModel 稍后的默认光标/视口复位盖掉，
+    // 表现就是「文件切过去了，光标却没停在目标行」。延到下一帧再定位，避免被复位。
+    requestAnimationFrame(() => {
+      const live = editorRef.current;
+      if (!live || live.getModel() !== editor.getModel()) return;
+      live.setSelection(selection);
+      live.revealRangeInCenterIfOutsideViewport(selection, monaco.editor.ScrollType.Immediate);
+      live.focus();
+    });
     editor.focus();
   }, [reveal, file]);
 

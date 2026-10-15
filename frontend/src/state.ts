@@ -821,6 +821,9 @@ export const useStore = create<State>((set, get) => ({
         fileLoading: false,
         savedText: fresh,
         fileMtimeMs: res.mtimeMs,
+        // 跳转 / 打开成功即清除任何「跳转失败」残留提示（N2 的 external/unresolved/no-symbol 浮层）；
+        // 否则上一次失败留下的提示会一直挂到 5 秒定时器耗尽，出现「跳转成功了却还在提示失败」。
+        notice: null,
         // 打开 / 重载：这是「把正文灌进编辑器 model」的唯一时机之一
         contentToken: get().contentToken + 1,
         saveStatus: pending == null ? 'idle' : 'pending',
