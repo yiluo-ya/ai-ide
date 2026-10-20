@@ -325,6 +325,19 @@
   margin-top: 6px;
 }
 
+.ag-compose-model {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.ag-compose-model-label {
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
 .ag-select {
   height: var(--ctl-h);
   padding: 0 8px;

@@ -138,7 +138,8 @@
   用的是 tree-sitter 索引，不是 grep 猜；**文件类**（`read_file` / `write_file` / `edit_file` /
   `list_dir` / `glob` / `grep`）让它真能改代码。所有文件路径必须落在项目根内，越界直接拒绝
 - 会话新建时可挑后端：**内置 agent** / **pi**（本机 `pi --mode rpc --no-session`）/ **OpenHands**
-  （占位，调用时给出「怎么接」的指引）；只有内置后端能切模型
+  （占位，调用时给出「怎么接」的指引）；内置与 pi 都能在输入框下方切模型（pi 用的是同步过去的
+  provider，见下「模型配置同步给 pi」）
 - **pi 从哪来**（FR-0007）：源码里不含 pi，按 **设置 → Code Agent 后端** 里填的路径 →
   落点 `~/.ide/agents/pi/` → `PATH` 的顺序找（环境变量 `READER_PI_COMMAND` 优先级最高）；
   两种装法二选一：`npm install -g @earendil-works/pi-coding-agent`（进 PATH），或

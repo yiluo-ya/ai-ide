@@ -157,6 +157,27 @@ export async function syncModelsToPi(config: ModelConfig): Promise<PiSyncOutcome
   }
 }
 
+/**
+ * 会话里换模型时用：本项目的 provider id → 写进 pi 的 key（账本）。
+ * 没同步过（不在账本里）就返回 undefined，调用方回退用原值交给 pi 报错。
+ */
+export async function piKeyForProvider(providerId: string): Promise<string | undefined> {
+  const manifest = await readManifest();
+  return manifest.keys[providerId];
+}
+
+/**
+ * 反查：pi 报回来的 provider key → 本项目的 provider id。
+ * 界面统一显示本项目的 provider id，而不是 pi 内部用的 slug key（如 `deek-2`）。
+ */
+export async function providerIdForPiKey(key: string): Promise<string | undefined> {
+  const manifest = await readManifest();
+  for (const [id, piKey] of Object.entries(manifest.keys)) {
+    if (piKey === key) return id;
+  }
+  return undefined;
+}
+
 // ------------------------------------------------------------------ 内部
 
 interface SyncManifest {

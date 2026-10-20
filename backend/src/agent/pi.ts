@@ -22,6 +22,7 @@ import {
   type PiRuntime,
 } from './runtime';
 import { readAgentRuntimeConfig } from './runtime-config';
+import { piKeyForProvider, providerIdForPiKey } from './pi-models';
 import {
   type AdapterExit,
   type AdapterOptions,
@@ -71,7 +72,7 @@ export class PiAgent extends EventEmitter implements AgentAdapter {
   async start(): Promise<SessionState> {
     await this.spawn();
     const data = await this.command('get_state');
-    this.state = mapState(data);
+    this.state = await mapState(data);
     if (this.options.name) {
       // 会话名只是显示用，失败不影响可用性
       await this.command('set_session_name', { name: this.options.name }).catch(() => {});
@@ -95,15 +96,22 @@ export class PiAgent extends EventEmitter implements AgentAdapter {
   }
 
   async getState(): Promise<SessionState> {
-    this.state = mapState(await this.command('get_state'));
+    this.state = await mapState(await this.command('get_state'));
     return this.state;
   }
 
   async setModel(ref: ModelRef): Promise<{ id?: string; name?: string; provider?: string } | null> {
-    const data = asRecord(await this.command('set_model', { provider: ref.provider, modelId: ref.modelId }));
+    // 前端给的是本项目 provider id（如 `p-murww7mk`），pi 认的是账本里的 key（如 `deek-2`）
+    const provider = (await piKeyForProvider(ref.provider)) ?? ref.provider;
+    const data = asRecord(await this.command('set_model', { provider, modelId: ref.modelId }));
     const model = asRecord(data?.model ?? data);
     if (!model) return null;
-    return { id: str(model.id), name: str(model.name), provider: str(model.provider) };
+    const rawProvider = str(model.provider);
+    return {
+      id: str(model.id),
+      name: str(model.name),
+      provider: rawProvider ? ((await providerIdForPiKey(rawProvider)) ?? rawProvider) : undefined,
+    };
   }
 
   async rename(name: string): Promise<void> {
@@ -277,16 +285,18 @@ function startFailure(runtime: PiRuntime, error: unknown): string {
   return runtime.resolved ? `启动 pi 失败：${message(error)}` : piNotFoundMessage();
 }
 
-/** pi 的 get_state → 适配层的 SessionState。 */
-function mapState(data: unknown): SessionState {
+/** pi 的 get_state → 适配层的 SessionState（provider key 翻回本项目的 provider id）。 */
+async function mapState(data: unknown): Promise<SessionState> {
   const d = asRecord(data);
   const model = asRecord(d?.model);
+  const rawProvider = str(model?.provider);
+  const provider = rawProvider ? ((await providerIdForPiKey(rawProvider)) ?? rawProvider) : undefined;
   return {
     model: model
       ? {
           id: str(model.id),
           name: str(model.name) ?? str(model.id),
-          provider: str(model.provider),
+          provider,
           api: str(model.api),
         }
       : null,

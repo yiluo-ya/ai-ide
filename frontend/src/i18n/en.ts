@@ -1080,6 +1080,7 @@ export const en: Record<string, string> = {
   'agent.toolResultPrefix': 'Tool result · ',
   'agent.failed': 'failed',
   'agent.sessionModelAria': 'Which model this session uses',
+  'agent.modelLabel': 'Model',
   'agent.backToReadingHint': 'Back to code reading (or click "Back to code" in the left panel)',
   'agent.gotIt': 'Got it',
   'agent.installInTerminal': 'Install in terminal',

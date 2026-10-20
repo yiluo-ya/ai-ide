@@ -183,30 +183,6 @@ export function AgentView({
           </span>
         </span>
         <span className="spacer" />
-        {active && active.backend === 'builtin' && (
-          <select
-            className="ag-select"
-            aria-label={t('agent.sessionModelAria')}
-            value={active.model ? `${active.model.provider}::${active.model.id}` : ''}
-            onChange={(e) => {
-              const [provider, ...rest] = e.target.value.split('::');
-              void setModel(provider, rest.join('::'));
-            }}
-          >
-            {active.model?.provider && active.model.id && (
-              <option value={`${active.model.provider}::${active.model.id}`}>
-                {active.model.provider}/{active.model.id}
-              </option>
-            )}
-            {options
-              .filter((o) => !active.model || o.provider !== active.model.provider || o.modelId !== active.model.id)
-              .map((o) => (
-                <option key={`${o.provider}::${o.modelId}`} value={`${o.provider}::${o.modelId}`}>
-                  {o.providerName}/{o.modelId}
-                </option>
-              ))}
-          </select>
-        )}
         {active && (
           <div className="share-wrap">
             <button
@@ -287,6 +263,33 @@ export function AgentView({
                 }
               }}
             />
+            {active && active.backend !== 'openhands' && (
+              <div className="ag-compose-model">
+                <span className="ag-compose-model-label">{t('agent.modelLabel')}</span>
+                <select
+                  className="ag-select"
+                  aria-label={t('agent.sessionModelAria')}
+                  value={active.model ? `${active.model.provider}::${active.model.id}` : ''}
+                  onChange={(e) => {
+                    const [provider, ...rest] = e.target.value.split('::');
+                    void setModel(provider, rest.join('::'));
+                  }}
+                >
+                  {active.model?.provider && active.model.id && (
+                    <option value={`${active.model.provider}::${active.model.id}`}>
+                      {active.model.provider}/{active.model.id}
+                    </option>
+                  )}
+                  {options
+                    .filter((o) => !active.model || o.provider !== active.model.provider || o.modelId !== active.model.id)
+                    .map((o) => (
+                      <option key={`${o.provider}::${o.modelId}`} value={`${o.provider}::${o.modelId}`}>
+                        {o.providerName}/{o.modelId}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
             <div className="ag-compose-actions">
               {active.lastError && <span className="ag-dim">{active.lastError}</span>}
               {busy && (

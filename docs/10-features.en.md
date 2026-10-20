@@ -171,7 +171,8 @@ unless you enter this mode.
   it change code. Every file path must stay inside the project root; anything outside is rejected
 - When creating a session you pick the backend: **built-in** / **pi** (local
   `pi --mode rpc --no-session`) / **OpenHands** (placeholder that explains how to wire it up);
-  only the built-in backend can switch models
+  both the built-in backend and pi can switch models (in a picker below the input box; pi uses the
+  providers synced over, see "Model config sync to pi" below)
 - **Where pi comes from** (FR-0007): pi is not part of this source tree. It is looked up in this
   order — the path set in **Settings → Code Agent backend** → the drop-in dir `~/.ide/agents/pi/` →
   `PATH` (the `READER_PI_COMMAND` env var wins over all of them). Either install works:

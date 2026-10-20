@@ -1061,6 +1061,7 @@ export const zh: Record<string, string> = {
   'agent.toolResultPrefix': '工具结果 · ',
   'agent.failed': '失败',
   'agent.sessionModelAria': '这个会话用哪个模型',
+  'agent.modelLabel': '模型',
   'agent.backToReadingHint': '回到代码阅读（也可点左栏的「回到代码」）',
   'agent.gotIt': '知道了',
   'agent.installInTerminal': '在终端安装',
