@@ -134,23 +134,28 @@ async function main() {
     return;
   }
 
-  await step('T：文件树默认折叠、目录与文件两色', async () => {
+  await step('T：文件树默认折叠、目录靠加粗区分（IDEA 口径）', async () => {
     await openPanel(page, 'files');
     await page.waitForSelector('.tree-row.dir', { timeout: 15_000 });
     // 2026-10-03 用户要求「文件夹默认折叠」：一进来只该看到目录行
     const fileRows = await page.locator('.tree-row.file').count();
     assert(fileRows === 0, `默认应折叠，却直接显示了 ${fileRows} 个文件行`);
-    const dirColor = await page.$eval('.tree-row.dir .tree-name', (el) => getComputedStyle(el).color);
+    const dirColor = await page.$eval('.tree-row.dir:not([class*="vcs-"]) .tree-name', (el) => getComputedStyle(el).color);
     const dirWeight = await page.$eval('.tree-row.dir .tree-name', (el) => getComputedStyle(el).fontWeight);
-    // 展开第一个目录，看文件行是否出现、颜色是否与目录不同
+    // 展开第一个目录，看文件行是否出现
     await page.locator('.tree-row.dir').first().click();
     await page.waitForSelector('.tree-row.file', { timeout: 15_000 });
-    const fileColor = await page.$eval('.tree-row.file .tree-name', (el) => getComputedStyle(el).color);
-    assert(
-      dirColor !== fileColor,
-      `目录与文件颜色相同（都是 ${dirColor}）：用户要求区分这两者`,
+    const fileColor = await page.$eval('.tree-row.file:not([class*="vcs-"]) .tree-name', (el) =>
+      getComputedStyle(el).color,
     );
-    return `目录 ${dirColor} / 粗 ${dirWeight}，文件 ${fileColor}`;
+    // 2026-10-20 用户要求（IDEA 口径）：目录与文件同色，区分靠字重；
+    // 有未提交变更时才由 .vcs-* 染色（上面两条已把带状态的行排除掉）
+    assert(
+      dirColor === fileColor,
+      `目录与文件应同色（IDEA 口径），实际 目录 ${dirColor} / 文件 ${fileColor}`,
+    );
+    assert(Number(dirWeight) >= 600, `目录应加粗，实际 ${dirWeight}`);
+    return `同色 ${dirColor}，目录粗 ${dirWeight}，文件常规 ${fileColor}`;
   });
 
   const openFile = async (needle) => {

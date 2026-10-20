@@ -61,10 +61,16 @@
   --hl-local: #cfe2ff;
   --hl-external: #9aa7b6;
 
-  /* 文件树：目录与文件两种颜色（2026-10-03 用户要求「区分目录和文件的颜色」）。
-     目录偏蓝且加粗，一眼与文件分开；具体值改这里即可。 */
-  --tree-dir: #7cc4f5;
+  /* 文件树：目录与文件（2026-10-20 改为 IDEA 口径）——目录不再单独染蓝，
+     与文件同色，靠「加粗 + 文件夹图标」区分；颜色留给下面的 vcs 状态色表达是否未提交。 */
+  --tree-dir: #c9d1d9;
   --tree-file: #c9d1d9;
+
+  /* 文件树 git 状态（IDEA 语义）：新增 / 修改 / 删除 / 冲突。 */
+  --vcs-added: #6a9955;
+  --vcs-modified: #569cd6;
+  --vcs-deleted: #8a8a8a;
+  --vcs-conflict: #e06c75;
 
   /* 悬停卡片（02-lens §3.1–§3.3） */
   --wcr-hover-bg: #1b1b20;
@@ -197,9 +203,14 @@
   --hl-local: #3d6ea5;
   --hl-external: #7c8794;
 
-  /* 文件树：目录与文件两种颜色（亮色主题相反：目录蓝、文件深灰） */
-  --tree-dir: #0b62a4;
+  /* 文件树：IDEA 口径——目录与文件同色，靠加粗区分（浅色下同为深色文字） */
+  --tree-dir: #24292f;
   --tree-file: #24292f;
+
+  --vcs-added: #2e7d32;
+  --vcs-modified: #0f6cbd;
+  --vcs-deleted: #8b949e;
+  --vcs-conflict: #c0392b;
 
   --wcr-hover-bg: #ffffff;
   --wcr-hover-name: #0a3d91;
@@ -550,7 +561,7 @@ textarea.text-input {
 }
 
 .icon-btn:hover {
-  color: var(--tree-dir);
+  color: var(--accent-2);
   border-color: var(--accent-2);
 }
 
@@ -829,7 +840,7 @@ kbd {
   min-width: 0;
 }
 
-/* 目录 / 文件两色（2026-10-03 用户要求）：目录偏蓝加粗，文件常规灰。 */
+/* 目录 / 文件同色（2026-10-20 IDEA 口径）：靠加粗区分；未提交变更由 .vcs-* 染色（filetree.css）。 */
 .tree-row.dir .tree-name {
   color: var(--tree-dir);
   font-weight: 600;

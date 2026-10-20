@@ -19,8 +19,8 @@ const colors = {
 
 // 图标颜色映射（SVG 统一为 fill="currentColor"，这里是颜色的唯一来源）
 const iconColors: { [key: string]: string } = {
-    // 文件夹
-    folder: colors.greyLight,
+    // 文件夹：跟随主题前景（styles.css 的 --tree-dir），缺省仍是 Seti 的灰蓝
+    folder: 'var(--tree-dir, #6D8086)',
 
     // JavaScript/TypeScript（测试文件橙色区分）
     javascript: colors.yellow,

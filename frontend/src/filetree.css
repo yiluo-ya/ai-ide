@@ -98,3 +98,25 @@
     background: transparent;
   }
 }
+
+/* ---------------------------------------------------------------- git 状态染色（IDEA 口径，2026-10-20）
+
+   新增 = 绿、修改 / 重命名 = 蓝、删除 = 灰、冲突 = 红；目录里只要有一处未提交就染成
+   子树里最强的那档（汇总在 FileTree.tsx 的 dirVcs 里做）。
+   加 `.file-tree` 前缀是为了稳压 `.tree-row.dir .tree-name`（styles.css 里的目录色）。 */
+.file-tree .tree-row.vcs-add .tree-name {
+  color: var(--vcs-added);
+}
+
+.file-tree .tree-row.vcs-mod .tree-name,
+.file-tree .tree-row.vcs-ren .tree-name {
+  color: var(--vcs-modified);
+}
+
+.file-tree .tree-row.vcs-del .tree-name {
+  color: var(--vcs-deleted);
+}
+
+.file-tree .tree-row.vcs-conflict .tree-name {
+  color: var(--vcs-conflict);
+}

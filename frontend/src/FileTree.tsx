@@ -1,6 +1,6 @@
 /** 文件树：目录可展开/折叠，点击文件打开；叠加「改动热力 / 来源徽标」。 */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { FileOrigin } from '../../shared/types';
+import type { FileOrigin, GitChangeEntry } from '../../shared/types';
 import type { FileNode } from './api';
 import { langColor } from './languages';
 import { FileIcon } from './common/fileicon/FileIcon';
@@ -27,6 +27,31 @@ export interface TreeDecor {
   dirs?: Map<string, { duty: string; layer: string; from: string | null }>;
   /** 只渲染集合里的文件（undefined = 不筛）。 */
   visible?: Set<string>;
+  /** git 工作区状态（IDEA 口径染色）：新增绿 / 修改蓝 / 删除灰 / 重命名蓝 / 冲突红。 */
+  vcs?: Map<string, GitChangeEntry['status']>;
+}
+
+/** 状态 → 行上的附加类名（颜色在 filetree.css 里用 `--vcs-*` 变量定义）。 */
+const VCS_CLASS: Record<GitChangeEntry['status'], string> = {
+  added: 'vcs-add',
+  modified: 'vcs-mod',
+  deleted: 'vcs-del',
+  renamed: 'vcs-ren',
+  conflicted: 'vcs-conflict',
+};
+
+/** 目录汇总用：子项状态混在一起时取最「显眼」的那个（冲突 > 修改 > 重命名 > 新增 > 删除）。 */
+const VCS_RANK: Record<GitChangeEntry['status'], number> = {
+  conflicted: 5,
+  modified: 4,
+  renamed: 3,
+  added: 2,
+  deleted: 1,
+};
+
+/** 行类名后缀：没有状态就是空串。 */
+function vcsRowClass(status: GitChangeEntry['status'] | undefined): string {
+  return status ? ` ${VCS_CLASS[status] ?? VCS_CLASS.added}` : '';
 }
 
 interface Props {
@@ -221,6 +246,7 @@ function TreeNode({
   onOpen,
   filter,
   decor,
+  dirVcs,
   expanded,
   collapsed,
   flashPath,
@@ -234,6 +260,8 @@ function TreeNode({
   onOpen: (file: string) => void;
   filter: string;
   decor?: TreeDecor;
+  /** 目录 → 子树里最强 git 状态（目录内含变更时目录也染色，IDEA 口径）。 */
+  dirVcs: Map<string, GitChangeEntry['status']>;
   expanded: Set<string>;
   /** 用户显式折叠过的目录：过滤自动展开时也压得住。 */
   collapsed: Set<string>;
@@ -259,9 +287,9 @@ function TreeNode({
     return (
       <div className="tree-dir">
         <div
-          className={`tree-row dir${dnd.target === tail.path ? ' drop-target' : ''}${
-            flashPath === tail.path ? ' reveal-flash' : ''
-          }`}
+          className={`tree-row dir${vcsRowClass(dirVcs.get(tail.path))}${
+            dnd.target === tail.path ? ' drop-target' : ''
+          }${flashPath === tail.path ? ' reveal-flash' : ''}`}
           data-path={tail.path}
           style={{ paddingLeft: depth * 12 + 6 }}
           onClick={() => toggle(chain.map((n) => n.path))}
@@ -305,6 +333,7 @@ function TreeNode({
               onOpen={onOpen}
               filter={filter}
               decor={decor}
+              dirVcs={dirVcs}
               expanded={expanded}
               collapsed={collapsed}
               flashPath={flashPath}
@@ -322,6 +351,7 @@ function TreeNode({
     'file',
     activeFile === node.path ? 'active' : '',
     flashPath === node.path ? 'reveal-flash' : '',
+    decor?.vcs?.has(node.path) ? VCS_CLASS[decor.vcs.get(node.path) ?? 'added'] : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -564,7 +594,24 @@ export function FileTree({
     el.style.top = `${Math.max(pad, Math.min(menu.y, window.innerHeight - pad - height))}px`;
   }, [menu]);
 
+  // 2026-10-20：目录颜色不再是固定蓝，改为「与文件同色 + 加粗」，未提交变更才染状态色。
   const children = useMemo(() => sortNodes(tree?.children ?? []), [tree]);
+
+  /**
+   * 目录 → 子树里最强 git 状态（IDEA 口径：目录里只要有一处未提交，目录也跟着染色）。
+   * 只往上汇总，不改文件自身的状态（文件行直接用 decor.vcs）。
+   */
+  const dirVcs = useMemo(() => {
+    const out = new Map<string, GitChangeEntry['status']>();
+    for (const [file, status] of decor?.vcs ?? []) {
+      // `''` 是项目根那一行：它也是祖先（ancestorDirs 只给真实目录段）
+      for (const dir of ['', ...ancestorDirs(file)]) {
+        const prev = out.get(dir);
+        if (!prev || VCS_RANK[status] > VCS_RANK[prev]) out.set(dir, status);
+      }
+    }
+    return out;
+  }, [decor?.vcs]);
 
   /** 根目录行的名字：只显示最后一段（与下面的目录一样），不铺完整路径。 */
   const rootName =
@@ -616,7 +663,9 @@ export function FileTree({
           点击折叠 / 展开、右键是本目录的菜单（新建文件 / 新建文件夹 / 粘贴到这里）。
           右侧额外保留「复制项目链接」（此前明确要求复制入口在根目录上）。 */}
       <div
-        className={`tree-row dir tree-root-row${dnd.target === '' ? ' drop-target' : ''}`}
+        className={`tree-row dir tree-root-row${vcsRowClass(dirVcs.get(''))}${
+          dnd.target === '' ? ' drop-target' : ''
+        }`}
         data-path=""
         onClick={toggleRoot}
         onContextMenu={(e) => {
@@ -769,6 +818,7 @@ export function FileTree({
               onOpen={onOpen}
               filter={filter}
               decor={decor}
+              dirVcs={dirVcs}
               expanded={expanded}
               collapsed={collapsed}
               flashPath={flashPath}

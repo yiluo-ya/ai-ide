@@ -51,7 +51,7 @@ import { useChangesStore } from './changesState';
 import { changesApi, flushSnapshot } from './readSnapshot';
 import { blameAt, blameText, loadBlame } from './blame';
 import { translate, useI18n } from './i18n';
-import type { BlameResult, FileNode, FileOrigin } from '../../shared/types';
+import type { BlameResult, FileNode, FileOrigin, GitChangeEntry } from '../../shared/types';
 import type { HotMetric } from './mapApi';
 
 type PanelTab = 'guide' | 'files' | 'refs' | 'hierarchy' | 'outline' | 'search' | 'changes' | 'git' | 'agent' | 'api';
@@ -123,6 +123,8 @@ export default function App() {
   /** W3：变更面板 tab 上的计数（变了几个文件）。 */
   // 变更计数 = git 报的未提交改动条数（2026-10-03：变更以 git 为准，不再自记录）
   const changesCount = useChangesStore((s) => s.result?.entries.length ?? 0);
+  /** 文件树染色用：文件 → git 工作区状态（引用稳定，changesState 内容未变就不换对象）。 */
+  const changesEntries = useChangesStore((s) => s.result?.entries);
 
   /**
    * 选中某侧视图；点「code会话」时主区切到 Agent。
@@ -860,6 +862,10 @@ export default function App() {
     const hot = new Set((mapOverview?.hot ?? []).map((h) => h.file));
     // M9.3：SSE 刚报过的文件（mapState 里 20 秒后自动撤掉）
     const pulse = new Set(Object.keys(mapPulse));
+    // 2026-10-20 用户要求（IDEA 口径）：文件树按 git 状态染色 —— 新增绿 / 修改蓝 / 删除灰 /
+    // 重命名蓝 / 冲突红；被忽略的文件不在清单里，不染色。目录汇总在 FileTree 内部做。
+    const vcs = new Map<string, GitChangeEntry['status']>();
+    for (const entry of changesEntries ?? []) vcs.set(entry.file, entry.status);
     // 2026-10-03 用户要求去掉「已读 / 未读」标准：不再往文件树叠 read / ignored，也不再按未读过滤。
 
     const filtering = recentFilter !== 'all' || onlyOrphans;
@@ -875,8 +881,8 @@ export default function App() {
         }),
       );
     }
-    return { timeline, orphans, hot, pulse, dirs, visible };
-  }, [mapTimeline, mapOverview, mapPulse, store.tree, recentFilter, onlyOrphans]);
+    return { timeline, orphans, hot, pulse, dirs, visible, vcs };
+  }, [mapTimeline, mapOverview, mapPulse, store.tree, recentFilter, onlyOrphans, changesEntries]);
 
   /** 没有打开文件时，主区就是项目地图（落点 C：首屏即主页）。 */
   // agent 模式下强制不显示地图（地图与 agent 都占主区）

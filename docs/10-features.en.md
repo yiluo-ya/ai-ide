@@ -8,8 +8,9 @@
 
 - Open a project as a **local directory** (`POST /api/projects`; the same path always reuses the same id)
 - The file tree lists **every file** in the project (including non-indexable binaries and assets):
-  directories first, files after, **collapsed by default**, two colours for dirs vs files;
-  filter by time (all / changed today / within 3 days / within 7 days), “orphan” and “indexed”
+  directories first, files after, **collapsed by default**, directories and files **in the same colour**
+  (IDEA convention: bold weight and the folder icon tell them apart; colour is reserved for git status,
+  see Platform); filter by time (all / changed today / within 3 days / within 7 days), “orphan” and “indexed”
 - **File-tree navigation** (2026-10-14, see `FR/FR-0012-fr.md`): the toolbar’s **“Collapse” folds every
   folder at once** (`Ctrl+Alt+-` / `Ctrl+Shift+-`), **“Reveal” puts the open file back in the tree**
   (expands its ancestors, scrolls to it and flashes; `Alt+F`, the tab context menu and auto-reveal on
@@ -296,6 +297,13 @@ unquoted identifiers fold to lower case, quoted ones keep their case); resolutio
   across packages
 - **One-command start / single instance**: `wcr [directory]` — a busy port yields to the next one, and
   repeated starts reuse the running instance
+- **File tree coloured by git status** (IDEA convention, 2026-10-20): directories and files **share one
+  colour** (bold weight + folder icon tell them apart; no more “directories are blue”), colour only
+  expresses workspace status — added green, modified / renamed blue, deleted grey, conflicted red;
+  a directory whose subtree has anything uncommitted takes the strongest status in that subtree
+  (`dirVcs` in `FileTree.tsx`; priority conflicted > modified > renamed > added > deleted). The statuses
+  come from the same `gitChanges` feed the Changes panel uses, so ignored files never show up (and are
+  never coloured). Every theme ships its own `--vcs-*` values (`styles.css`)
 - **Settings & i18n**: “Model” and “Settings” sit side by side in the top bar; Settings groups
   Appearance (theme / font size / sidebar width / language), Editor (word wrap / indent / minimap /
   whitespace), Interface (reduced motion / Changes panel expanded by default), Index (custom ignore
@@ -612,7 +620,8 @@ npm run bench         # benchmarks: synthetic-repo first open / index / second o
 ```
 
 The UI regression suite lives in `tests/ui/` and `run.mjs` sets up the fixture project and backend:
-`navigator.mjs` (navigation and courier: the file tree collapsed by default with two colours,
+`navigator.mjs` (navigation and courier: the file tree collapsed by default with dirs and files in one
+colour,
 Ctrl+P file open and tabs, the search panel (fullscreen / stop / directory grouping), the notice bar
 when pressing F12 on an external dependency, copy location, **copy selection with provenance**,
 **share deep links**, print-view header, the right-dock Commands tab showing the current project’s
