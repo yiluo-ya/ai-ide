@@ -135,7 +135,9 @@ The bottom **Terminal** is a persistent interactive shell (xterm + node-pty, **l
 the real command from the language instead of only sending the path).
 
 - Four entry points: file-tree context menu “Run in Terminal”, editor context menu, the editor tab
-  bar `▶` button, and the `Ctrl+F5` shortcut.
+  bar `▶` button, and the `Ctrl+F5` shortcut. The `▾` next to it lists this project's **run profiles**
+  (build / run / test, inferred from `pom.xml` / `package.json` / `go.mod`); picking one runs it in the
+  active terminal. The menu footer shows the runtimes actually in use (`java 21.0.2 · maven 3.9.16`).
 - Language → command (only languages that run a single file directly): `.py/.pyw`→`python`,
   `.js/.mjs/.cjs`→`node`, `.go`→`go run`, `.ps1`→`powershell -File`, `.sh/.bash`→`bash`, `.rb`→`ruby`,
   `.php`→`php`, `.pl`→`perl`, `.lua`→`lua`, `.bat/.cmd`→`cmd /c`; compiled ones (`.ts`/`.java`/`.c`/…)
@@ -144,11 +146,31 @@ the real command from the language instead of only sending the path).
   with spaces/parentheses/quotes → `& '…'`; Git Bash → backslashes to forward slashes + single quotes,
   and `cmd /c` becomes `cmd //c` (MSYS would otherwise rewrite `/c` as a drive path).
 - cwd always stays at the project root; the command uses a project-relative path.
-- **Python environments**: an interpreter typed in Settings (`Settings → Run → Python interpreter`)
-  always wins; otherwise the project's `.venv` / `venv` / `env` (`Scripts\python.exe` on Windows) and
-  `conda-meta` are detected; failing that, the `python` on PATH is used. A detected interpreter is
-  written as an **absolute path** (as `& 'D:\…\python.exe'` under PowerShell) so it is obvious which
-  environment ran.
+- **Run environment (2026-10-20)**: the terminal PTY and the command panel (foreground / background)
+  share one resolution (`resolveRunEnv` in `backend/src/indexer/run-config.ts`):
+  - **Runtime detection does not trust PATH**. Candidates come from env vars (`JAVA_HOME` / `MAVEN_HOME` /
+    `GOROOT` / `CONDA_PREFIX`…) → **toolchain roots** (configured in Settings, e.g. `D:/toolchains`; two
+    levels down are searched for `bin/java`, `bin/mvn`) → project-local (`.venv`, `conda-meta`, `mvnw`,
+    `gradlew`) → well-known install dirs (`~/.jdks`, `~/.sdkman`, `~/.gradle/jdks`, the various
+    `Program Files` distributions) → PATH. The toolchain roots entry is essential: a JDK / Maven installed
+    at a custom path with no env var set is invisible to any allow-list. Versions are read from files when possible (`<jdk>/release`, `pyvenv.cfg`,
+    `lib/maven-core-*.jar`, `<goroot>/VERSION`), spawning a process only as a fallback.
+  - **Each project can lock a runtime** (`Settings → Run → Project runtimes`), stored in the local data
+    dir at `~/.ide/runs/<projectId>.json` — **never written into the project being read**. Locking a JDK
+    also pairs `JAVA_HOME` and prepends `<jdk>/bin` to PATH.
+  - **PATH prepending**: the selected runtimes' `bin` (`Scripts` for a Python venv), `node_modules/.bin`,
+    and any configured dirs — so typing `mvn` / `java` by hand hits the same runtimes.
+  - **envFile is loaded only when declared** in the config (no implicit `.env`); entries under `env`
+    override the file's values.
+  - Detection **re-runs on every entry point** (menu, dropdown, settings) instead of being cached per
+    project, so a fresh venv or a newly installed JDK is picked up immediately.
+  - Project declarations (`.python-version` / `.nvmrc` / `go.mod` / `pom.xml`'s `maven.compiler.*`) that
+    disagree with what was detected only produce a warning — never an automatic switch.
+- **Python environments**: the interpreter chosen in the project's run config (or locked under
+  `Settings → Run → Project runtimes`) wins; otherwise the global default from Settings; failing both,
+  the first auto-detected one (project `.venv` / `venv` / `env`, a pyenv managed by `.python-version`,
+  `CONDA_PREFIX`, or the `python` on PATH). A detected interpreter is written as an **absolute path**
+  (as `& 'D:\…\python.exe'` under PowerShell) so it is obvious which environment ran.
 - If no terminal is open: the bottom panel expands, switches to “Terminal”, and a new tab is created;
   the command is written only after the shell is ready (backend `title`) — otherwise `input` sent before
   `spawn` is dropped by the backend (`backend/src/api/terminal.ts`).

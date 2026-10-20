@@ -6,7 +6,9 @@
  * stdio 直接给文件句柄时 cmd 又会全缓冲（长驻进程的日志一直是空的）；只有「进程自己 open 文件写」
  * 才可靠 —— 所以 worker 用 pipe 收 shell 的子进程输出，再自己写盘（实测 1 秒内可见）。
  *
- * 用法：`node run-with-log.mjs '<json>'`，json = `{ command, cwd, logPath }`。
+ * 用法：`node run-with-log.mjs '<json>'`，json = `{ command, cwd, logPath, env? }`。
+ * `env` 由后端装配好（项目运行时 / PATH 前插 / JAVA_HOME / envFile，见 indexer/run-config.ts）——
+ * worker 是新进程，不传就用它自己的环境，那会退回到 IDE 后端启动时的 PATH（2026-10-20）。
  * 启动后在 stdout 打一行 `{"childPid":n}`（后端据此记 pid），随后一直转发输出到日志；
  * 子进程退出后写 `<logPath>.exit.json`（`{exitCode,signal,endedAt}`），后端据此判定成功 / 失败。
  */
@@ -15,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const spec = JSON.parse(process.argv[2] ?? '{}');
-const { command, cwd, logPath } = spec;
+const { command, cwd, logPath, env } = spec;
 
 if (!command || !cwd || !logPath) {
   process.stderr.write('run-with-log: 参数不完整（需要 command / cwd / logPath）\n');
@@ -33,6 +35,8 @@ const child = spawn(shell, args, {
   cwd,
   windowsHide: true,
   stdio: ['ignore', 'pipe', 'pipe'],
+  // 项目运行环境（后端装配好传进来）；缺省继承 worker 自己的
+  ...(env && typeof env === 'object' ? { env } : {}),
   // 命令串原样交给 shell（里面可能有引号），不要再让 Node 转义一层
   ...(win ? { windowsVerbatimArguments: true } : {}),
 });

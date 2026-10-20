@@ -51,7 +51,7 @@ import { useChangesStore } from './changesState';
 import { changesApi, flushSnapshot } from './readSnapshot';
 import { blameAt, blameText, loadBlame } from './blame';
 import { translate, useI18n } from './i18n';
-import type { BlameResult, FileNode, FileOrigin, GitChangeEntry } from '../../shared/types';
+import type { BlameResult, FileNode, FileOrigin, GitChangeEntry, RunConfigResult, RunProfile } from '../../shared/types';
 import type { HotMetric } from './mapApi';
 
 type PanelTab = 'guide' | 'files' | 'refs' | 'hierarchy' | 'outline' | 'search' | 'changes' | 'git' | 'agent' | 'api';
@@ -309,11 +309,16 @@ export default function App() {
 
   /**
    * FR-0011「在终端中运行」：token 自增的一次运行请求，交给 TerminalPanel 写进激活终端。
-   * pythonEnvRef 缓存后端探测结果（每项目探一次）；prefs.pythonPath 非空时优先、不探测。
+   *
+   * 2026-10-20：不再在这里缓存 Python 探测结果 —— 运行时要「每次入口重探」（新建 venv、
+   * 装了新 JDK 之后要立刻能反映）；Python 解释器改由项目运行配置统一决定
+   * （`GET /run-config` 的 runtimes 摘要）。
    */
   const [runRequest, setRunRequest] = useState<RunRequest | null>(null);
   const runTokenRef = useRef(0);
-  const pythonEnvRef = useRef<{ projectId: string; path: string | null } | null>(null);
+  /** 当前项目的运行配置（运行档 + 实际运行时摘要）；切项目重新拉。 */
+  const [runConfig, setRunConfig] = useState<RunConfigResult | null>(null);
+  const [runMenuOpen, setRunMenuOpen] = useState(false);
 
   /** 打开某个面板：视图在哪一侧就聚焦那一侧；在右侧时顺带展开右侧栏。 */
   const openPanel = useCallback(
@@ -359,8 +364,8 @@ export default function App() {
 
   /**
    * FR-0011：在终端里运行一个文件（文件树右键 / 编辑器右键 / 标签栏 ▶ / Ctrl+F5 共用）。
-   * - prefs.pythonPath 非空 → 直接用（完全覆盖探测）；
-   * - 否则探一次项目 venv（结果缓存），没有就用 PATH 上的 python；
+   * - 运行时（Python 解释器等）由**项目运行配置**决定：每次点都重拉一次 run-config（见 2026-10-20）；
+   * - 环境变量 / PATH 前插 / JAVA_HOME 由后端在 PTY spawn 时注入，不拼进命令；
    * - 展开底部面板并切到「终端」，把请求交给 TerminalPanel（它知道当前 pane 用哪种 shell）。
    */
   const runFileInTerminal = useCallback((file: string) => {
@@ -379,23 +384,70 @@ export default function App() {
     setBottomTab('terminal');
     setBottomOpen(true);
     void (async () => {
-      let pythonPath = loadPrefs().pythonPath || null;
-      if (!pythonPath) {
-        const cached = pythonEnvRef.current;
-        if (cached && cached.projectId === projectId) pythonPath = cached.path;
-        else {
-          try {
-            const env = await api.pythonEnv(projectId);
-            pythonEnvRef.current = { projectId, path: env.path };
-            pythonPath = env.path;
-          } catch {
-            pythonPath = null; // 探测失败就退回 PATH，不打断运行
-          }
-        }
+      // 每次入口都重拉：环境变化（新建 venv / 换 conda / 装了新 JDK）要能立刻感知。
+      // 优先级：项目锁定 → 设置里的全局默认 → 自动探测到的第一个。
+      let pythonPath: string | null = null;
+      try {
+        const result = await api.runConfig(projectId);
+        setRunConfig(result);
+        const selected = result.runtimes.find((r) => r.id === 'python')?.path ?? null;
+        const locked = Boolean(result.config.runtimes.python);
+        pythonPath = locked ? selected : loadPrefs().pythonPath || selected;
+      } catch {
+        pythonPath = loadPrefs().pythonPath || null; // 探测失败就退回全局默认 / PATH
       }
       setRunRequest({ token: ++runTokenRef.current, file, pythonPath });
     })();
   }, []);
+
+  /**
+   * 2026-10-20：跑一个运行档（▶ 下拉里的「构建 / 运行 / 测试」）。
+   * 命令原样写进终端；env / PATH / JAVA_HOME 由后端 PTY 注入，所以这里不用拼任何环境。
+   */
+  const runProfile = useCallback((profile: RunProfile) => {
+    const projectId = useStore.getState().projectId;
+    if (!projectId) return;
+    if (!LOCAL_HOSTNAMES.has(window.location.hostname)) {
+      showFlash(translate('run.shareMode'));
+      return;
+    }
+    setRunMenuOpen(false);
+    setBottomTab('terminal');
+    setBottomOpen(true);
+    setRunRequest({ token: ++runTokenRef.current, command: profile.command });
+  }, []);
+
+  /**
+   * 2026-10-20：切项目（或首次进入）时拉一份运行配置，供 ▶ 下拉显示运行档与实际运行时。
+   * 这是「入口处重拉」的另一半 —— 打开下拉也是重新拉（见下面的 effect）。
+   */
+  useEffect(() => {
+    const projectId = store.projectId;
+    setRunConfig(null);
+    if (!projectId) return;
+    let alive = true;
+    void api
+      .runConfig(projectId)
+      .then((result) => {
+        if (alive) setRunConfig(result);
+      })
+      .catch(() => {
+        /* 探测失败不影响阅读，下拉里显示“正在读取” */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [store.projectId]);
+
+  // 打开下拉时重新拉一次（环境变化：新建 venv / 装了新 JDK）
+  useEffect(() => {
+    const projectId = store.projectId;
+    if (!runMenuOpen || !projectId) return;
+    void api
+      .runConfig(projectId)
+      .then(setRunConfig)
+      .catch(() => undefined);
+  }, [runMenuOpen, store.projectId]);
 
   /**
    * FR-0013：把一条命令**填进**终端（不回车）。跟 runFileInTerminal 同一条通道，
@@ -1286,6 +1338,28 @@ export default function App() {
                   </button>
                   <button
                     className="btn ghost"
+                    disabled={!store.projectId}
+                    onClick={() => setRunMenuOpen((v) => !v)}
+                    title={t('run.profiles')}
+                    aria-label={t('run.profiles')}
+                    aria-haspopup="menu"
+                    aria-expanded={runMenuOpen}
+                  >
+                    ▾
+                  </button>
+                  {runMenuOpen && store.projectId && (
+                    <RunMenu
+                      result={runConfig}
+                      onPick={runProfile}
+                      onClose={() => setRunMenuOpen(false)}
+                      onOpenSettings={() => {
+                        setRunMenuOpen(false);
+                        setSettingsOpen(true);
+                      }}
+                    />
+                  )}
+                  <button
+                    className="btn ghost"
                     disabled={!canBack}
                     onClick={() => void useStore.getState().goBack()}
                     title={loadPrefs().keymap === 'idea' ? 'Ctrl+Alt+←' : 'Alt+←'}
@@ -1726,7 +1800,9 @@ export default function App() {
       />
 
       {/* P24 浮层：设置 · 模型 */}
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsPanel projectId={store.projectId} onClose={() => setSettingsOpen(false)} />
+      )}
       {modelOpen && <ModelDialog onClose={() => setModelOpen(false)} />}
 
       {confirmAction && (
@@ -1853,6 +1929,66 @@ export default function App() {
 
 // 让 Monaco 的编辑器实例在模块加载后即可用（provider 注册依赖它）
 void monaco;
+
+/**
+ * 2026-10-20：▶ 旁边的下拉 —— 列出本项目的运行档（构建 / 运行 / 测试）与实际运行时。
+ * 点外面 / Esc 收起（与标签右键菜单同款 backdrop）。
+ */
+function RunMenu({
+  result,
+  onPick,
+  onClose,
+  onOpenSettings,
+}: {
+  result: RunConfigResult | null;
+  onPick: (profile: RunProfile) => void;
+  onClose: () => void;
+  onOpenSettings: () => void;
+}) {
+  const { t } = useI18n();
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  const profiles = result?.profiles ?? [];
+  const runtimes = result?.runtimes ?? [];
+  return (
+    <>
+      <div className="tab-menu-backdrop" onClick={onClose} />
+      <div className="run-menu" role="menu">
+        {!result && <div className="run-menu-empty">{t('run.loading')}</div>}
+        {result && profiles.length === 0 && <div className="run-menu-empty">{t('run.noProfiles')}</div>}
+        {profiles.map((p) => (
+          <button
+            key={p.id}
+            className="run-menu-item"
+            role="menuitem"
+            onClick={() => onPick(p)}
+            title={p.note ?? p.command}
+          >
+            <span className={`run-kind k-${p.kind}`}>{t(`run.kind.${p.kind}`)}</span>
+            <span className="run-menu-label">{p.label}</span>
+            {p.background && <span className="run-menu-tag">{t('run.background')}</span>}
+          </button>
+        ))}
+        <div className="run-menu-foot">
+          {runtimes.length > 0 && (
+            <span className="run-menu-runtimes">
+              {runtimes.map((r) => `${r.id} ${r.version ?? '?'}`).join(' · ')}
+            </span>
+          )}
+          <button className="cp-link" onClick={onOpenSettings}>
+            {t('run.openSettings')}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
 
 /**
  * FR-0009：文件树上的参数收集弹窗要办的四种事（一个输入框复用）。

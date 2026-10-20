@@ -192,6 +192,83 @@ export interface CommandPlan {
   commands: ProjectCommand[];
 }
 
+// ------------------------------------------------ 运行时与运行配置（2026-10-20）
+
+/** 可探测的运行时（本轮四门语言 + 两个 Java 构建工具）。 */
+export type RuntimeId = 'java' | 'maven' | 'gradle' | 'python' | 'node' | 'go';
+
+/** 候选从哪来（可信度从高到低）。 */
+export type RuntimeSource = 'env' | 'project' | 'convention' | 'path';
+
+/** 一个候选运行时（界面上可锁定其中的一个）。 */
+export interface RuntimeCandidate {
+  id: RuntimeId;
+  /** 可执行文件绝对路径。 */
+  path: string;
+  /** 安装根（JDK home / Maven home / GOROOT / venv 根）。 */
+  home: string;
+  /** 读不到就是 null，不编造。 */
+  version: string | null;
+  source: RuntimeSource;
+  /** 来源细节（`JAVA_HOME` / `~/.jdks` / `PATH` / `项目内 .venv`）。 */
+  detail: string;
+}
+
+/** `GET /api/projects/:id/runtimes` 的响应：按运行时分组，找不到的给空数组。 */
+export type RuntimesResult = Record<RuntimeId, RuntimeCandidate[]>;
+
+/** 一次运行的用途（与 FR-0005 的 CommandKind 同口径，少一个 stop）。 */
+export type RunProfileKind = 'build' | 'run' | 'test' | 'other';
+
+/** 运行档从哪来：推断出来的（可被覆盖）还是用户自己写的。 */
+export type RunProfileSource = 'inferred' | 'user';
+
+/** 一个运行档：一条可执行命令 + 它的用途与默认前后台。 */
+export interface RunProfile {
+  id: string;
+  kind: RunProfileKind;
+  label: string;
+  /** 原样交给 shell 的一行命令。 */
+  command: string;
+  source: RunProfileSource;
+  /** 出处（`pom.xml` 的 spring-boot 插件 / `package.json` scripts.dev / 内置推断）。 */
+  note?: string;
+  /** 建议后台跑（长驻服务）。 */
+  background?: boolean;
+}
+
+/** 项目运行配置（`~/.ide/runs/<projectId>.json`）。 */
+export interface RunConfig {
+  version: number;
+  /** 锁定的运行时：id → 候选的 home（或可执行文件路径）。只写用户明确锁过的。 */
+  runtimes: Partial<Record<RuntimeId, string>>;
+  /**
+   * 用户自定义的工具链根目录（如 `D:/toolchains`）。
+   * 探测会看根本身与它下面两层，找 `bin/<java|mvn|gradle|go>` 的安装根 ——
+   * 放在 PATH 与官方安装目录之外时，只能靠它。
+   */
+  toolchainRoots: string[];
+  /** 追加 / 覆盖的环境变量。 */
+  env: Record<string, string>;
+  /** 要前插进 PATH 的目录（相对项目根或绝对）。 */
+  pathPrepend: string[];
+  /** 要加载的 env 文件（相对项目根；只有写在这里才加载）。 */
+  envFile: string[];
+  /** 用户自定义的运行档（与推断出来的合并，同 id 后者优先）。 */
+  profiles: RunProfile[];
+}
+
+/** `GET /api/projects/:id/run-config` 的响应：生效配置 + 合并后的运行档 + 探测摘要。 */
+export interface RunConfigResult {
+  config: RunConfig;
+  /** 推断 + 自定义合并后的运行档。 */
+  profiles: RunProfile[];
+  /** 实际会用到的运行时（界面显示「Java 21 · Maven 3.9.16」）。 */
+  runtimes: Array<{ id: RuntimeId; version: string | null; path: string; source: RuntimeSource }>;
+  /** 版本要求与实际探测不符时的提醒（`.python-version` / `.nvmrc` / `go.mod` / `pom.xml`）。 */
+  warnings: string[];
+}
+
 /** 一次命令执行（前台跑完就结束；后台留在运行列表里）。 */
 export interface CommandRun {
   id: string;

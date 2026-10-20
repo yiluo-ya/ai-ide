@@ -112,14 +112,33 @@
 `Run Active File In Active Terminal` 的思路，但按语言推断真命令，而不是只送路径）。
 
 - 入口四处：文件树右键「在终端中运行」、编辑器右键、编辑器标签栏 `▶`、快捷键 `Ctrl+F5`。
+  `▶` 旁边的 `▾` 列出本项目的**运行档**（构建 / 运行 / 测试，按下文规则从 `pom.xml` / `package.json` /
+  `go.mod` 推断），点一条就直接在那条终端里跑；菜单底部显示实际用到的运行时（`java 21.0.2 · maven 3.9.16`）。
 - 语言 → 命令（只收**单文件可直接解释执行**的）：`.py/.pyw`→`python`、`.js/.mjs/.cjs`→`node`、
   `.go`→`go run`、`.ps1`→`powershell -File`、`.sh/.bash`→`bash`、`.rb`→`ruby`、`.php`→`php`、
   `.pl`→`perl`、`.lua`→`lua`、`.bat/.cmd`→`cmd /c`；需要编译的（`.ts`/`.java`/`.c`/…）菜单项**置灰**。
 - 路径按当前 shell 转义（借 VS Code 的 `preparePathForShell` 规则）：PowerShell 有空格/括号/单引号 →
   `& '…'`；Git Bash → 反斜杠转正斜杠 + 单引号，且 `cmd /c` 写成 `cmd //c`（MSYS 不把 `/c` 当盘符路径）。
 - cwd 始终 = 项目根，命令里用项目相对路径（终端不 `cd`）。
-- **Python 环境**：设置里手填的解释器优先（`设置 → 运行 → Python 解释器`，覆盖一切）；留空则探测
-  项目根的 `.venv` / `venv` / `env`（Windows 取 `Scripts\python.exe`）与 `conda-meta`；都没有则用 PATH 上的 `python`。
+- **运行环境（2026-10-20）**：终端 PTY、命令面板的前台/后台运行共用同一份装配结果（`backend/src/indexer/run-config.ts`
+  的 `resolveRunEnv`）：
+  - **运行时探测**不信任 PATH，按「环境变量（`JAVA_HOME` / `MAVEN_HOME` / `GOROOT` / `CONDA_PREFIX`…）→
+    **工具链根目录**（设置里填，如 `D:/toolchains`，会看它下面两层找 `bin/java`、`bin/mvn`）→
+    项目内（`.venv`、`conda-meta`、`mvnw`、`gradlew`）→ 约定安装目录（`~/.jdks`、`~/.sdkman`、`~/.gradle/jdks`、
+    `Program Files` 各家发行版…）→ PATH」的顺序列**候选**，版本尽量读文件（`<jdk>/release`、`pyvenv.cfg`、
+    `lib/maven-core-*.jar`、`<goroot>/VERSION`），读不到才起一次进程。
+    工具链根目录这一条是必需的：JDK / Maven 装在自定义路径、且没设环境变量时，任何白名单都扫不到。
+  - **每个项目可锁定运行时**（`设置 → 运行 → 项目运行时`）；存在本机数据目录 `~/.ide/runs/<projectId>.json`，
+    **不写被读的项目目录**。选中的 JDK 会同时把 `JAVA_HOME` 与 `<jdk>/bin` 前插进 PATH。
+  - **PATH 前插**：所选运行时的 `bin`（Python venv 用 `Scripts`）+ `node_modules/.bin` + 配置里的目录，
+    所以手敲 `mvn` / `java` 命中的也是同一套运行时。
+  - **envFile 只在配置里声明时才加载**（默认不读 `.env`，避免“变量从哪来”失去判断）；`env` 里的值覆盖 envFile。
+  - **每次打开运行入口 / 下拉 / 设置都重新探测**（原来按项目缓存一次，新建 venv 或装了新 JDK 后感知不到）。
+  - 项目声明（`.python-version` / `.nvmrc` / `go.mod` / `pom.xml` 的 `maven.compiler.*`）与实探测不符时
+    只给提醒，不自动切换。
+- **Python 环境**：项目运行配置里选中的解释器最优先（或在 `设置 → 运行 → 项目运行时` 锁定）；
+  否则用设置里的全局默认；都为空则用自动探测到的第一个（项目根 `.venv` / `venv` / `env`、
+  `.python-version` 管理的 pyenv、`CONDA_PREFIX`、PATH 上的 `python`）。
   探测到的解释器写成**绝对路径**（PowerShell 里 `& 'D:\…\python.exe'`），让「跑的是哪个环境」一眼可见。
 - 终端没开时：自动展开底部面板 → 切到「终端」→ 新建标签；命令要等 shell 就绪（后端回 `title`）
   后才写入 —— 否则 spawn 之前的 `input` 会被后端丢弃（`backend/src/api/terminal.ts`）。

@@ -27,6 +27,7 @@ import { messageText } from './agent/types';
 import type { AgentSessions } from './agent/sessions';
 import type { ProjectRegistry } from './registry';
 import type { CommandKind, CommandPlan, CommandRisk, CommandRun, ProjectCommand } from './types';
+import { resolveRunEnv } from './indexer/run-config';
 
 /** 一次发现最多等这么久（agent 要读若干文件 + 多轮工具调用）。 */
 const DISCOVER_TIMEOUT_MS = Number(process.env.READER_COMMAND_TIMEOUT_MS ?? 180_000);
@@ -326,7 +327,9 @@ function shellCommand(command: string): { file: string; args: string[] } {
 
 async function runInForeground(run: CommandRun, cwd: string): Promise<void> {
   const { file, args } = shellCommand(run.command);
-  const child = spawn(file, args, { cwd, windowsHide: true, env: process.env });
+  // 2026-10-20：项目运行环境（PATH 前插 / JAVA_HOME / envFile）—— 与终端同一来源
+  const { env } = await resolveRunEnv(cwd).catch(() => ({ env: process.env as Record<string, string> }));
+  const child = spawn(file, args, { cwd, windowsHide: true, env });
   let output = '';
   let overflowed = false;
   const collect = (chunk: Buffer): void => {
@@ -369,7 +372,9 @@ async function runInBackground(run: CommandRun, cwd: string): Promise<void> {
   await fsp.writeFile(logPath, '');
   // 真正干活的是独立 worker（bin/run-with-log.mjs）：它用 pipe 收输出、自己写日志。
   // 这样 IDE 后端重启不会带走用户起的服务，日志也不会撞上 cmd 的缓冲 / 重定向丢输出。
-  const child = spawn(process.execPath, [workerFile(), JSON.stringify({ command: run.command, cwd, logPath })], {
+  // env 一并传过去：worker 是新进程，不传就退回到 IDE 后端自己的环境（2026-10-20）。
+  const { env } = await resolveRunEnv(cwd).catch(() => ({ env: process.env as Record<string, string> }));
+  const child = spawn(process.execPath, [workerFile(), JSON.stringify({ command: run.command, cwd, logPath, env })], {
     detached: true,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'ignore'],

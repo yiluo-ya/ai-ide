@@ -71,6 +71,7 @@ import {
 } from '../indexer/fswrite';
 import { buildRoutes } from '../indexer/guide';
 import { detectPythonEnv } from '../indexer/run-env';
+import { coerceRunConfig, loadRunConfig, runConfigFor, runtimesFor, saveRunConfig } from '../indexer/run-config';
 import { fileSummary } from '../indexer/summary';
 import { buildTimeline, DEFAULT_RECENT_WINDOW_MS, hostLinesFor, markHostOrigins } from '../indexer/timeline';
 import { compareSnapshot, readmap } from '../indexer/changes';
@@ -470,6 +471,40 @@ export function createApp(
     const project = registry.get(c.req.param('id'));
     if (!project) return fail(c, 404, 'project_not_found');
     return c.json(detectPythonEnv(project.root));
+  });
+
+  // -------------------------------------------------------------- 运行时与运行配置（2026-10-20）
+
+  /**
+   * 探测本机可用的运行时（Java / Maven / Gradle / Python / Node / Go）。
+   * 返回**候选列表**：环境变量 → 项目内 → 约定安装目录 → PATH，界面据此让人锁定一个。
+   */
+  app.get('/api/projects/:id/runtimes', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    // 用户自定义的工具链根目录（如 D:/toolchains）也要参与探测
+    const config = await loadRunConfig(project.id);
+    return c.json(await runtimesFor(project.root, config.toolchainRoots));
+  });
+
+  /** 生效的运行配置 + 合并后的运行档（推断 + 用户自定义）+ 运行时不匹配提醒。 */
+  app.get('/api/projects/:id/run-config', async (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    return c.json(await runConfigFor(project.id, project.root));
+  });
+
+  /** 保存运行配置（锁定的运行时 / env / envFile / 自定义运行档），落 `~/.ide/runs/<projectId>.json`。 */
+  app.put('/api/projects/:id/run-config', async (c) => {
+    const denied = serviceGuarded(c);
+    if (denied) return denied;
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const saved = await saveRunConfig(project.id, coerceRunConfig(body));
+    return c.json(await runConfigFor(project.id, project.root).then((r) => ({ ...r, config: saved })));
   });
 
   // -------------------------------------------------------------- 命令管理（2026-10-03）

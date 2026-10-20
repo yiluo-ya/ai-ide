@@ -40,6 +40,9 @@ import type {
   ReferenceLocation,
   ReferenceResult,
   RepoLogResult,
+  RunConfig,
+  RunConfigResult,
+  RuntimesResult,
   SaveFileResult,
   SearchMatch,
   SearchResult,
@@ -195,6 +198,19 @@ export const api = {
   /** FR-0011：运行环境探测 —— 「在终端中运行」用它挑 Python 解释器（path 为 null = 用 PATH 上的 python）。 */
   pythonEnv: (id: string) =>
     request<{ path: string | null; source: 'venv' | 'conda' | 'path' }>(`/projects/${id}/python`),
+
+  /**
+   * 运行时探测（2026-10-20）：按运行时分组返回候选，找不到的语言给空数组。
+   * 来源可信度：env → project → convention → path（不信任 PATH）。
+   */
+  runtimes: (id: string) => request<RuntimesResult>(`/projects/${id}/runtimes`),
+
+  /** 生效的运行配置（锁定的运行时 / env / envFile）+ 合并后的运行档 + 版本提醒。 */
+  runConfig: (id: string) => request<RunConfigResult>(`/projects/${id}/run-config`),
+
+  /** 保存运行配置（落 `~/.ide/runs/<projectId>.json`，不写被读的项目目录）。 */
+  saveRunConfig: (id: string, config: RunConfig) =>
+    request<RunConfigResult>(`/projects/${id}/run-config`, { method: 'PUT', body: JSON.stringify(config) }),
 
   fileTree: (id: string) =>
     request<{ tree: FileNode; status: IndexStatus }>(`/projects/${id}/files`),

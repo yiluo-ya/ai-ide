@@ -18,6 +18,7 @@ import * as path from 'node:path';
 import { spawn, type IPty } from 'node-pty';
 import { LOCAL_HOSTS, HOST } from '../config';
 import { logInfo, logError } from '../log';
+import { resolveRunEnv } from '../indexer/run-config';
 import type { ProjectRegistry } from '../registry';
 
 /** 可选的 shell 种类（前端工具栏选择器与之对应）。 */
@@ -227,6 +228,59 @@ export function handleTerminalUpgrade(
   socket.on('close', () => closeSession(sessionId));
 }
 
+/**
+ * 起一个 PTY（异步：先装配项目运行环境，再 spawn）。
+ *
+ * 环境来自 `resolveRunEnv(项目根)`（2026-10-20）：PATH 前插所选运行时的 bin、
+ * JAVA_HOME / GOROOT 与选定版本配对、项目配置里的 env 与显式 envFile。
+ * 这样在终端里手敲 `mvn` / `java` 也能命中项目选定的运行时，而不只是「在终端中运行」。
+ */
+async function spawnPty(session: TerminalSession, msg: ClientMessage, cwd: string): Promise<void> {
+  const cols = Math.max(2, Math.min(500, Math.floor(msg.cols ?? 80)));
+  const rows = Math.max(1, Math.min(200, Math.floor(msg.rows ?? 24)));
+  try {
+    const { file, args, env, name } = resolveShell(msg.shell);
+    const runEnv = await resolveRunEnv(cwd).catch(() => null);
+    const baseEnv = runEnv?.env ?? (process.env as Record<string, string>);
+    const pty = spawn(file, args, {
+      name: 'xterm-256color',
+      cols,
+      rows,
+      cwd,
+      env: { ...baseEnv, ...env },
+      // Windows：走 node-pty 自带的 conpty.dll（OpenConsole）而不是系统 conhost。
+      // 系统 conpty 的 kill() 会 fork 一个 node 子进程去取 console 进程列表，
+      // 后端没有 Windows 控制台时会给它分配一个可见控制台窗口 —— 也就是关闭 /
+      // 切换终端时“一闪而过”的窗口；conpty.dll 这条路径不 fork（同 VS Code）。
+      ...(process.platform === 'win32' ? { useConpty: true, useConptyDll: true } : {}),
+    });
+    session.pty = pty;
+    // 回传 shell 名，前端据此显示「1: PowerShell」这样的标签标题。
+    session.sender.send(JSON.stringify({ type: 'title', title: name } satisfies ServerMessage));
+    pty.onData((data) => {
+      if (session.open) session.sender.send(JSON.stringify({ type: 'output', data } satisfies ServerMessage));
+    });
+    pty.onExit(({ exitCode, signal }) => {
+      if (session.open) {
+        session.sender.send(
+          JSON.stringify({
+            type: 'exit',
+            exitCode,
+            signal: signal ?? undefined,
+          } satisfies ServerMessage),
+        );
+        closeSession(session.id);
+      }
+    });
+  } catch (err) {
+    logError('terminal.spawn.failed', { error: (err as Error).message });
+    session.sender.send(
+      JSON.stringify({ type: 'error', message: `无法启动 shell：${(err as Error).message}` } satisfies ServerMessage),
+    );
+    closeSession(session.id);
+  }
+}
+
 /** 客户端消息：spawn / input / resize / signal。 */
 function handleClientMessage(
   session: TerminalSession,
@@ -237,47 +291,7 @@ function handleClientMessage(
   if (!session.open) return;
   if (msg.type === 'spawn') {
     if (session.pty) return; // 已起过
-    const cols = Math.max(2, Math.min(500, Math.floor(msg.cols ?? 80)));
-    const rows = Math.max(1, Math.min(200, Math.floor(msg.rows ?? 24)));
-    try {
-      const { file, args, env, name } = resolveShell(msg.shell);
-      const pty = spawn(file, args, {
-        name: 'xterm-256color',
-        cols,
-        rows,
-        cwd,
-        env: { ...(process.env as Record<string, string>), ...env },
-        // Windows：走 node-pty 自带的 conpty.dll（OpenConsole）而不是系统 conhost。
-        // 系统 conpty 的 kill() 会 fork 一个 node 子进程去取 console 进程列表，
-        // 后端没有 Windows 控制台时会给它分配一个可见控制台窗口 —— 也就是关闭 /
-        // 切换终端时“一闪而过”的窗口；conpty.dll 这条路径不 fork（同 VS Code）。
-        ...(process.platform === 'win32' ? { useConpty: true, useConptyDll: true } : {}),
-      });
-      session.pty = pty;
-      // 回传 shell 名，前端据此显示「1: PowerShell」这样的标签标题。
-      session.sender.send(JSON.stringify({ type: 'title', title: name } satisfies ServerMessage));
-      pty.onData((data) => {
-        if (session.open) session.sender.send(JSON.stringify({ type: 'output', data } satisfies ServerMessage));
-      });
-      pty.onExit(({ exitCode, signal }) => {
-        if (session.open) {
-          session.sender.send(
-            JSON.stringify({
-              type: 'exit',
-              exitCode,
-              signal: signal ?? undefined,
-            } satisfies ServerMessage),
-          );
-          closeSession(session.id);
-        }
-      });
-    } catch (err) {
-      logError('terminal.spawn.failed', { error: (err as Error).message });
-      session.sender.send(
-        JSON.stringify({ type: 'error', message: `无法启动 shell：${(err as Error).message}` } satisfies ServerMessage),
-      );
-      closeSession(session.id);
-    }
+    void spawnPty(session, msg, cwd);
     return;
   }
   if (!session.pty) return;

@@ -7,7 +7,7 @@
  *
  * 模型配置**不在这里**：2026-10-03 用户要求把它提出来，与设置在顶栏平级（见 ModelDialog）。
  */
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { api, type AgentRuntimeStatus } from './api';
 import { Dialog } from './Dialog';
 import { useI18n } from './i18n';
@@ -22,6 +22,7 @@ import {
   type ThemeMode,
 } from './prefs';
 import type { KeymapId } from './keymap';
+import type { RunConfig, RunConfigResult, RuntimeCandidate, RuntimeId, RuntimesResult } from '../../shared/types';
 import { THEMES as COLOR_THEMES } from './themes';
 
 /** 主题下拉项：先给「跟随系统」，再列各套配色（id 与 styles.css / code-themes.ts 对齐）。 */
@@ -101,7 +102,138 @@ function Toggle({
   );
 }
 
-export function SettingsPanel({ onClose }: { onClose: () => void }) {
+/** 运行时表格里展示哪几项（顺序即界面顺序）；名称与来源文案都走 i18n。 */
+const RUNTIME_IDS_FOR_UI: RuntimeId[] = ['java', 'maven', 'gradle', 'python', 'node', 'go'];
+
+/** 来源 → i18n key（后端给枚举，文案在前端，避免英文界面混中文）。 */
+const SOURCE_KEY: Record<RuntimeCandidate['source'], string> = {
+  env: 'settings.runtimeSourceEnv',
+  project: 'settings.runtimeSourceProject',
+  convention: 'settings.runtimeSourceConvention',
+  path: 'settings.runtimeSourcePath',
+};
+
+/**
+ * 2026-10-20：项目运行时锁定 —— 列出探测到的候选（环境变量 → 项目内 → 约定目录 → PATH），
+ * 选中一个就写进 `~/.ide/runs/<projectId>.json`；清空即回到自动（用第一个候选）。
+ *
+ * 为什么需要它：IDE 后端从桌面图标起来时 PATH 往往没有 JDK / Maven，探测能找到多个版本时
+ * 也得让人选“这个项目要用哪个”。
+ */
+function RuntimesSection({ projectId }: { projectId: string }) {
+  const { t } = useI18n();
+  const [runtimes, setRuntimes] = useState<RuntimesResult | null>(null);
+  const [config, setConfig] = useState<RunConfigResult | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([api.runtimes(projectId), api.runConfig(projectId)])
+      .then(([list, result]) => {
+        if (cancelled) return;
+        setRuntimes(list);
+        setConfig(result);
+      })
+      .catch(() => {
+        /* 旧后端没有这两个端点：整块不渲染 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  const save = async (patch: Partial<RunConfig>): Promise<void> => {
+    if (!config) return;
+    setSaving(true);
+    setNote(null);
+    try {
+      const next = await api.saveRunConfig(projectId, { ...config.config, ...patch });
+      setConfig(next);
+      // 工具链根变了 → 候选列表也要重算（否则刚填的目录不出现）
+      if (patch.toolchainRoots) setRuntimes(await api.runtimes(projectId));
+      setNote(t('settings.runtimesSaved'));
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const warnings = useMemo(() => config?.warnings ?? [], [config]);
+  /** 工具链根目录输入框（每行一条；失焦保存，避免边输边写盘）。 */
+  const [rootsText, setRootsText] = useState('');
+  useEffect(() => {
+    setRootsText((config?.config.toolchainRoots ?? []).join('\n'));
+  }, [config?.config.toolchainRoots]);
+  if (!runtimes) return null;
+
+  return (
+    <>
+      <h4 className="settings-subtitle">{t('settings.runtimes')}</h4>
+      <p className="wcr-note">{t('settings.runtimesHint')}</p>
+      <div className="settings-row">
+        <span className="settings-label">{t('settings.toolchainRoots')}</span>
+        <textarea
+          className="text-input settings-ignore"
+          rows={2}
+          spellCheck={false}
+          aria-label={t('settings.toolchainRoots')}
+          placeholder={t('settings.toolchainRootsEmpty')}
+          value={rootsText}
+          onChange={(e) => setRootsText(e.target.value)}
+          onBlur={() => {
+            const next = rootsText
+              .split(/\r?\n/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const current = config?.config.toolchainRoots ?? [];
+            if (next.join('\n') === current.join('\n')) return;
+            void save({ toolchainRoots: next });
+          }}
+        />
+      </div>
+      {RUNTIME_IDS_FOR_UI.map((id) => {
+        const list = runtimes[id] ?? [];
+        const locked = config?.config.runtimes[id] ?? '';
+        const label = t(`settings.runtimeId.${id}`);
+        return (
+          <div className="settings-row" key={id}>
+            <span className="settings-label">{label}</span>
+            {list.length === 0 ? (
+              <span className="settings-note">{t('settings.runtimeMissing')}</span>
+            ) : (
+              <select
+                className="project-select"
+                aria-label={label}
+                disabled={saving}
+                value={locked}
+                onChange={(e) => void save({ runtimes: { ...config?.config.runtimes, [id]: e.target.value } })}
+              >
+                <option value="">{t('settings.runtimeAuto')}</option>
+                {list.map((c) => (
+                  <option key={`${c.path}:${c.source}`} value={c.home}>
+                    {`${c.version ?? '?'} · ${t(SOURCE_KEY[c.source])} · ${c.home}`}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        );
+      })}
+      {warnings.length > 0 && (
+        <div className="settings-note">
+          {warnings.map((w) => (
+            <div key={w}>{w}</div>
+          ))}
+        </div>
+      )}
+      {note && <div className="settings-note">{note}</div>}
+    </>
+  );
+}
+
+export function SettingsPanel({ projectId, onClose }: { projectId: string | null; onClose: () => void }) {
   const { t, locale } = useI18n();
   const prefs = usePrefs();
   const themeLabelId = useId();
@@ -364,6 +496,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           onChange={(e) => savePrefs({ pythonPath: e.target.value })}
         />
       </div>
+
+      {/* 2026-10-20：项目级运行时锁定（不写被读目录，落 ~/.ide/runs/<projectId>.json） */}
+      {projectId && <RuntimesSection projectId={projectId} />}
 
       <h3 className="wcr-section-title">{t('settings.indexSection')}</h3>
       <h4 className="settings-subtitle">{t('settings.ignoreRules')}</h4>

@@ -376,3 +376,101 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ---------------------------------------------------------------- 运行档下拉（2026-10-20） */
+
+/* ▶ 旁边的 ▾：列出本项目的构建 / 运行 / 测试档；定位与标签右键菜单同款（固定定位 + backdrop） */
+.run-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 41;
+  min-width: 240px;
+  max-width: 420px;
+  padding: 6px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elev-2);
+}
+
+.run-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.run-menu-item:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+.run-kind {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 16px;
+  /* 与命令面板的徽标同口径：浅底深字，不跟主题 --bg */
+  color: #10161d;
+}
+
+.run-kind.k-build {
+  background: #6ea8fe;
+}
+.run-kind.k-run {
+  background: #63d29b;
+}
+.run-kind.k-test {
+  background: #c58fe8;
+}
+.run-kind.k-other {
+  background: var(--hl-external);
+}
+
+.run-menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-menu-tag {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+}
+
+.run-menu-empty {
+  padding: 8px;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+
+.run-menu-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 4px 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+}
+
+.run-menu-runtimes {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

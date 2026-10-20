@@ -1825,6 +1825,8 @@ mark {
 }
 
 .editor-actions {
+  /* 运行档下拉（service.css 的 .run-menu）按它定位 */
+  position: relative;
   flex: none;
   display: flex;
   align-items: center;
