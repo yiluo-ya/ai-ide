@@ -5,33 +5,56 @@
  * 画面，还得引新依赖。这里只画「结论」：语法色 + 语义档位 + 行号 + 出处条。
  * Monaco 自带的 tokenizer 已经能给出每行 token，直接复用，不自己写词法分析。
  *
- * 取色跟界面一致：底色 / 前景抄 READER_THEME_DARK（monaco-setup.ts），语义三档读 styles.css
- * 的 CSS 变量 —— 界面调色后截图自动跟着变，读不到（非浏览器环境）才退回默认值。
+ * 取色跟界面一致：底色 / 前景 / 语法色都读当前主题的配色（code-themes.ts），
+ * 语义三档读 styles.css 的 CSS 变量 —— 换主题后截图自动跟着变，
+ * 读不到（非浏览器环境）才退回默认深色。
  */
 import { translate } from './i18n';
+import { CODE_THEMES } from './code-themes';
+import { DEFAULT_THEME } from './themes';
 import { monaco, monacoLangFor } from './monaco-setup';
+import { loadPrefs, resolvedTheme } from './prefs';
 
 const FONT_STACK = "'JetBrains Mono', 'Consolas', monospace";
 
-/** 与 READER_THEME_DARK 的 editor.* 一致（monaco-setup.ts defineReaderTheme）。 */
-const BG = '#131315';
-const FG = '#c3c8ce';
-const GUTTER_BG = '#191919';
-const GUTTER_FG = '#4b5057';
-const DIVIDER = '#2a2a30';
-const BAR_BG = '#1b1b1f';
-const BAR_FG = '#8b9198';
+/** 默认主题（New UI Dark）的代码配色；取不到当前主题时用。 */
+const FALLBACK = CODE_THEMES[DEFAULT_THEME];
+
+/** 读当前主题的代码配色（截图跟随界面主题）。 */
+function currentCodeTheme(): typeof FALLBACK {
+  try {
+    return CODE_THEMES[resolvedTheme(loadPrefs().theme)] ?? FALLBACK;
+  } catch {
+    return FALLBACK;
+  }
+}
+
+/**
+ * 主题 rule → 「token 前缀 → 颜色」表。
+ * tokenize 给的是粗分类，按前缀匹配；更具体的规则（段数多 / 名字长）排前面，
+ * 否则 `keyword` 会盖住 `keyword.control`（主题数据是按可读性排的，不保证匹配优先级）。
+ */
+function tokenColorsOf(theme: typeof FALLBACK): Array<[string, string]> {
+  const rules = theme.rules
+    .filter((r) => r.foreground)
+    .map((r) => [r.token, `#${r.foreground}`] as [string, string])
+    .sort((a, b) => {
+      const depth = b[0].split('.').length - a[0].split('.').length;
+      return depth !== 0 ? depth : b[0].length - a[0].length;
+    });
+  return rules;
+}
 
 /** 语义三档的兜底色（与 styles.css 的 `--hl-*` 默认值一致）。 */
 const HL_FALLBACK = { project: '#ffffff', local: '#cfe2ff', external: '#9aa7b6' } as const;
 
 /**
- * Monaco token type → VS Code Dark+ 近似色。
+ * Monaco token type → VS Code Dark+ 近似色（「继承 base、没有自定义 rules」的深色主题兜底）。
  * 「近似」的原因：tokenize 给的是语言无关的粗分类（comment / string / keyword…），
  * 没有语义信息；做到 VS Code 那种逐 token 精确配色既不可能也没必要。
  * 顺序敏感：前缀先匹配到谁就用谁（更具体的规则放前面）。
  */
-const TOKEN_COLORS: Array<[string, string]> = [
+const TOKEN_COLORS_DARK: Array<[string, string]> = [
   ['comment', '#6a9955'],
   ['string', '#ce9178'],
   ['regexp', '#d16969'],
@@ -49,6 +72,31 @@ const TOKEN_COLORS: Array<[string, string]> = [
   ['operator', '#d4d4d4'],
   ['delimiter', '#d4d4d4'],
 ];
+
+/** 同上，VS Light+ 近似（浅色主题兜底）。 */
+const TOKEN_COLORS_LIGHT: Array<[string, string]> = [
+  ['comment', '#008000'],
+  ['string', '#a31515'],
+  ['regexp', '#811f3f'],
+  ['keyword.control', '#af00db'],
+  ['keyword', '#0000ff'],
+  ['constant.numeric', '#098658'],
+  ['constant', '#0070c1'],
+  ['entity.name.type', '#267f99'],
+  ['type', '#267f99'],
+  ['entity.name.function', '#795e26'],
+  ['support.function', '#795e26'],
+  ['entity.name.tag', '#800000'],
+  ['attribute', '#001080'],
+  ['variable', '#001080'],
+  ['operator', '#000000'],
+  ['delimiter', '#000000'],
+];
+
+/** 主题自带 rules 为空（继承 Monaco base）时，按明暗选兜底表。 */
+function fallbackTokensOf(theme: typeof FALLBACK): Array<[string, string]> {
+  return theme.base === 'vs' ? TOKEN_COLORS_LIGHT : TOKEN_COLORS_DARK;
+}
 
 const MAX_LINES = 400;
 const MAX_WIDTH = 4000;
@@ -72,8 +120,8 @@ export interface SnapshotOptions {
   /** 右侧落款，通常放项目名。 */
   subtitle?: string;
   fontSize?: number;
-  /** 目前只做与 READER_THEME_DARK 一致的深色；字段留给后续浅色主题。 */
-  theme?: 'dark';
+  /** 截图配色：目前跟随当前界面主题；字段留给「固定某种主题导出」的将来需求。 */
+  theme?: 'auto';
 }
 
 /** 读 CSS 变量（拿不到就退回默认色：单测 / 非浏览器里没有 document）。 */
@@ -86,20 +134,25 @@ function cssVarColor(name: string, fallback: string): string {
   }
 }
 
-function tokenColor(type: string): string {
-  for (const [prefix, color] of TOKEN_COLORS) {
+function tokenColor(type: string, theme: typeof FALLBACK, table: Array<[string, string]>): string {
+  for (const [prefix, color] of table) {
     if (type.startsWith(prefix)) return color;
   }
-  return FG;
+  return theme.colors['editor.foreground'] ?? '#bcbec4';
 }
 
-function tokenColorAt(tokens: monaco.Token[] | undefined, offset: number): string {
+function tokenColorAt(
+  tokens: monaco.Token[] | undefined,
+  offset: number,
+  theme: typeof FALLBACK,
+  table: Array<[string, string]>,
+): string {
   let type = '';
   for (const token of tokens ?? []) {
     if (token.offset <= offset) type = token.type;
     else break; // token 按 offset 升序
   }
-  return tokenColor(type);
+  return tokenColor(type, theme, table);
 }
 
 function splitLines(text: string): string[] {
@@ -123,6 +176,8 @@ function drawCodeLine(
   font: string,
   boldFont: string,
   hl: Record<SnapshotHit['tier'], string>,
+  theme: typeof FALLBACK,
+  table: Array<[string, string]>,
 ): void {
   const length = text.length;
   const cuts = new Set<number>([0, length]);
@@ -139,7 +194,7 @@ function drawCodeLine(
     if (to <= from) continue;
     const hit = hits?.find((h) => h.startCol - 1 <= from && from < h.endCol - 1);
     ctx.font = hit?.tier === 'project' ? boldFont : font;
-    ctx.fillStyle = hit ? hl[hit.tier] : tokenColorAt(tokens, from);
+    ctx.fillStyle = hit ? hl[hit.tier] : tokenColorAt(tokens, from, theme, table);
     const piece = text.slice(from, to);
     ctx.fillText(piece, cursor, y);
     cursor += ctx.measureText(piece).width;
@@ -165,6 +220,9 @@ export function renderCodeSnapshot(opts: SnapshotOptions): HTMLCanvasElement {
 
   // tokenize 一次给全量：截断只影响绘制哪些行，token 与行下标仍一一对齐
   const tokenLines = monaco.editor.tokenize(opts.text.replace(/\r\n?/g, '\n'), monacoLangFor(opts.lang));
+  // 截图配色跟随当前界面主题：有自定义 rules 用 rules，继承 base 的用近似兜底表
+  const codeTheme = currentCodeTheme();
+  const tokenTable = codeTheme.rules.length ? tokenColorsOf(codeTheme) : fallbackTokensOf(codeTheme);
 
   const hitsByLine = new Map<number, SnapshotHit[]>();
   for (const hit of opts.highlights ?? []) {
@@ -209,33 +267,52 @@ export function renderCodeSnapshot(opts: SnapshotOptions): HTMLCanvasElement {
     external: cssVarColor('--hl-external', HL_FALLBACK.external),
   };
 
-  // 背景 + 行号栏（单独底色，和代码区一眼分开）
-  ctx.fillStyle = BG;
+  // 背景 + 行号栏（单独底色，和代码区一眼分开）—— 颜色仍取自当前主题
+  const bg = codeTheme.colors['editor.background'] ?? '#1e1f22';
+  const gutterBg = codeTheme.colors['editor.lineHighlightBackground'] ?? bg;
+  const gutterFg = codeTheme.colors['editorLineNumber.foreground'] ?? '#4b5057';
+  const divider = codeTheme.colors['editorWidget.border'] ?? '#2a2a30';
+  const barBg = codeTheme.colors['editorWidget.background'] ?? '#1b1b1f';
+  const barFg = codeTheme.colors['editorLineNumber.activeForeground'] ?? '#8b9198';
+
+  ctx.fillStyle = bg;
   ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = GUTTER_BG;
+  ctx.fillStyle = gutterBg;
   ctx.fillRect(0, 0, gutterWidth, codeTop + codeHeight);
-  ctx.fillStyle = DIVIDER;
+  ctx.fillStyle = divider;
   ctx.fillRect(gutterWidth - 1, 0, 1, codeTop + codeHeight);
 
   ctx.textBaseline = 'middle';
   ctx.font = font;
   for (let i = 0; i < lines.length; i += 1) {
     const y = codeTop + i * lineHeight + lineHeight / 2;
-    ctx.fillStyle = GUTTER_FG;
+    ctx.fillStyle = gutterFg;
     ctx.textAlign = 'right';
     ctx.fillText(String(startLine + i), gutterWidth - gutterPad, y);
     ctx.textAlign = 'left';
-    drawCodeLine(ctx, lines[i], tokenLines[i], hitsByLine.get(startLine + i), contentLeft, y, font, boldFont, hl);
+    drawCodeLine(
+      ctx,
+      lines[i],
+      tokenLines[i],
+      hitsByLine.get(startLine + i),
+      contentLeft,
+      y,
+      font,
+      boldFont,
+      hl,
+      codeTheme,
+      tokenTable,
+    );
   }
 
   if (hasBar) {
     const barY = codeTop + codeHeight + Math.round(padding * 0.5);
-    ctx.fillStyle = DIVIDER;
+    ctx.fillStyle = divider;
     ctx.fillRect(0, barY, width, 1);
-    ctx.fillStyle = BAR_BG;
+    ctx.fillStyle = barBg;
     ctx.fillRect(0, barY + 1, width, barHeight - 1);
     ctx.font = `${Math.round(fontSize * 0.85)}px ${FONT_STACK}`;
-    ctx.fillStyle = BAR_FG;
+    ctx.fillStyle = barFg;
     const centerY = barY + barHeight / 2;
     if (barText) {
       ctx.textAlign = 'left';

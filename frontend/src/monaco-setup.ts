@@ -23,8 +23,10 @@ import type {
   SymbolKind,
 } from '../../shared/types';
 import { api } from './api';
+import { CODE_THEMES } from './code-themes';
 import { translate } from './i18n';
 import { ensureLanguages, guessLangFor, monacoContributions, monacoLangFor, refLanguageList, symbolLanguageList } from './languages';
+import type { ThemeId } from './themes';
 
 declare global {
   interface Window {
@@ -65,15 +67,14 @@ export { monacoLangFor };
 export const MODEL_SCHEME = 'wcr';
 
 /**
- * 阅读器专用主题（P24）：深/浅各一套。
- * 底色压暗 / 提亮，默认前景降一档，让「本项目符号」的提亮与「外部依赖」的压暗都有对比空间。
+ * 阅读器专用主题（P24 / 多配色 2026-10-20）：每个界面主题一套 Monaco 配色。
+ * 配色数据集中在 code-themes.ts；这里只负责注册成 Monaco 主题并给出名字映射。
  */
-export const READER_THEME_DARK = 'wcr-dark';
-export const READER_THEME_LIGHT = 'wcr-light';
+const THEME_PREFIX = 'wcr-';
 
-/** 按生效主题取 Monaco 主题名。 */
-export function themeNameFor(theme: 'dark' | 'light'): string {
-  return theme === 'light' ? READER_THEME_LIGHT : READER_THEME_DARK;
+/** 按生效主题 id 取 Monaco 主题名（未注册的 id 兜底到默认深色）。 */
+export function themeNameFor(theme: ThemeId): string {
+  return `${THEME_PREFIX}${theme in CODE_THEMES ? theme : 'dark'}`;
 }
 
 /** 语义着色的装饰类名（颜色在 styles.css 里用 CSS 变量定义）。 */
@@ -86,45 +87,16 @@ export const HL_CLASS = {
 /** 后端 kind 序号 → 装饰类名。 */
 const HL_BY_KIND = [HL_CLASS.project, HL_CLASS.external, HL_CLASS.local] as const;
 
+/** 注册全部配色主题（Editor 模块加载时调一次）。 */
 export function defineReaderTheme() {
-  monaco.editor.defineTheme(READER_THEME_DARK, {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [],
-    colors: {
-      'editor.background': '#131315',
-      'editor.foreground': '#c3c8ce',
-      'editor.lineHighlightBackground': '#1c1c21',
-      'editor.selectionBackground': '#2a4a6b',
-      'editorLineNumber.foreground': '#4b5057',
-      'editorLineNumber.activeForeground': '#8b9198',
-      'editorGutter.background': '#131315',
-      'editorCursor.foreground': '#ffffff',
-      'minimap.background': '#131315',
-      'editorWidget.background': '#1b1b1f',
-      'editorWidget.border': '#3c3c3c',
-      'editorIndentGuide.background1': '#232327',
-    },
-  });
-  monaco.editor.defineTheme(READER_THEME_LIGHT, {
-    base: 'vs',
-    inherit: true,
-    rules: [],
-    colors: {
-      'editor.background': '#ffffff',
-      'editor.foreground': '#1f2328',
-      'editor.lineHighlightBackground': '#f2f4f7',
-      'editor.selectionBackground': '#b9d6f2',
-      'editorLineNumber.foreground': '#a0a6ae',
-      'editorLineNumber.activeForeground': '#40474f',
-      'editorGutter.background': '#ffffff',
-      'editorCursor.foreground': '#0f6cbd',
-      'minimap.background': '#ffffff',
-      'editorWidget.background': '#f8f9fb',
-      'editorWidget.border': '#d5d8dd',
-      'editorIndentGuide.background1': '#e6e8eb',
-    },
-  });
+  for (const [id, theme] of Object.entries(CODE_THEMES)) {
+    monaco.editor.defineTheme(themeNameFor(id as ThemeId), {
+      base: theme.base,
+      inherit: true,
+      rules: theme.rules,
+      colors: theme.colors,
+    });
+  }
 }
 
 export function modelUriFor(file: string): monaco.Uri {

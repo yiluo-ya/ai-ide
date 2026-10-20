@@ -22,15 +22,14 @@ import {
   type ThemeMode,
 } from './prefs';
 import type { KeymapId } from './keymap';
+import { THEMES as COLOR_THEMES } from './themes';
 
-const THEMES: ThemeMode[] = ['dark', 'light', 'system'];
+/** 主题下拉项：先给「跟随系统」，再列各套配色（id 与 styles.css / code-themes.ts 对齐）。 */
+const THEME_CHOICES: Array<{ id: ThemeMode; labelKey: string }> = [
+  { id: 'system', labelKey: 'settings.themeSystem' },
+  ...COLOR_THEMES.map((t) => ({ id: t.id as ThemeMode, labelKey: t.labelKey })),
+];
 const KEYMAPS: KeymapId[] = ['idea', 'vscode'];
-
-const THEME_KEY: Record<ThemeMode, string> = {
-  dark: 'settings.themeDark',
-  light: 'settings.themeLight',
-  system: 'settings.themeSystem',
-};
 
 /** pi 的解析来源 → 文案（来源由后端给枚举，文案在前端，免得英文界面里混中文）。 */
 const AGENT_SOURCE_KEY: Record<AgentRuntimeStatus['pi']['source'], string> = {
@@ -207,23 +206,22 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       <h3 className="wcr-section-title">{t('settings.appearance')}</h3>
 
       <div className="settings-row">
-        <span className="settings-label" id={themeLabelId}>
+        <label className="settings-label" htmlFor={themeLabelId}>
           {t('settings.theme')}
-        </span>
-        <div className="settings-seg" role="radiogroup" aria-labelledby={themeLabelId}>
-          {THEMES.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              role="radio"
-              aria-checked={prefs.theme === mode}
-              className={`settings-seg-btn${prefs.theme === mode ? ' on' : ''}`}
-              onClick={() => savePrefs({ theme: mode })}
-            >
-              {t(THEME_KEY[mode])}
-            </button>
+        </label>
+        <select
+          id={themeLabelId}
+          className="project-select"
+          data-wcr-pref="theme"
+          value={prefs.theme}
+          onChange={(e) => savePrefs({ theme: e.target.value as ThemeMode })}
+        >
+          {THEME_CHOICES.map((choice) => (
+            <option key={choice.id} value={choice.id}>
+              {t(choice.labelKey)}
+            </option>
           ))}
-        </div>
+        </select>
       </div>
 
       <div className="settings-row">
@@ -267,6 +265,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         <select
           id={localeId}
           className="project-select"
+          data-wcr-pref="locale"
           value={locale}
           onChange={(e) => savePrefs({ locale: e.target.value === 'en' ? 'en' : 'zh' })}
         >

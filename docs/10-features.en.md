@@ -232,18 +232,21 @@ external dependency” verdict.
 
 The editor highlights by **symbol ownership** in three tiers, so your own code stands out first:
 
-| Tier | What it covers | Default colour |
+| Tier | What it covers | How it is coloured (follows the theme) |
 |---|---|---|
-| **Project** | Functions / classes / methods / properties / constants defined in this project, and references to them | `#ffffff` white + bold + subtle glow |
-| **Local** | Local variables and parameters inside a function | `#cfe2ff` light blue |
-| **External** | Standard library / third-party packages / built-ins (`os.path.*`, `print`, `process`, …) | `#9aa7b6` grey-blue |
+| **Project** | Functions / classes / methods / properties / constants defined in this project, and references to them | the theme’s brightest foreground **+ bold** (+ a subtle glow) |
+| **Local** | Local variables and parameters inside a function | the theme’s regular foreground (not bold) |
+| **External** | Standard library / third-party packages / built-ins (`os.path.*`, `print`, `process`, …) | the theme’s dim foreground (the comment tier) |
 
+- Emphasis comes from **weight and brightness**, not from a dedicated hue: switching themes recomputes
+  all three tiers, so you never get a fixed light blue fighting a dark theme
 - Verdicts come from backend resolution (`GET /api/projects/:id/highlights?file=`), not from regex guesses
 - **Member accesses that cannot be resolved are not coloured** (e.g. `method` in `obj.method()`,
   which would need type inference) — they keep their editor syntax colour; better no highlight than a
   wrong one. `self` / `this` also keep their normal colour
-- The three colours are CSS variables (`--hl-project` / `--hl-local` / `--hl-external` at the top of
-  `frontend/src/styles.css`)
+- The three tiers are CSS variables (`--hl-project` / `--hl-local` / `--hl-external` /
+  `--hl-project-weight` in `frontend/src/styles.css`), overridden per theme; snapshot export
+  (`snapshot.ts`) reads the same variables
 - If the index has not finished when you open a project, the page re-fetches highlights on the
   `index-ready` event — no refresh needed
 
@@ -297,6 +300,15 @@ unquoted identifiers fold to lower case, quoted ones keep their case); resolutio
   across packages
 - **One-command start / single instance**: `wcr [directory]` — a busy port yields to the next one, and
   repeated starts reuse the running instance
+- **Colour themes** (2026-10-20): Settings → Appearance → “Theme” switches the whole UI **and** the
+  editor at once — **New UI Dark (default, the IntelliJ IDEA 2023+ palette)**, Dark (classic VS Code
+  look), Light, One Dark, One Light, Darcula, Material Palenight, Nord, Catppuccin Mocha, plus
+  “follow system”. Metadata lives in `frontend/src/themes.ts`; the UI palette in `styles.css`
+  (dark baseline in `:root`, light baseline in `[data-tone='light']`, one primary block per theme) and
+  the editor palette in `frontend/src/code-themes.ts` (Monaco colors + token rules). Semantic tiers keep
+  one fixed policy: project symbols = the theme’s brightest foreground **+ bold**, locals = regular
+  foreground, external dependencies = dim foreground — emphasis by weight, never by a dedicated hue.
+  A new theme = one entry in each of those three places, no component changes
 - **File tree coloured by git status** (IDEA convention, 2026-10-20): directories and files **share one
   colour** (bold weight + folder icon tell them apart; no more “directories are blue”), colour only
   expresses workspace status — added green, modified / renamed blue, deleted grey, conflicted red;
@@ -350,6 +362,7 @@ frontend/src/
   ShareMenu.tsx removed (2026-10-15, share entry dropped) · share.ts / report.ts / snapshot.ts / bridge.ts
                                                    snippet format / reports / screenshots (entry dropped, code kept) / host bridge
   SettingsPanel.tsx / ModelSettings.tsx / ModelDialog.tsx / prefs.ts   settings / model / preferences
+  themes.ts / code-themes.ts                        colour-theme list (id · label · tone) / Monaco palettes
   Dialog.tsx / Notice.tsx / Welcome.tsx / FolderBrowser.tsx            dialogs / notices / welcome / folder picker
   i18n/            zh.ts / en.ts / index.ts (Chinese & English strings)
 shared/types.ts    API contract shared by both sides (positions are 1-based, columns are UTF-16)
@@ -629,7 +642,7 @@ state, file nodes in the graph sticking to their own directory), `guide.mjs` (re
 the first screen, “Start reading” entering step 1, **the Changes panel docked on the right with git
 as the source of truth** — clicking the added/removed counts opens a diff — structural explanation),
 `platform.mjs` (Model next to Settings in the top bar, the five settings groups, switching to light
-theme actually re-themes, font size landing in `wcr:prefs` with immediate effect, switching to
+theme actually re-themes, **One Dark / One Light swapping both the UI and the editor background**, font size landing in `wcr:prefs` with immediate effect, switching to
 English, four permanent left-panel tabs with Overview beside Changes / Commands in the right dock,
 the “Add project” dialog picking a directory, no console errors throughout) and `panel.mjs` (the open
 action for the four permanent left-panel tabs).

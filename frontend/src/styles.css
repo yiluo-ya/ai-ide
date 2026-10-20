@@ -44,6 +44,8 @@
   /* 输入控件的聚焦光环 */
   --focus-ring: rgba(17, 119, 187, 0.28);
 
+  /* ---- 默认深色（VS Code Dark+ 风）：保留自 2026-10-03 以来的原配色 ----
+     2026-10-20 起默认主题改成了 New UI Dark（见下方主题块），这一套作为可选保留。 */
   --bg: #1e1e1e;
   --bg-2: #252526;
   --bg-3: #2d2d30;
@@ -54,12 +56,15 @@
   --accent-2: #1177bb;
   --hit: #613214;
 
-  /* 语义着色三档强度（改这里就能调对比）：project 最亮 > local 次亮 > external 略暗 */
+  /* 语义着色三档（2026-10-20 统一策略）：
+     project = 主题最亮前景 + 加粗（可跳转符号的强调靠字重与亮度）；
+     local = 主题常规前景；external = 主题暗淡前景（注释色）。
+     换主题时这三项随主题块一起覆盖，不必每处单独调。 */
   --hl-project: #ffffff;
   --hl-project-glow: rgba(255, 214, 130, 0.2);
-  --hl-project-weight: 600;
-  --hl-local: #cfe2ff;
-  --hl-external: #9aa7b6;
+  --hl-project-weight: 700;
+  --hl-local: #d4d4d4;
+  --hl-external: #9d9d9d;
 
   /* 文件树：目录与文件（2026-10-20 改为 IDEA 口径）——目录不再单独染蓝，
      与文件同色，靠「加粗 + 文件夹图标」区分；颜色留给下面的 vcs 状态色表达是否未提交。 */
@@ -85,7 +90,7 @@
   --wcr-density-track: rgba(0, 0, 0, 0.3);
   --wcr-density-width: 12px;
 
-  /* ---- P24：以下语义色在亮色主题（:root[data-theme='light']）里整体覆盖 ---- */
+  /* ---- P24：以下语义色在亮色主题（:root[data-tone='light']）里整体覆盖 ---- */
   --warn: #e2c08d;
   --ok: #6a9955;
   --danger: #e06c75;
@@ -182,8 +187,10 @@
   color-scheme: dark;
 }
 
-/* 亮色主题（P24）：只换变量，不改结构；Monaco 用 wcr-light（monaco-setup.ts）。 */
-:root[data-theme='light'] {
+/* 亮色基线（P24）：只换变量，不改结构；按 data-tone 生效，具体主题块再覆盖主色。
+   2026-10-20 多配色起，这里从 `data-theme='light'` 改成 `data-tone='light'`：
+   浅色系主题（light / one-light）共用这份基线，各自只覆盖主色板。 */
+:root[data-tone='light'] {
   --focus-ring: rgba(15, 108, 189, 0.22);
 
   --bg: #ffffff;
@@ -196,12 +203,12 @@
   --accent-2: #0b5a9e;
   --hit: #ffe9a8;
 
-  /* 语义着色三档反过来：本项目最深最重 > 局部次之 > 外部最淡 */
+  /* 语义着色三档（同上策略，浅色下 project 最深最重）：project 最深 + 加粗 > local 常规 > external 最淡 */
   --hl-project: #0a3d91;
   --hl-project-glow: rgba(10, 61, 145, 0.16);
   --hl-project-weight: 700;
-  --hl-local: #3d6ea5;
-  --hl-external: #7c8794;
+  --hl-local: #1f2328;
+  --hl-external: #5b6470;
 
   /* 文件树：IDEA 口径——目录与文件同色，靠加粗区分（浅色下同为深色文字） */
   --tree-dir: #24292f;
@@ -313,6 +320,547 @@
   --kind-bg-enum: #eddfae;
 
   color-scheme: light;
+}
+
+/* ---------------------------------------------------------------- 配色主题（2026-10-20）
+
+   约定：深色基线在 :root，浅色基线在 [data-tone='light']；每个主题块只覆盖「主色板」，
+   其余次要色用 color-mix 从主色派生 —— 新增主题不必重写上百个变量。
+   语义三档（--hl-*）：本项目符号 = 该主题最亮前景 + 加粗（强调靠字重，不靠与基线抢色），
+   局部变量 = 常规前景，外部依赖 = 暗淡前景（注释色）。
+   编辑器侧同 id 的 Monaco 配色在 code-themes.ts。 */
+
+/* New UI Dark（IDEA 2023+ 默认深色，默认主题）
+   色值口径：编辑器 #1E1F22、工具窗口 #2B2D30、边框 #393B40、前景 #BCBEC4；
+   主强调色是蓝 #3574F0（Darcula 时代是橙）；语法色是 Darcula 血统的 New UI 调色版。 */
+:root[data-theme='new-ui-dark'] {
+  --bg: #1e1f22;
+  --bg-2: #2b2d30;
+  --bg-3: #2b2d30;
+  --border: #393b40;
+  --fg: #bcbec4;
+  --fg-dim: #868a91;
+  --accent: #3574f0;
+  --accent-2: #4a82f5;
+  --hit: #2e436e;
+
+  --hl-project: #ffffff;
+  --hl-project-glow: rgba(53, 116, 240, 0.24);
+  --hl-project-weight: 700;
+  --hl-local: #bcbec4;
+  --hl-external: #868a91;
+
+  --tree-dir: #bcbec4;
+  --tree-file: #bcbec4;
+  /* IDEA New UI 原生状态色 */
+  --vcs-added: #62b543;
+  --vcs-modified: #56a8f5;
+  --vcs-deleted: #7a7e85;
+  --vcs-conflict: #f75464;
+
+  --wcr-hover-bg: #2b2d30;
+  --wcr-hover-name: #ffffff;
+  --wcr-hover-doc: #bcbec4;
+  --wcr-hover-note: #a1a5ab;
+  --wcr-density-track: rgba(0, 0, 0, 0.4);
+
+  --warn: #d6b26a;
+  --ok: #62b543;
+  --danger: #f75464;
+  --danger-border: #6b3a3f;
+  --danger-bg: rgba(247, 84, 100, 0.08);
+  --danger-bg-strong: rgba(247, 84, 100, 0.18);
+  --row-hover: #2e3035;
+  --row-active: #2e436e;
+  --chip-bg: #3b3d42;
+  --chip-fg: #bcbec4;
+  --code-ref: #cf8e6d;
+  --muted-2: #5a5d63;
+  --mark-fg: #ffffff;
+  --accent-fg: #ffffff;
+  --overlay: rgba(0, 0, 0, 0.4);
+  --overlay-strong: rgba(0, 0, 0, 0.6);
+  --mask-bg: rgba(30, 31, 34, 0.72);
+  --shadow-sm: rgba(0, 0, 0, 0.45);
+  --shadow-md: rgba(0, 0, 0, 0.5);
+  --shadow-lg: rgba(0, 0, 0, 0.65);
+  --toast-bg: #4b2b2f;
+  --toast-border: #8f4a51;
+  --toast-fg: #ffd9dc;
+  --notice-bg: #232b38;
+  --notice-border: #3a4f6b;
+  --notice-dot: #56a8f5;
+  --flash-fg: #d6b26a;
+  --swatch-bg: #1e1f22;
+  --hover-soft: rgba(255, 255, 255, 0.06);
+  --hover-soft-2: rgba(255, 255, 255, 0.09);
+  --hover-badge-bg: #3b3d42;
+  --hover-badge-fg: #bcbec4;
+  --hover-ext-bg: #2e436e;
+  --hover-ext-fg: #9db8f5;
+  --entry-badge-bg: #2f4a26;
+  --entry-badge-fg: #a9d18a;
+  --entry-rank-fg: #1e1f22;
+  --entry-rank-bg: #cf8e6d;
+  --warn-border: #5c5330;
+  --warn-bg: #33301f;
+
+  --heat-empty: #393b40;
+  --heat-0: #33353a;
+  --heat-1: #3b4a3b;
+  --heat-2: #4a6b40;
+  --heat-3: #5f9440;
+  --heat-4: #77c043;
+  --heat-glow: rgba(119, 192, 67, 0.45);
+  --badge-bg: #393b40;
+  --badge-fg: #bcbec4;
+  --badge-hot-bg: #3f3524;
+  --badge-hot-fg: #d6b26a;
+  --badge-orphan-bg: #3a2f4b;
+  --badge-orphan-fg: #c5a3e0;
+  --badge-read-bg: #2f4a26;
+  --badge-read-fg: #77c043;
+  --badge-ignored-bg: #393b40;
+  --badge-ignored-fg: #7a7e85;
+  --badge-pulse-bg: #4a3420;
+  --badge-pulse-fg: #dfa869;
+
+  --agent: #dfa869;
+  --agent-line: rgba(223, 168, 105, 0.13);
+
+  --graph-edge: #4a4d52;
+  --graph-strong-fg: #ffffff;
+  --lane-entry: rgba(214, 178, 106, 0.08);
+  --lane-domain: rgba(53, 116, 240, 0.12);
+  --lane-infra: rgba(98, 181, 67, 0.1);
+  --lane-utility: rgba(177, 140, 217, 0.1);
+  --lane-isolated: rgba(134, 138, 145, 0.1);
+
+  --layer-entry-bg: #3f3524;
+  --layer-entry-fg: #d6b26a;
+  --layer-domain-bg: #22375c;
+  --layer-domain-fg: #8ab4f8;
+  --layer-infra-bg: #2b4023;
+  --layer-infra-fg: #a9d18a;
+  --layer-utility-bg: #3b2b4d;
+  --layer-utility-fg: #c5a3e0;
+  --layer-isolated-bg: #393b40;
+  --layer-isolated-fg: #9a9ea5;
+  --refs-badge-bg: #3f3524;
+  --refs-badge-fg: #d6b26a;
+  --refs-decl-bg: #22375c;
+  --refs-decl-fg: #b8d4f8;
+  --kind-bg: #3b3d42;
+  --kind-fg: #bcbec4;
+  --kind-bg-class: #4a3420;
+  --kind-bg-function: #22375c;
+  --kind-bg-property: #3d2f4d;
+  --kind-bg-enum: #3f3524;
+
+  color-scheme: dark;
+}
+
+/* One Dark（Atom） */
+:root[data-theme='one-dark'] {
+  --bg: #282c34;
+  --bg-2: #21252b;
+  --bg-3: #2f343d;
+  --border: #3e4451;
+  --fg: #abb2bf;
+  --fg-dim: #7f848e;
+  --accent: #3a6ea5;
+  --accent-2: #528bff;
+  --hit: #4b3a1e;
+
+  --hl-project: #e6e9ef;
+  --hl-project-glow: rgba(97, 175, 239, 0.22);
+  --hl-project-weight: 700;
+  --hl-local: #abb2bf;
+  --hl-external: #7f848e;
+
+  --tree-dir: #abb2bf;
+  --tree-file: #abb2bf;
+  --vcs-added: #98c379;
+  --vcs-modified: #61afef;
+  --vcs-deleted: #7f848e;
+  --vcs-conflict: #e06c75;
+
+  --wcr-hover-bg: #21252b;
+  --wcr-hover-name: #e6e9ef;
+  --wcr-hover-doc: #abb2bf;
+  --wcr-hover-note: #7f848e;
+  --wcr-density-track: rgba(0, 0, 0, 0.4);
+
+  --warn: #e5c07b;
+  --ok: #98c379;
+  --danger: #e06c75;
+  --danger-border: #7a3b41;
+  --danger-bg: rgba(224, 108, 117, 0.1);
+  --danger-bg-strong: rgba(224, 108, 117, 0.2);
+  --row-hover: #2c313c;
+  --row-active: #3a4a63;
+  --chip-bg: #3e4451;
+  --chip-fg: #c8cdd6;
+  --code-ref: #e5c07b;
+  --muted-2: #5c6370;
+  --mark-fg: #282c34;
+  --accent-fg: #ffffff;
+  --overlay: rgba(0, 0, 0, 0.45);
+  --overlay-strong: rgba(0, 0, 0, 0.62);
+  --mask-bg: rgba(23, 26, 32, 0.68);
+  --shadow-sm: rgba(0, 0, 0, 0.5);
+  --shadow-md: rgba(0, 0, 0, 0.55);
+  --shadow-lg: rgba(0, 0, 0, 0.7);
+  --toast-bg: #4b2b2f;
+  --toast-border: #8f4a51;
+  --toast-fg: #ffd9dc;
+  --notice-bg: #22303c;
+  --notice-border: #3a5a72;
+  --notice-dot: #61afef;
+  --flash-fg: #ffd98a;
+  --swatch-bg: #282c34;
+  --hover-soft: rgba(255, 255, 255, 0.06);
+  --hover-soft-2: rgba(255, 255, 255, 0.09);
+  --warn-border: #5e5231;
+  --warn-bg: #33301f;
+  --graph-edge: #4b5263;
+  color-scheme: dark;
+}
+
+/* One Light（Atom） */
+:root[data-theme='one-light'] {
+  --bg: #fafafa;
+  --bg-2: #f0f0f1;
+  --bg-3: #eaeaeb;
+  --border: #dbdbdc;
+  --fg: #383a42;
+  --fg-dim: #696c77;
+  --accent: #4078f2;
+  --accent-2: #2f62d6;
+  --hit: #ffe08a;
+
+  --hl-project: #11121a;
+  --hl-project-glow: rgba(64, 120, 242, 0.18);
+  --hl-project-weight: 700;
+  --hl-local: #383a42;
+  --hl-external: #8b8d94;
+
+  --tree-dir: #383a42;
+  --tree-file: #383a42;
+  --vcs-added: #50a14f;
+  --vcs-modified: #4078f2;
+  --vcs-deleted: #a0a1a7;
+  --vcs-conflict: #e45649;
+
+  --wcr-hover-bg: #ffffff;
+  --wcr-hover-name: #11121a;
+  --wcr-hover-doc: #383a42;
+  --wcr-hover-note: #696c77;
+  --wcr-density-track: rgba(0, 0, 0, 0.07);
+
+  --warn: #986801;
+  --ok: #50a14f;
+  --danger: #e45649;
+  --danger-border: #f0b3ad;
+  --danger-bg: rgba(228, 86, 73, 0.08);
+  --danger-bg-strong: rgba(228, 86, 73, 0.16);
+  --row-hover: #f0f0f1;
+  --row-active: #dbe4f7;
+  --chip-bg: #e5e5e6;
+  --chip-fg: #4a4c56;
+  --code-ref: #986801;
+  --muted-2: #b0b1b7;
+  --mark-fg: #383a42;
+  --accent-fg: #ffffff;
+  --overlay: rgba(20, 22, 30, 0.3);
+  --overlay-strong: rgba(20, 22, 30, 0.45);
+  --mask-bg: rgba(250, 250, 250, 0.75);
+  --shadow-sm: rgba(20, 22, 30, 0.1);
+  --shadow-md: rgba(20, 22, 30, 0.14);
+  --shadow-lg: rgba(20, 22, 30, 0.2);
+  --toast-bg: #fdecea;
+  --toast-border: #e9a49e;
+  --toast-fg: #8b2219;
+  --notice-bg: #eaf2ff;
+  --notice-border: #a9c5f5;
+  --notice-dot: #4078f2;
+  --flash-fg: #7a5a10;
+  --swatch-bg: #ffffff;
+  --hover-soft: rgba(20, 22, 30, 0.05);
+  --hover-soft-2: rgba(20, 22, 30, 0.07);
+  --warn-border: #e6d4a4;
+  --warn-bg: #fdf6e3;
+  --graph-edge: #c3c5cc;
+  color-scheme: light;
+}
+
+/* Darcula（JetBrains） */
+:root[data-theme='darcula'] {
+  --bg: #2b2b2b;
+  --bg-2: #313335;
+  --bg-3: #3c3f41;
+  --border: #4a4a4a;
+  --fg: #a9b7c6;
+  --fg-dim: #7d8792;
+  --accent: #365880;
+  --accent-2: #4b7cb6;
+  --hit: #214283;
+
+  --hl-project: #e6ebf0;
+  --hl-project-glow: rgba(78, 201, 176, 0.18);
+  --hl-project-weight: 700;
+  --hl-local: #a9b7c6;
+  --hl-external: #7d8792;
+
+  --tree-dir: #a9b7c6;
+  --tree-file: #a9b7c6;
+  /* IDEA Darcula 原生状态色 */
+  --vcs-added: #629755;
+  --vcs-modified: #6897bb;
+  --vcs-deleted: #808080;
+  --vcs-conflict: #ff6b68;
+
+  --wcr-hover-bg: #313335;
+  --wcr-hover-name: #e6ebf0;
+  --wcr-hover-doc: #a9b7c6;
+  --wcr-hover-note: #7d8792;
+  --wcr-density-track: rgba(0, 0, 0, 0.4);
+
+  --warn: #bbb529;
+  --ok: #6a8759;
+  --danger: #ff6b68;
+  --danger-border: #7a3a38;
+  --danger-bg: rgba(255, 107, 104, 0.1);
+  --danger-bg-strong: rgba(255, 107, 104, 0.2);
+  --row-hover: #353638;
+  --row-active: #214283;
+  --chip-bg: #46484a;
+  --chip-fg: #c4cbd3;
+  --code-ref: #ffc66d;
+  --muted-2: #6b6f73;
+  --mark-fg: #2b2b2b;
+  --accent-fg: #ffffff;
+  --overlay: rgba(0, 0, 0, 0.45);
+  --overlay-strong: rgba(0, 0, 0, 0.62);
+  --mask-bg: rgba(30, 30, 30, 0.7);
+  --shadow-sm: rgba(0, 0, 0, 0.5);
+  --shadow-md: rgba(0, 0, 0, 0.55);
+  --shadow-lg: rgba(0, 0, 0, 0.7);
+  --toast-bg: #4d2a2a;
+  --toast-border: #8f4a48;
+  --toast-fg: #ffd9d8;
+  --notice-bg: #25323c;
+  --notice-border: #3d5a70;
+  --notice-dot: #6897bb;
+  --flash-fg: #ffd98a;
+  --swatch-bg: #2b2b2b;
+  --hover-soft: rgba(255, 255, 255, 0.06);
+  --hover-soft-2: rgba(255, 255, 255, 0.09);
+  --warn-border: #5c5820;
+  --warn-bg: #35321c;
+  --graph-edge: #4f5254;
+  color-scheme: dark;
+}
+
+/* Material Palenight */
+:root[data-theme='palenight'] {
+  --bg: #292d3e;
+  --bg-2: #1e2132;
+  --bg-3: #333852;
+  --border: #3f4463;
+  --fg: #a6accd;
+  --fg-dim: #7a80a3;
+  --accent: #4a5fa8;
+  --accent-2: #82aaff;
+  --hit: #444267;
+
+  --hl-project: #e4e7f5;
+  --hl-project-glow: rgba(130, 170, 255, 0.24);
+  --hl-project-weight: 700;
+  --hl-local: #a6accd;
+  --hl-external: #7a80a3;
+
+  --tree-dir: #a6accd;
+  --tree-file: #a6accd;
+  --vcs-added: #c3e88d;
+  --vcs-modified: #82aaff;
+  --vcs-deleted: #7a80a3;
+  --vcs-conflict: #f07178;
+
+  --wcr-hover-bg: #1e2132;
+  --wcr-hover-name: #e4e7f5;
+  --wcr-hover-doc: #a6accd;
+  --wcr-hover-note: #7a80a3;
+  --wcr-density-track: rgba(0, 0, 0, 0.4);
+
+  --warn: #ffcb6b;
+  --ok: #c3e88d;
+  --danger: #f07178;
+  --danger-border: #7c3c43;
+  --danger-bg: rgba(240, 113, 120, 0.1);
+  --danger-bg-strong: rgba(240, 113, 120, 0.2);
+  --row-hover: #303552;
+  --row-active: #444267;
+  --chip-bg: #3f4463;
+  --chip-fg: #c3c8e0;
+  --code-ref: #ffcb6b;
+  --muted-2: #5b6080;
+  --mark-fg: #292d3e;
+  --accent-fg: #ffffff;
+  --overlay: rgba(10, 12, 20, 0.45);
+  --overlay-strong: rgba(10, 12, 20, 0.62);
+  --mask-bg: rgba(30, 33, 50, 0.7);
+  --shadow-sm: rgba(0, 0, 0, 0.5);
+  --shadow-md: rgba(0, 0, 0, 0.55);
+  --shadow-lg: rgba(0, 0, 0, 0.7);
+  --toast-bg: #47262d;
+  --toast-border: #8a4650;
+  --toast-fg: #ffd7db;
+  --notice-bg: #232842;
+  --notice-border: #3d4870;
+  --notice-dot: #82aaff;
+  --flash-fg: #ffd98a;
+  --swatch-bg: #292d3e;
+  --hover-soft: rgba(255, 255, 255, 0.06);
+  --hover-soft-2: rgba(255, 255, 255, 0.09);
+  --warn-border: #5e5232;
+  --warn-bg: #35301f;
+  --graph-edge: #4a5072;
+  color-scheme: dark;
+}
+
+/* Nord */
+:root[data-theme='nord'] {
+  --bg: #2e3440;
+  --bg-2: #2a2f3a;
+  --bg-3: #3b4252;
+  --border: #434c5e;
+  --fg: #d8dee9;
+  --fg-dim: #8f9aad;
+  --accent: #4c6a8f;
+  --accent-2: #88c0d0;
+  --hit: #4c566a;
+
+  --hl-project: #eceff4;
+  --hl-project-glow: rgba(136, 192, 208, 0.22);
+  --hl-project-weight: 700;
+  --hl-local: #d8dee9;
+  --hl-external: #8f9aad;
+
+  --tree-dir: #d8dee9;
+  --tree-file: #d8dee9;
+  --vcs-added: #a3be8c;
+  --vcs-modified: #88c0d0;
+  --vcs-deleted: #8f9aad;
+  --vcs-conflict: #bf616a;
+
+  --wcr-hover-bg: #3b4252;
+  --wcr-hover-name: #eceff4;
+  --wcr-hover-doc: #d8dee9;
+  --wcr-hover-note: #8f9aad;
+  --wcr-density-track: rgba(0, 0, 0, 0.35);
+
+  --warn: #ebcb8b;
+  --ok: #a3be8c;
+  --danger: #bf616a;
+  --danger-border: #6d3b43;
+  --danger-bg: rgba(191, 97, 106, 0.12);
+  --danger-bg-strong: rgba(191, 97, 106, 0.22);
+  --row-hover: #353c4a;
+  --row-active: #434c5e;
+  --chip-bg: #434c5e;
+  --chip-fg: #d8dee9;
+  --code-ref: #ebcb8b;
+  --muted-2: #667089;
+  --mark-fg: #2e3440;
+  --accent-fg: #2e3440;
+  --overlay: rgba(20, 24, 31, 0.45);
+  --overlay-strong: rgba(20, 24, 31, 0.62);
+  --mask-bg: rgba(46, 52, 64, 0.7);
+  --shadow-sm: rgba(0, 0, 0, 0.45);
+  --shadow-md: rgba(0, 0, 0, 0.5);
+  --shadow-lg: rgba(0, 0, 0, 0.65);
+  --toast-bg: #452e33;
+  --toast-border: #7f4a51;
+  --toast-fg: #f6dde0;
+  --notice-bg: #2b3844;
+  --notice-border: #405a6d;
+  --notice-dot: #88c0d0;
+  --flash-fg: #ebcb8b;
+  --swatch-bg: #2e3440;
+  --hover-soft: rgba(236, 239, 244, 0.06);
+  --hover-soft-2: rgba(236, 239, 244, 0.09);
+  --warn-border: #5c552f;
+  --warn-bg: #353424;
+  --graph-edge: #4c566a;
+  color-scheme: dark;
+}
+
+/* Catppuccin Mocha */
+:root[data-theme='catppuccin'] {
+  --bg: #1e1e2e;
+  --bg-2: #181825;
+  --bg-3: #313244;
+  --border: #45475a;
+  --fg: #cdd6f4;
+  --fg-dim: #8f93b0;
+  --accent: #4b5ea8;
+  --accent-2: #89b4fa;
+  --hit: #45475a;
+
+  --hl-project: #eef1fb;
+  --hl-project-glow: rgba(137, 180, 250, 0.24);
+  --hl-project-weight: 700;
+  --hl-local: #cdd6f4;
+  --hl-external: #8f93b0;
+
+  --tree-dir: #cdd6f4;
+  --tree-file: #cdd6f4;
+  --vcs-added: #a6e3a1;
+  --vcs-modified: #89b4fa;
+  --vcs-deleted: #8f93b0;
+  --vcs-conflict: #f38ba8;
+
+  --wcr-hover-bg: #181825;
+  --wcr-hover-name: #eef1fb;
+  --wcr-hover-doc: #cdd6f4;
+  --wcr-hover-note: #8f93b0;
+  --wcr-density-track: rgba(0, 0, 0, 0.45);
+
+  --warn: #f9e2af;
+  --ok: #a6e3a1;
+  --danger: #f38ba8;
+  --danger-border: #7b4453;
+  --danger-bg: rgba(243, 139, 168, 0.1);
+  --danger-bg-strong: rgba(243, 139, 168, 0.2);
+  --row-hover: #2a2a3d;
+  --row-active: #45475a;
+  --chip-bg: #313244;
+  --chip-fg: #cdd6f4;
+  --code-ref: #f9e2af;
+  --muted-2: #6c7086;
+  --mark-fg: #1e1e2e;
+  --accent-fg: #ffffff;
+  --overlay: rgba(11, 11, 18, 0.5);
+  --overlay-strong: rgba(11, 11, 18, 0.66);
+  --mask-bg: rgba(24, 24, 37, 0.72);
+  --shadow-sm: rgba(0, 0, 0, 0.5);
+  --shadow-md: rgba(0, 0, 0, 0.55);
+  --shadow-lg: rgba(0, 0, 0, 0.7);
+  --toast-bg: #45283a;
+  --toast-border: #834a63;
+  --toast-fg: #ffd9e6;
+  --notice-bg: #232338;
+  --notice-border: #3d3f63;
+  --notice-dot: #89b4fa;
+  --flash-fg: #f9e2af;
+  --swatch-bg: #1e1e2e;
+  --hover-soft: rgba(205, 214, 244, 0.06);
+  --hover-soft-2: rgba(205, 214, 244, 0.09);
+  --warn-border: #5e5638;
+  --warn-bg: #35331f;
+  --graph-edge: #45475a;
+  color-scheme: dark;
 }
 
 * {
@@ -840,7 +1388,7 @@ kbd {
   min-width: 0;
 }
 
-/* 目录 / 文件同色（2026-10-20 IDEA 口径）：靠加粗区分；未提交变更由 .vcs-* 染色（filetree.css）。 */
+/* 目录 / 文件两色（2026-10-03 用户要求）：目录偏蓝加粗，文件常规灰。 */
 .tree-row.dir .tree-name {
   color: var(--tree-dir);
   font-weight: 600;

@@ -70,7 +70,7 @@ function wsUrl(projectId: string, sessionId: string): string {
 /** 基于 CSS 变量取主题色，xterm 配色跟随 IDE 主题。 */
 function themeColors(): Record<string, string> {
   const css = getComputedStyle(document.documentElement);
-  const bg = css.getPropertyValue('--bg').trim() || '#1e1e1e';
+  const bg = css.getPropertyValue('--bg').trim() || '#1e1f22';
   const fg = css.getPropertyValue('--fg').trim() || '#cccccc';
   const accent = css.getPropertyValue('--accent').trim() || '#4fc1ff';
   return {

@@ -28,6 +28,7 @@ describe('prefs', () => {
     vi.resetModules();
     window.localStorage.clear();
     delete document.documentElement.dataset.theme;
+    delete document.documentElement.dataset.tone;
   });
 
   it('没有存量数据时给出默认偏好', async () => {
@@ -138,18 +139,39 @@ describe('prefs', () => {
     expect(resolvedTheme('system')).toBe('dark');
     expect(resolvedTheme('light')).toBe('light');
     expect(resolvedTheme('dark')).toBe('dark');
+    expect(resolvedTheme('one-dark')).toBe('one-dark'); // 具体配色原样返回
   });
 
-  it('applyPrefs 把主题 / 字号 / 侧栏宽 / 语言 / 动效写到 :root', async () => {
+  it('未知主题 id 收敛回默认主题（多套配色不认脏值）', async () => {
+    window.localStorage.setItem('wcr:prefs', JSON.stringify({ theme: 'solarized' }));
+    const { loadPrefs, DEFAULT_PREFS } = await loadPrefsModule();
+    expect(loadPrefs().theme).toBe(DEFAULT_PREFS.theme);
+  });
+
+  it('默认主题是 IDEA New UI Dark（2026-10-20 用户拍板）', async () => {
+    const { loadPrefs, DEFAULT_PREFS } = await loadPrefsModule();
+    expect(DEFAULT_PREFS.theme).toBe('new-ui-dark');
+    expect(loadPrefs().theme).toBe('new-ui-dark');
+  });
+
+  it('applyPrefs 把主题 / 明暗基调 / 字号 / 侧栏宽 / 语言 / 动效写到 :root', async () => {
     const { savePrefs } = await loadPrefsModule();
     savePrefs({ theme: 'light', fontSize: 15, sidebarWidth: 400, locale: 'en', reduceMotion: true });
     const root = document.documentElement;
     expect(root.dataset.theme).toBe('light');
+    expect(root.dataset.tone).toBe('light'); // 浅色基线靠它生效
     expect(root.style.getPropertyValue('--ui-font-size')).toBe('15px');
     expect(root.style.getPropertyValue('--sidebar-width')).toBe('400px');
     expect(root.dataset.motion).toBe('reduced');
     expect(root.lang).toBe('en');
     expect(document.title).toBe('ai-ide');
+  });
+
+  it('切到深色系配色时 data-tone 跟着回 dark', async () => {
+    const { savePrefs } = await loadPrefsModule();
+    savePrefs({ theme: 'nord' });
+    expect(document.documentElement.dataset.theme).toBe('nord');
+    expect(document.documentElement.dataset.tone).toBe('dark');
   });
 
   it('订阅者在 savePrefs 后收到一次最新值，取消订阅后不再收到', async () => {

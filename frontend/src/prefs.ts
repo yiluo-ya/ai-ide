@@ -13,8 +13,10 @@
 import { useSyncExternalStore } from 'react';
 import { translate } from './i18n';
 import type { KeymapId } from './keymap';
+import { isThemeId, themeMetaFor, type ThemeId } from './themes';
 
-export type ThemeMode = 'dark' | 'light' | 'system';
+/** 主题选择：具体配色 id，或「跟随系统」（只在深浅两档默认主题间切换）。 */
+export type ThemeMode = ThemeId | 'system';
 export type Locale = 'zh' | 'en';
 
 export interface Prefs {
@@ -56,7 +58,7 @@ export const TAB_SIZES = [2, 4, 8] as const;
 
 export const DEFAULT_PREFS: Prefs = {
   version: PREFS_VERSION,
-  theme: 'dark',
+  theme: 'new-ui-dark',
   fontSize: 13,
   sidebarWidth: 320,
   locale: 'zh',
@@ -93,8 +95,7 @@ function normalizeVersion(value: unknown, fallback: number): number {
 /** 把任意来源的原始值收敛成合法偏好（容错读的唯一入口）。 */
 function coerce(raw: unknown): Prefs {
   const src = isPlainObject(raw) ? raw : {};
-  const theme: ThemeMode =
-    src.theme === 'light' || src.theme === 'dark' || src.theme === 'system' ? src.theme : DEFAULT_PREFS.theme;
+  const theme: ThemeMode = src.theme === 'system' || isThemeId(src.theme) ? src.theme : DEFAULT_PREFS.theme;
   const locale: Locale = src.locale === 'en' ? 'en' : 'zh';
   return {
     version: normalizeVersion(src.version, PREFS_VERSION),
@@ -201,8 +202,8 @@ export function systemTheme(): 'dark' | 'light' {
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
-/** 把 theme 偏好解析成真正生效的主题。 */
-export function resolvedTheme(mode: ThemeMode = current.theme): 'dark' | 'light' {
+/** 把 theme 偏好解析成真正生效的主题：具体主题原样返回，system 折成深色 / 浅色默认主题。 */
+export function resolvedTheme(mode: ThemeMode = current.theme): ThemeId {
   return mode === 'system' ? systemTheme() : mode;
 }
 
@@ -223,7 +224,10 @@ function watchSystemTheme(): void {
 export function applyPrefs(prefs: Prefs = current): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  root.dataset.theme = resolvedTheme(prefs.theme);
+  const theme = resolvedTheme(prefs.theme);
+  root.dataset.theme = theme;
+  // 明暗基调单独给出：CSS 用 `[data-tone='light']` 铺浅色基线，各主题块只覆盖主色
+  root.dataset.tone = themeMetaFor(theme).tone;
   root.style.setProperty('--ui-font-size', `${prefs.fontSize}px`);
   root.style.setProperty('--sidebar-width', `${prefs.sidebarWidth}px`);
   // 动效减弱：由 CSS 用 [data-motion='reduced'] 关掉过渡与动画

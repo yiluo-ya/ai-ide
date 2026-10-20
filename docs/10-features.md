@@ -195,16 +195,19 @@
 
 编辑器里按「符号归属」分三档着色，让本项目的代码先跳出来：
 
-| 档位 | 覆盖对象 | 默认色 |
+| 档位 | 覆盖对象 | 着色规则（随主题） |
 |---|---|---|
-| **本项目** | 项目内定义的函数 / 类 / 方法 / 属性 / 常量，以及它们的引用 | `#ffffff` 白色 + 加粗 + 微光 |
-| **局部变量** | 函数内的局部变量与参数 | `#cfe2ff` 浅蓝 |
-| **外部依赖** | 标准库 / 第三方包 / 内置函数（`os.path.*`、`print`、`process`…） | `#9aa7b6` 灰蓝 |
+| **本项目** | 项目内定义的函数 / 类 / 方法 / 属性 / 常量，以及它们的引用 | 主题最亮前景 **+ 加粗**（+ 微光） |
+| **局部变量** | 函数内的局部变量与参数 | 主题常规前景（不加粗） |
+| **外部依赖** | 标准库 / 第三方包 / 内置函数（`os.path.*`、`print`、`process`…） | 主题暗淡前景（注释色那一档） |
 
+- 强调靠**字重与亮度**，不靠专属色：换主题时三档随主题自动重算，不会出现「深色里的浅蓝」
+  这类与主题打架的颜色
 - 判定依据是后端解析结果（`GET /api/projects/:id/highlights?file=`），不是正则猜的
 - **解析不出的成员访问不着色**（如 `obj.method()` 中的 `method`，需要类型推断才能确定），
   保持编辑器语法色 —— 宁可不着色，也不标错；`self` / `this` 保持原色
-- 三档颜色是 CSS 变量（`frontend/src/styles.css` 顶部 `--hl-project` / `--hl-local` / `--hl-external`）
+- 三档颜色是 CSS 变量（`frontend/src/styles.css` 的 `--hl-project` / `--hl-local` /
+  `--hl-external` / `--hl-project-weight`），每套主题一块覆盖；截图导出（`snapshot.ts`）读同一组变量
 - 打开项目后若索引尚未跑完，页面会在收到 `index-ready` 事件时自动补上着色，不需要刷新
 
 ## 语言支持（实现细节）
@@ -244,6 +247,13 @@
   一次 `git checkout` 只让前端刷一次树
 - **monorepo**：tsconfig `paths`/`baseUrl`、`go.work`、Python src 布局 / `package-dir` 都能跨包解析
 - **一键启动 / 单实例**：`wcr [目录]` —— 端口被占用自动让位，重复启动复用已有实例
+- **配色主题**（2026-10-20）：设置 → 外观 →「主题」下拉，整套界面 + 编辑器一起换 ——
+  **New UI Dark（默认，IDEA 2023+ 原配色）**、深色（经典 VS Code 风）、亮色、One Dark、One Light、Darcula、Material Palenight、Nord、Catppuccin Mocha，
+  另有「跟随系统」。元数据在 `frontend/src/themes.ts`；界面色板在 `styles.css`
+  （`:root` 深色基线 + `[data-tone='light']` 浅色基线 + 每主题一块主色），编辑器色板在
+  `frontend/src/code-themes.ts`（Monaco colors + token rules）。语义三档固定策略：
+  本项目符号 = 主题最亮前景 **+ 加粗**、局部变量 = 常规前景、外部依赖 = 暗淡前景 —— 强调靠字重，不靠专属色。
+  新增一套主题 = 三处各加一条，无需改组件
 - **文件树按 git 状态染色**（IDEA 口径，2026-10-20）：目录与文件**同色**（靠加粗 + 文件夹图标区分，
   不再是目录单独染蓝），颜色只表达工作区状态 —— 新增绿、修改 / 重命名蓝、删除灰、冲突红；
   目录里只要有一处未提交就染成子树里最强的那档（`FileTree.tsx` 的 `dirVcs` 汇总，
@@ -300,6 +310,7 @@ frontend/src/
   ShareMenu.tsx 已删（2026-10-15 移去分享入口）· share.ts / report.ts / snapshot.ts / bridge.ts
                                                    片段格式 / 报告 / 截图（入口已撤，实现保留）/ 宿主桥
   SettingsPanel.tsx / ModelSettings.tsx / ModelDialog.tsx / prefs.ts  设置 / 模型 / 偏好
+  themes.ts / code-themes.ts                       配色主题清单（id · 显示名 · 明暗）/ Monaco 配色
   Dialog.tsx / Notice.tsx / Welcome.tsx / FolderBrowser.tsx           对话框 / 提示条 / 首屏 / 目录选择
   i18n/            zh.ts / en.ts / index.ts（中英文文案）
 shared/types.ts    前后端共享的 API 契约（位置统一 1-based、列按 UTF-16）
@@ -555,7 +566,7 @@ UI 回归用例在 `tests/ui/`，由 `run.mjs` 统一起夹具项目与后端：
 右侧「命令」tab 显示的是当前项目状态、依赖图里文件节点归属目录）、`guide.mjs`（首屏推荐路线、
 点「开始阅读」进第 1 步、**变更栏常驻右侧且以 git 为准**（点行尾增删数弹差异）、
 解释这段给出结构性解释）、`platform.mjs`（顶栏「模型」与设置并列、设置面板五个分组、
-切亮色真的换主题、字号落 `wcr:prefs` 并即时生效、切 English、左栏四个常驻 tab 与右栏
+切亮色真的换主题、**切 One Dark / One Light 时界面与编辑器底色一起换**、字号落 `wcr:prefs` 并即时生效、切 English、左栏四个常驻 tab 与右栏
 「总览」和变更 / 命令并排、**code 会话区字号跟随「字号」缩放**、「添加项目」弹窗选目录、
 全程无 console error）、
 `panel.mjs`（左栏四个常驻面板的打开动作）。

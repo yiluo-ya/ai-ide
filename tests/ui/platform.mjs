@@ -298,7 +298,12 @@ async function main() {
     });
     await page.waitForTimeout(600);
     await page.evaluate(() => {
-      [...document.querySelectorAll('.wcr-dialog button')].find((b) => b.innerText.trim() === '亮色')?.click();
+      // 2026-10-20 起主题是下拉框（多套配色），按 data-wcr-pref 定位（面板里还有语言下拉）
+      const sel = document.querySelector('.wcr-dialog select[data-wcr-pref="theme"]');
+      if (!sel) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(sel, 'light');
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await page.waitForTimeout(500);
     const theme = await page.evaluate(() => document.documentElement.dataset.theme);
@@ -311,6 +316,43 @@ async function main() {
     assert(after !== before, `背景色没变：${before}`);
     assert(lum > 150, `亮色背景亮度不足：${Math.round(lum)}`);
     return `light：${before} → ${after}`;
+  });
+
+  await step('P24b 多套配色：整站界面与编辑器一起换（One Dark / One Light）', async () => {
+    /** 切到某个主题并读回：data-theme / data-tone / 界面底色 / Monaco 编辑区底色。 */
+    const pick = async (id) => {
+      await page.evaluate((themeId) => {
+        const sel = document.querySelector('.wcr-dialog select[data-wcr-pref="theme"]');
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+        setter.call(sel, themeId);
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }, id);
+      await page.waitForTimeout(500);
+      return await page.evaluate(() => {
+        const editorBg = document.querySelector('.monaco-editor .monaco-editor-background');
+        return {
+          theme: document.documentElement.dataset.theme,
+          tone: document.documentElement.dataset.tone,
+          ui: getComputedStyle(document.body).backgroundColor,
+          code: editorBg ? getComputedStyle(editorBg).backgroundColor : '(无编辑器)',
+        };
+      });
+    };
+
+    const oneDark = await pick('one-dark');
+    assert(oneDark.theme === 'one-dark', `data-theme=${oneDark.theme}`);
+    assert(oneDark.tone === 'dark', `data-tone=${oneDark.tone}`);
+    assert(oneDark.ui === 'rgb(40, 44, 52)', `One Dark 界面底色=${oneDark.ui}`);
+    assert(oneDark.code === 'rgb(40, 44, 52)', `One Dark 编辑器底色=${oneDark.code}`);
+
+    const oneLight = await pick('one-light');
+    assert(oneLight.theme === 'one-light', `data-theme=${oneLight.theme}`);
+    assert(oneLight.tone === 'light', `data-tone=${oneLight.tone}`);
+    assert(oneLight.ui === 'rgb(250, 250, 250)', `One Light 界面底色=${oneLight.ui}`);
+    assert(oneLight.code === 'rgb(250, 250, 250)', `One Light 编辑器底色=${oneLight.code}`);
+
+    await pick('dark');
+    return `one-dark ${oneDark.ui}/${oneDark.code}；one-light ${oneLight.ui}/${oneLight.code}`;
   });
 
   await step('P24 字号 16 落 wcr:prefs 并即时生效', async () => {
@@ -330,7 +372,7 @@ async function main() {
 
   await step('P25 切 English：语言与文案都变', async () => {
     await page.evaluate(() => {
-      const el = document.querySelector('.wcr-dialog select');
+      const el = document.querySelector('.wcr-dialog select[data-wcr-pref="locale"]');
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
       setter.call(el, 'en');
       el.dispatchEvent(new Event('change', { bubbles: true }));
