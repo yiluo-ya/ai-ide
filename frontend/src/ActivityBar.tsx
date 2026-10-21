@@ -2,7 +2,7 @@
  * 活动栏（最左 / 最右竖条窄栏，VS Code 布局迁移，2026-10-08）。
  *
  * 竖排图标，点击选中该侧视图；拖拽图标到另一条活动栏 = 换侧；在同一条活动栏内拖到某图标上 = 上下排序。
- * 六个视图：files / search / git / agent / outline / api。
+ * 七个视图：files / search / git / agent / outline / api / terminal（terminal 只在 code agent 模式出现）。
  */
 import { useState, type DragEvent, type ReactNode } from 'react';
 import { useI18n } from './i18n';
@@ -20,6 +20,7 @@ const LABEL: Record<ViewId, string> = {
   agent: 'app.activityAgent',
   outline: 'app.activityOutline',
   api: 'app.activityApi',
+  terminal: 'app.activityTerminal',
 };
 
 /** 内联图标（与 TopBar 里一致的线性 SVG 风格）。 */
@@ -66,6 +67,13 @@ function icon(id: ViewId): ReactNode {
           <line x1="13" y1="6" x2="11" y2="18" />
         </>
       );
+    case 'terminal':
+      return (
+        <>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="m7 9 3 3-3 3M13 15h4" />
+        </>
+      );
   }
 }
 
@@ -77,6 +85,7 @@ export function ActivityBar({
   onMove,
   onReorder,
   gitCount,
+  locked,
 }: {
   side: ViewSide;
   /** 该侧活动栏要显示的视图（顺序已决定）。 */
@@ -89,6 +98,8 @@ export function ActivityBar({
   onReorder: (id: ViewId, toIndex: number) => void;
   /** 源码管理图标上的未提交改动计数徽标（可选）。 */
   gitCount?: number;
+  /** 钉住不允许拖走的视图（如 terminal：位置随模式走，不该被拖到别的栏）。 */
+  locked?: ViewId[];
 }) {
   const { t } = useI18n();
   /** 是否正有视图拖到本栏上方（用于高亮 drop 目标）。 */
@@ -172,7 +183,7 @@ export function ActivityBar({
           aria-selected={active === id}
           className={`activity-item${active === id ? ' active' : ''}${draggingId === id ? ' dragging' : ''}`}
           title={t(LABEL[id])}
-          draggable
+          draggable={!locked?.includes(id)}
           onDragStart={(e) => {
             e.dataTransfer.setData(DRAG_ID, id);
             e.dataTransfer.setData(DRAG_FROM, side);

@@ -54,7 +54,7 @@ import { translate, useI18n } from './i18n';
 import type { BlameResult, FileNode, FileOrigin, GitChangeEntry, RunConfigResult, RunProfile } from '../../shared/types';
 import type { HotMetric } from './mapApi';
 
-type PanelTab = 'guide' | 'files' | 'refs' | 'hierarchy' | 'outline' | 'search' | 'changes' | 'git' | 'agent' | 'api';
+type PanelTab = 'guide' | 'files' | 'refs' | 'hierarchy' | 'outline' | 'search' | 'changes' | 'git' | 'agent' | 'api' | 'terminal';
 
 /**
  * 底部面板的入口（VS Code 布局迁移 2026-10-08）：输出 / 终端。
@@ -142,9 +142,10 @@ export default function App() {
     else setChangesDockOpen(true);
     // 活动栏与主区联动：点 code 会话 → 主区看会话；从会话切到别的面板（文件 / 搜索…）→ 主区回代码视图。
     // 只在当前确实停在会话视图时才回（不碰用户手动开的项目地图）。
+    // 终端例外（2026-10-21）：它是 code agent 的配套，点它不回代码视图。
     if (id === 'agent') {
       if (store.projectId) showAgent();
-    } else if (mainView === 'agent') {
+    } else if (id !== 'terminal' && mainView === 'agent') {
       backToCode();
     }
   };
@@ -172,6 +173,8 @@ export default function App() {
   const [mainView, setMainView] = useState<'auto' | 'map' | 'agent'>(() =>
     snapshot.get('view') === 'map' ? 'map' : 'auto',
   );
+  /** 是否停在 code agent 会话上 —— 终端位置随之切换（2026-10-21，见下方终端宿主）。 */
+  const agentMode = mainView === 'agent';
   const [graphOpen, setGraphOpen] = useState(() => snapshot.get('graph') === '1');
   /** 2026-10-03：code-agent 会话（左栏管会话 + 中间看内容，见 mainView === 'agent'）。 */
   /** W5：流视图浮层的焦点（null = 关着）。 */
@@ -286,26 +289,84 @@ export default function App() {
   const [bottomTab, setBottomTab] = useState<BottomTab>('output');
   /** 底部面板高度（px），拖动顶边调整。 */
   const [bottomHeight, setBottomHeight] = useState(220);
+  /** 底部面板实际显示的页：agent 模式下终端搬到右栏了，底部不再提供「终端」页。 */
+  const shownBottomTab: BottomTab = agentMode && bottomTab === 'terminal' ? 'output' : bottomTab;
+  const bottomTabs: BottomTab[] = agentMode ? BOTTOM_TABS.filter((id) => id !== 'terminal') : BOTTOM_TABS;
+
+  /**
+   * 终端位置随 code agent 模式走（2026-10-21 用户要求）：
+   * - 不在 agent = 底部面板的「终端」页；
+   * - 在 agent = 右栏的「终端」视图（git / 接口那一带）。
+   *
+   * 两条位置共用**同一个 TerminalPanel 实例**（PTY 会话、滚动内容、标签都不能因换位置重建）：
+   * 面板渲染在 App 尾部不可见的锚点里，再由下面那个 effect 把宿主 div **整块搬进**当前该在的槽位。
+   */
+  const [termHostEl, setTermHostEl] = useState<HTMLDivElement | null>(null);
+  const [bottomSlotEl, setBottomSlotEl] = useState<HTMLDivElement | null>(null);
+  const [rightSlotEl, setRightSlotEl] = useState<HTMLDivElement | null>(null);
+  /** 宿主搬家后自增：让终端按新容器尺寸重排（见 TerminalPanel 的 relayoutToken）。 */
+  const [relayoutToken, setRelayoutToken] = useState(0);
+
+  useEffect(() => {
+    const slot = agentMode ? rightSlotEl : bottomSlotEl;
+    if (!termHostEl || !slot || termHostEl.parentElement === slot) return;
+    slot.appendChild(termHostEl);
+    setRelayoutToken((n) => n + 1);
+  }, [agentMode, termHostEl, bottomSlotEl, rightSlotEl]);
+
+  /** 把终端摆到眼前：agent 模式 = 右栏终端视图；否则 = 底部「终端」页。 */
+  const showTerminal = useCallback(() => {
+    if (agentMode) {
+      setActiveView('right', 'terminal');
+      setChangesDockOpen(true);
+    } else {
+      setBottomTab('terminal');
+      setBottomOpen(true);
+    }
+  }, [agentMode]);
+
+  /**
+   * 刷页后若右栏存档还停在「终端」（非 agent 模式终端在底部），把它挪到该侧第一个别的视图。
+   * 只跑一次：模式切换期间的还原由 showAgent / backToCode 负责。
+   */
+  useEffect(() => {
+    if (agentMode || layout.active.right !== 'terminal') return;
+    const fallback = viewsOn('right').find((v) => v !== 'terminal');
+    if (fallback) setActiveView('right', fallback);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * 2026-10-15 用户要求：进 Code Agent 时把底部面板收拢，回到代码时**还原进来前的样子**。
    * 只在「在 Agent 里没自己动过底部面板」时还原 —— 用户为装 pi 特意开了终端，别抢他的状态。
    */
   const codeBottomRef = useRef<{ open: boolean; tab: BottomTab } | null>(null);
+  /** 进 agent 前右栏停在哪（退出时还原；用户自己在 agent 里换过视图就不抢）。 */
+  const codeDockViewRef = useRef<ViewId | null>(null);
   const showAgent = useCallback(() => {
     codeBottomRef.current = { open: bottomOpen, tab: bottomTab };
     setBottomOpen(false);
+    // 终端在 agent 里住右栏：进来就把「终端」视图选中并展开右栏（2026-10-21 用户要求 auto-open）。
+    codeDockViewRef.current = layout.active.right === 'terminal' ? null : layout.active.right;
+    setActiveView('right', 'terminal');
+    setChangesDockOpen(true);
     setMainView('agent');
-  }, [bottomOpen, bottomTab]);
+  }, [bottomOpen, bottomTab, layout.active.right]);
   const backToCode = useCallback(() => {
     const saved = codeBottomRef.current;
     codeBottomRef.current = null;
+    const savedDock = codeDockViewRef.current;
+    codeDockViewRef.current = null;
     setMainView('auto');
     if (saved && !bottomOpen) {
       setBottomTab(saved.tab);
       setBottomOpen(saved.open);
     }
-  }, [bottomOpen]);
+    // 右栏只在还停在「终端」时才还原（用户在 agent 里换去看 git 就别抢）
+    if (savedDock && savedDock !== 'terminal' && layout.active.right === 'terminal') {
+      setActiveView('right', savedDock);
+    }
+  }, [bottomOpen, layout.active.right]);
 
   /**
    * FR-0011「在终端中运行」：token 自增的一次运行请求，交给 TerminalPanel 写进激活终端。
@@ -366,39 +427,42 @@ export default function App() {
    * FR-0011：在终端里运行一个文件（文件树右键 / 编辑器右键 / 标签栏 ▶ / Ctrl+F5 共用）。
    * - 运行时（Python 解释器等）由**项目运行配置**决定：每次点都重拉一次 run-config（见 2026-10-20）；
    * - 环境变量 / PATH 前插 / JAVA_HOME 由后端在 PTY spawn 时注入，不拼进命令；
-   * - 展开底部面板并切到「终端」，把请求交给 TerminalPanel（它知道当前 pane 用哪种 shell）。
+   * - 终端位置随模式走（agent = 右栏，否则底部），由 showTerminal 摆到眼前后把请求交给
+   *   TerminalPanel（它知道当前 pane 用哪种 shell）。
    */
-  const runFileInTerminal = useCallback((file: string) => {
-    const s = useStore.getState();
-    const projectId = s.projectId;
-    if (!projectId) return;
-    // 共享模式：后端终端整层拒绝（terminal.ts 的 403），入口一并禁用
-    if (!LOCAL_HOSTNAMES.has(window.location.hostname)) {
-      showFlash(translate('run.shareMode'));
-      return;
-    }
-    if (!isRunnable(file)) {
-      showFlash(translate('run.unsupported'));
-      return;
-    }
-    setBottomTab('terminal');
-    setBottomOpen(true);
-    void (async () => {
-      // 每次入口都重拉：环境变化（新建 venv / 换 conda / 装了新 JDK）要能立刻感知。
-      // 优先级：项目锁定 → 设置里的全局默认 → 自动探测到的第一个。
-      let pythonPath: string | null = null;
-      try {
-        const result = await api.runConfig(projectId);
-        setRunConfig(result);
-        const selected = result.runtimes.find((r) => r.id === 'python')?.path ?? null;
-        const locked = Boolean(result.config.runtimes.python);
-        pythonPath = locked ? selected : loadPrefs().pythonPath || selected;
-      } catch {
-        pythonPath = loadPrefs().pythonPath || null; // 探测失败就退回全局默认 / PATH
+  const runFileInTerminal = useCallback(
+    (file: string) => {
+      const s = useStore.getState();
+      const projectId = s.projectId;
+      if (!projectId) return;
+      // 共享模式：后端终端整层拒绝（terminal.ts 的 403），入口一并禁用
+      if (!LOCAL_HOSTNAMES.has(window.location.hostname)) {
+        showFlash(translate('run.shareMode'));
+        return;
       }
-      setRunRequest({ token: ++runTokenRef.current, file, pythonPath });
-    })();
-  }, []);
+      if (!isRunnable(file)) {
+        showFlash(translate('run.unsupported'));
+        return;
+      }
+      showTerminal();
+      void (async () => {
+        // 每次入口都重拉：环境变化（新建 venv / 换 conda / 装了新 JDK）要能立刻感知。
+        // 优先级：项目锁定 → 设置里的全局默认 → 自动探测到的第一个。
+        let pythonPath: string | null = null;
+        try {
+          const result = await api.runConfig(projectId);
+          setRunConfig(result);
+          const selected = result.runtimes.find((r) => r.id === 'python')?.path ?? null;
+          const locked = Boolean(result.config.runtimes.python);
+          pythonPath = locked ? selected : loadPrefs().pythonPath || selected;
+        } catch {
+          pythonPath = loadPrefs().pythonPath || null; // 探测失败就退回全局默认 / PATH
+        }
+        setRunRequest({ token: ++runTokenRef.current, file, pythonPath });
+      })();
+    },
+    [showTerminal],
+  );
 
   /**
    * 2026-10-20：跑一个运行档（▶ 下拉里的「构建 / 运行 / 测试」）。
@@ -412,10 +476,9 @@ export default function App() {
       return;
     }
     setRunMenuOpen(false);
-    setBottomTab('terminal');
-    setBottomOpen(true);
+    showTerminal();
     setRunRequest({ token: ++runTokenRef.current, command: profile.command });
-  }, []);
+  }, [showTerminal]);
 
   /**
    * 2026-10-20：切项目（或首次进入）时拉一份运行配置，供 ▶ 下拉显示运行档与实际运行时。
@@ -453,15 +516,18 @@ export default function App() {
    * FR-0013：把一条命令**填进**终端（不回车）。跟 runFileInTerminal 同一条通道，
    * 差别只在 submit=false —— 安装在系统里落东西的命令，要用户自己看一眼再按回车。
    */
-  const installPiInTerminal = useCallback((command: string) => {
-    if (!LOCAL_HOSTNAMES.has(window.location.hostname)) {
-      showFlash(translate('run.shareMode'));
-      return;
-    }
-    setBottomTab('terminal');
-    setBottomOpen(true);
-    setRunRequest({ token: ++runTokenRef.current, command, submit: false });
-  }, []);
+  const installPiInTerminal = useCallback(
+    (command: string) => {
+      if (!LOCAL_HOSTNAMES.has(window.location.hostname)) {
+        showFlash(translate('run.shareMode'));
+        return;
+      }
+      // 终端可能住在右栏（agent 模式）或底部面板，交给 showTerminal 摆到眼前再写命令。
+      showTerminal();
+      setRunRequest({ token: ++runTokenRef.current, command, submit: false });
+    },
+    [showTerminal],
+  );
   /** W3 / G7.3：整文件 blame 视图开关 + 当前文件的 blame（按文件缓存，光标移动不重新拉）。 */
   const [blameOn, setBlameOn] = useState(false);
   const [blame, setBlame] = useState<BlameResult | null>(null);
@@ -1146,6 +1212,10 @@ export default function App() {
         ) : (
           <div className="panel-empty">{t('app.noProject')}</div>
         );
+      case 'terminal':
+        // 2026-10-21：agent 模式下终端住右栏 —— 实际内容是 App 尾部锚点里的那个宿主 div
+        // （被搬进这个槽位），这里只留一个空槽接住它；非 agent 模式不会路由到这。
+        return <div className="terminal-slot docked" ref={setRightSlotEl} />;
     }
   };
 
@@ -1557,13 +1627,17 @@ export default function App() {
               {/* 收起面板时（.bottom-panel.collapsed 为 display:none）**不卸载内容**：终端是常驻会话，
                   卸载会把会话、滚动内容连同里面跑着的进程一起销毁（见下方终端常驻）。 */}
               <div className="bottom-body">
-                {bottomTab === 'output' && <OutputPanel projectId={store.projectId} />}
+                {shownBottomTab === 'output' && <OutputPanel projectId={store.projectId} />}
                 {/* 终端常驻：切到「输出」/收起面板只隐藏、不卸载 —— 会话、滚动内容与
                     里面跑着的进程都留着。切换项目时终端**跟项目走**：会话重开到新项目根
-                    （路径与当前项目一致），标签保留、面板不自行退出（关闭靠标签 ×）。 */}
-                <div className="terminal-slot" style={{ display: bottomTab === 'terminal' ? 'flex' : 'none' }}>
-                  <TerminalPanel projectId={store.projectId} runRequest={runRequest} />
-                </div>
+                    （路径与当前项目一致），标签保留、面板不自行退出（关闭靠标签 ×）。
+                    2026-10-21：agent 模式下终端搬到右栏（见 renderView 的 terminal 分支），
+                    这里只剩输出页 —— 槽位保留，退出 agent 时终端整块搬回来。 */}
+                <div
+                  className="terminal-slot"
+                  ref={setBottomSlotEl}
+                  style={{ display: !agentMode && shownBottomTab === 'terminal' ? 'flex' : 'none' }}
+                />
               </div>
               <div className="bottom-rail">
                 <div
@@ -1572,7 +1646,7 @@ export default function App() {
                   aria-orientation="vertical"
                   aria-label={t('app.bottomPanels')}
                 >
-                  {BOTTOM_TABS.map((id) => (
+                  {bottomTabs.map((id) => (
                     <button
                       key={id}
                       type="button"
@@ -1647,12 +1721,13 @@ export default function App() {
             <div className="right-rail">
               <ActivityBar
                 side="right"
-                views={viewsOn('right')}
+                views={agentMode ? viewsOn('right') : viewsOn('right').filter((v) => v !== 'terminal')}
                 active={dockTab}
                 onSelect={(id) => onSelectView('right', id)}
                 onMove={moveView}
                 onReorder={(id, idx) => reorderView('right', id, idx)}
                 gitCount={changesCount}
+                locked={['terminal']}
               />
               {/* 右下角竖轨的底部：项目地图开关（搬自顶部导航条）+ 左/右/下 三区域开关 */}
               <div className="rail-bottom">
@@ -1766,6 +1841,20 @@ export default function App() {
           />
         </div>
       )}
+
+      {/* 终端宿主锚点（2026-10-21）：唯一的 TerminalPanel 实例住在这里，由上面的 effect
+          把它整块搬进底部槽位（非 agent）或右栏槽位（agent）—— 换位置不换实例，
+          PTY 会话、滚动内容、标签全部保留。display:none 只在初始化前遮一下，
+          搬家后不参与布局（宿主 div 自身 flex，由槽位控制）。 */}
+      <div className="term-anchor" style={{ display: termHostEl ? 'none' : undefined }}>
+        <div
+          className="terminal-slot terminal-host"
+          ref={setTermHostEl}
+          style={{ display: 'flex', width: '100%', height: '100%' }}
+        >
+          <TerminalPanel projectId={store.projectId} runRequest={runRequest} relayoutToken={relayoutToken} />
+        </div>
+      </div>
 
       {/* W4 / G5.1：结构性解释浮层（纯静态，不使用模型） */}
       {explainTarget && store.projectId && (

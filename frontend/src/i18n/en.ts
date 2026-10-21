@@ -502,6 +502,7 @@ export const en: Record<string, string> = {
   'app.activityAgent': 'Code sessions',
   'app.activityOutline': 'Outline',
   'app.activityApi': 'API',
+  'app.activityTerminal': 'Terminal',
   'app.activityBarLeft': 'Left activity bar',
   'app.activityBarRight': 'Right activity bar',
   'app.panelOutput': 'Output',

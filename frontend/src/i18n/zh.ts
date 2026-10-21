@@ -501,6 +501,7 @@ export const zh: Record<string, string> = {
   'app.activityAgent': 'code会话',
   'app.activityOutline': '大纲',
   'app.activityApi': '接口',
+  'app.activityTerminal': '终端',
   'app.activityBarLeft': '左侧活动栏',
   'app.activityBarRight': '右侧活动栏',
   'app.panelOutput': '输出',

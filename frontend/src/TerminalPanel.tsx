@@ -346,8 +346,22 @@ function commandOf(request: RunRequest, pane: Pane): string | null {
   return buildRunCommand({ file: request.file, shellKind: pane.shellKind, pythonPath: request.pythonPath });
 }
 
-/** 底部终端面板：多标签 + 工具栏。所有标签常驻 DOM，非激活的隐藏。 */
-export function TerminalPanel({ projectId, runRequest }: { projectId: string | null; runRequest?: RunRequest | null }) {
+/** 底部 / 右栏终端面板：多标签 + 工具栏。所有标签常驻 DOM，非激活的隐藏。
+ *
+ * 2026-10-21：面板位置随 code agent 模式切换（不在 agent = 底部面板，在 agent = 右栏「终端」视图）。
+ * 宿主 DOM 由 App 搬动（会话不重建），换容器后尺寸可能撞上「恰好没变」而不触发 ResizeObserver ——
+ * 靠 `relayoutToken` 主动重排一次。
+ */
+export function TerminalPanel({
+  projectId,
+  runRequest,
+  relayoutToken,
+}: {
+  projectId: string | null;
+  runRequest?: RunRequest | null;
+  /** 外部传来「宿主换了容器」的信号（值变化即重排一次）。 */
+  relayoutToken?: number;
+}) {
   const { t } = useI18n();
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -407,6 +421,21 @@ export function TerminalPanel({ projectId, runRequest }: { projectId: string | n
   tabsRef.current = tabs;
   const activeTabRef = useRef(activeTabId);
   activeTabRef.current = activeTabId;
+
+  /** 宿主换容器（底部 ↔ 右栏）后主动 fit 一次：xterm 重新贴合新尺寸，顺带把 cols/rows 同步给 PTY。 */
+  useEffect(() => {
+    if (relayoutToken === undefined) return;
+    for (const tb of tabsRef.current) {
+      for (const p of tb.panes) {
+        if (!p.term.element) continue;
+        try {
+          p.fit.fit();
+        } catch {
+          /* 容器隐藏 / 尺寸为 0：跳过，等可见时 ResizeObserver 再算 */
+        }
+      }
+    }
+  }, [relayoutToken]);
 
   // 当前项目被移除（projectId → null）：面板没有可连的宿，把会话收干净
   // （否则 term 还挂在已卸载的 host 上，重新选项目时会重复 open）。

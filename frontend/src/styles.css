@@ -3793,6 +3793,28 @@ mark {
   flex-direction: column;
 }
 
+/* 2026-10-21：终端住右栏时的槽位 —— 全高竖栏（agent 模式），宽度由右侧栏拖拽控制。
+   terminal-host / term-anchor 是 App 尾部的锚点结构（终端实例常驻，搬进槽位后不占位）。 */
+.terminal-slot.docked {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg);
+}
+
+.terminal-host {
+  position: relative;
+}
+
+.term-anchor {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
 /* 输出面板 */
 .output-panel {
   display: flex;

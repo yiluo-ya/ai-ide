@@ -1,8 +1,9 @@
 /**
  * 视图侧位布局（VS Code 双活动栏，2026-10-08）。
  *
- * 六个视图（files / search / git / agent / outline / api）各有一个 side（left / right），
+ * 七个视图（files / search / git / agent / outline / api / terminal）各有一个 side（left / right），
  * 由左右两条活动栏分别展示；拖拽图标到另一条活动栏 = 换侧；在同一条活动栏内拖拽 = 上下排序。
+ * terminal 例外：它只在 code agent 模式下出现（终端位置随模式走，见 App.tsx），固定住右栏、不给换侧。
  *
  * 纪律（对齐 prefs.ts）：
  * 1) 只写一个 localStorage 键 `wcr:layout`，与项目无关（不分片）。
@@ -14,9 +15,9 @@ import { useSyncExternalStore } from 'react';
 
 export type ViewSide = 'left' | 'right';
 
-export type ViewId = 'files' | 'search' | 'git' | 'agent' | 'outline' | 'api';
+export type ViewId = 'files' | 'search' | 'git' | 'agent' | 'outline' | 'api' | 'terminal';
 
-export const ALL_VIEWS: ViewId[] = ['files', 'search', 'git', 'agent', 'outline', 'api'];
+export const ALL_VIEWS: ViewId[] = ['files', 'search', 'git', 'agent', 'outline', 'api', 'terminal'];
 
 /** 默认布局：左边 = 文件 / 搜索 / 大纲 / code会话；右边 = 源码管理(git) / 总览。 */
 const DEFAULT_SIDES: Record<ViewId, ViewSide> = {
@@ -26,12 +27,13 @@ const DEFAULT_SIDES: Record<ViewId, ViewSide> = {
   agent: 'left',
   outline: 'left',
   api: 'right',
+  terminal: 'right',
 };
 
 /** 默认每侧顺序。 */
 const DEFAULT_ORDER: Record<ViewSide, ViewId[]> = {
   left: ['files', 'search', 'outline', 'agent'],
-  right: ['git', 'api'],
+  right: ['git', 'api', 'terminal'],
 };
 
 const DEFAULT_ACTIVE: Record<ViewSide, ViewId> = { left: 'files', right: 'git' };
