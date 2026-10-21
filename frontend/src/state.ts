@@ -240,7 +240,7 @@ interface State {
   rememberPosition: (file: string, position: MemoryPosition) => void;
   /** 判据 6：复制 `path:line:col` 到剪贴板，并在状态栏轻提示。 */
   copyLocation: (file: string, line: number, col: number) => void;
-  /** 通用复制：任意文本写剪贴板 + 状态栏轻提示（文件树右键「复制路径 / 文件名」）。 */
+  /** 通用复制：任意文本写剪贴板 + 状态栏轻提示（文件树右键「复制绝对路径 / 文件名」）。 */
   copyText: (text: string) => void;
   /** S3a：把选中的一段代码连同出处（`path:行范围` + 围栏语言）复制走。 */
   copySnippet: (input: Omit<SnippetInput, 'file' | 'lang'> & { file?: string; lang?: string }) => void;
@@ -255,6 +255,8 @@ interface State {
   resolveConflict: (keep: 'mine' | 'disk' | 'later') => Promise<void>;
   /** FR-0008：删除文件 / 目录（移到系统回收站），失败如实提示。 */
   deleteEntry: (path: string) => Promise<void>;
+  /** 2026-10-21：在系统文件管理器里打开（选中该文件 / 目录；`path` 空串 = 项目根）。 */
+  revealEntry: (path: string) => Promise<void>;
   /** FR-0009：新建文件 / 目录（`parentDir` 空串 = 项目根；`name` 可含 `/` 一并建中间目录）。 */
   createEntry: (parentDir: string, name: string, isDir: boolean) => Promise<void>;
   /** FR-0009：重命名 / 移动（`to` 是完整目标路径）；打开态、标签、位置记忆跟着搬。 */
@@ -1320,6 +1322,18 @@ export const useStore = create<State>((set, get) => ({
       const message = e instanceof Error ? e.message : String(e);
       set({ saveStatus: 'error', saveError: message });
       showToast(translate('editor.saveFailed', { message }), false);
+    }
+  },
+
+  /** 2026-10-21：在系统文件管理器里打开（文件树右键）。只是把窗口叫起来，失败就如实提示。 */
+  async revealEntry(path) {
+    const id = get().projectId;
+    if (!id) return;
+    try {
+      await api.revealInExplorer(id, path);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      showToast(translate('filetree.revealFailed', { message }), false);
     }
   },
 

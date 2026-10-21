@@ -321,6 +321,13 @@ export const api = {
       method: 'DELETE',
     }),
 
+  /** 2026-10-21：在系统文件管理器里打开（文件 / 目录都选中它本身）；`path` 空串 = 项目根。 */
+  revealInExplorer: (id: string, path: string) =>
+    request<{ ok: boolean }>(`/projects/${id}/reveal`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+
   /**
    * FR-0009（2026-10-10）：新建文件。`text` 缺省 = 空文件；名字已存在 → 409 `exists`。
    * `path` 里带 `/` 时中间目录会一并建出（与 VSCode 一致）。

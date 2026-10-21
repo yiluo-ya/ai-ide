@@ -72,9 +72,11 @@ interface Props {
   onOpenAside?: (file: string) => void;
   /** FR-0011：右键菜单「在终端中运行」（App 负责解析解释器并写进终端）。 */
   onRun?: (file: string) => void;
-  /** 右键菜单「复制路径 / 复制文件名」：写剪贴板 + 状态栏反馈（由 App 注入）。 */
+  /** 右键菜单「复制绝对路径 / 复制文件名」：写剪贴板 + 状态栏反馈（由 App 注入）。 */
   onCopy?: (text: string) => void;
-  /** 项目根绝对路径（用于「复制路径」输出全路径而非项目相对路径）。 */
+  /** 右键菜单「在资源管理器中打开」（2026-10-21：文件 / 目录 / 项目根都能开）。 */
+  onRevealInExplorer?: (path: string) => void;
+  /** 项目根绝对路径（用于「复制绝对路径」输出全路径而非项目相对路径）。 */
   projectRoot?: string;
   /** FR-0008：右键菜单「删除」（文件与目录都有）；App 负责二次确认与调后端。 */
   onDelete?: (path: string, isDir: boolean) => void;
@@ -105,7 +107,7 @@ interface Props {
   onLoadDir?: (path: string) => Promise<FileNode[]>;
 }
 
-/** 右键菜单（视口坐标定位）：文件与目录都可开（目录用于复制路径 / 文件名）。 */
+/** 右键菜单（视口坐标定位）：文件与目录都可开（目录用于复制绝对路径 / 文件名）。 */
 interface LeafMenu {
   path: string;
   isDir: boolean;
@@ -504,6 +506,7 @@ export function FileTree({
   onOpenAside,
   onRun,
   onCopy,
+  onRevealInExplorer,
   projectRoot,
   onDelete,
   onNewFile,
@@ -705,7 +708,7 @@ export function FileTree({
   );
 
   // 右键菜单：先按光标坐标摆（渲染前就落在那儿），再在布局阶段钳进视口 ——
-  // 贴近窗口底部右击时整体上移（否则「复制路径 / 删除」这些下半截的项落到视口外点不到），
+  // 贴近窗口底部右击时整体上移（否则「复制绝对路径 / 删除」这些下半截的项落到视口外点不到），
   // 贴住右边缘时左移。用 ref 直接改样式，paint 之前完成，不会看见跳一下。
   useLayoutEffect(() => {
     const el = menuRef.current;
@@ -863,7 +866,7 @@ export function FileTree({
         <span className="tree-count">{tree?.count ?? 0}</span>
         {/* 2026-10-15 用户要求「根目录上的功能太少了」：把目录最常用的几个操作直接放到行上
             （悬停才显示）：新建文件 / 新建文件夹 / 粘贴到这里 / 复制项目链接；
-            其余（复制路径、重命名类不做）仍在右键菜单里。 */}
+            其余（复制绝对路径、重命名类不做）仍在右键菜单里。 */}
         <span className="tree-root-actions">
           <button
             type="button"
@@ -1064,6 +1067,16 @@ export function FileTree({
                     >
                       {t('filetree.copyFileName')}
                     </button>
+                    {/* 在系统文件管理器里打开（2026-10-21）：项目根也直接打开该目录 */}
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        onRevealInExplorer?.(menu.path);
+                        setMenu(null);
+                      }}
+                    >
+                      {t('filetree.revealInExplorer')}
+                    </button>
                   </>
                 )}
                 <div className="tree-menu-sep" />
@@ -1173,6 +1186,16 @@ export function FileTree({
                   }}
                 >
                   {t('filetree.copyFileName')}
+                </button>
+                {/* 在系统文件管理器里打开（2026-10-21）：文件选中它，目录直接打开 */}
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    onRevealInExplorer?.(menu.path);
+                    setMenu(null);
+                  }}
+                >
+                  {t('filetree.revealInExplorer')}
                 </button>
                 <div className="tree-menu-sep" />
                 <button

@@ -17,7 +17,7 @@ import type { Hono } from 'hono';
 import { ProjectRegistry } from '../src/registry';
 import type { ProjectIndex } from '../src/indexer/store';
 import { makeProject, type Fixture } from './helpers';
-import { createFileEntry, createDirEntry, copyEntry, isValidEntryName, MAX_WRITE_BYTES, renameEntry, trashEntry, writeProjectFile } from '../src/indexer/fswrite';
+import { createFileEntry, createDirEntry, copyEntry, isValidEntryName, MAX_WRITE_BYTES, renameEntry, revealCommand, revealInFileManager, trashEntry, writeProjectFile } from '../src/indexer/fswrite';
 
 const WIN = process.platform === 'win32';
 
@@ -390,5 +390,46 @@ test('fswrite: 模块级 —— 新建 / 改名 / 复制的失败面与名字规
     assert.equal(isValidEntryName('..'), false);
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('reveal: macOS / Linux 的命令形状（Windows 走 PowerShell 脚本，另测）', () => {
+  assert.deepEqual(revealCommand('/w/ide/src/a.ts', false, 'darwin'), ['open', ['-R', '/w/ide/src/a.ts']]);
+  assert.deepEqual(revealCommand('/w/ide/src', true, 'darwin'), ['open', ['/w/ide/src']]);
+
+  // Linux 没有「选中」入口：目录直接开，文件开父目录
+  assert.deepEqual(revealCommand('/w/ide/src', true, 'linux'), ['xdg-open', ['/w/ide/src']]);
+  assert.deepEqual(revealCommand('/w/ide/src/a.ts', false, 'linux'), ['xdg-open', ['/w/ide/src']]);
+});
+
+test('reveal: 路径不存在时如实报 not_found（不会去叫资源管理器）', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'wcr-reveal-'));
+  try {
+    const ghost = await revealInFileManager(path.join(root, 'ghost.txt'));
+    assert.equal(ghost.ok === false && ghost.error, 'not_found');
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('reveal 路由: 越界 400、不存在 404（都不弹窗口）', async () => {
+  const b = await boot();
+  try {
+    const escape = await b.app.request(`/api/projects/${b.id}/reveal`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: '../outside.ts' }),
+    });
+    assert.equal(escape.status, 400);
+    assert.equal(((await escape.json()) as { error: string }).error, 'path_escape');
+
+    const ghost = await b.app.request(`/api/projects/${b.id}/reveal`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'no/such/file.ts' }),
+    });
+    assert.equal(ghost.status, 404);
+  } finally {
+    await b.cleanup();
   }
 });

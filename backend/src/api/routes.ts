@@ -66,6 +66,7 @@ import {
   isValidEntryName,
   MAX_WRITE_BYTES,
   renameEntry,
+  revealInFileManager,
   trashEntry,
   writeProjectFile,
 } from '../indexer/fswrite';
@@ -882,6 +883,24 @@ export function createApp(
     // 标成 api 来源：这是本页操作的结果，前端不该把它当「外部删除」（FR-0009 同款口径）
     await project.withOrigin('api', () => project.onFileDeleted(rel)).catch(() => undefined);
     return c.json({ ok: true, path: rel, trashed: true });
+  });
+
+  /**
+   * 2026-10-21 用户要求：文件树右键「在资源管理器中打开」。
+   * 文件 / 目录都支持（选中它本身）；`path` 空串 = 项目根（直接打开项目目录）。
+   */
+  app.post('/api/projects/:id/reveal', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const body = await readJson<{ path?: string }>(c);
+    const abs = project.resolveInside((body?.path ?? '').trim());
+    if (!abs) return fail(c, 400, 'path_escape', '路径越界');
+    const result = await revealInFileManager(abs);
+    if (!result.ok) {
+      if (result.error === 'not_found') return fail(c, 404, 'file_not_found', result.message);
+      return fail(c, 500, 'reveal_failed', result.message);
+    }
+    return c.json({ ok: true });
   });
 
   // ---------------------------------------------- 新建 / 重命名 / 移动 / 复制（FR-0009）

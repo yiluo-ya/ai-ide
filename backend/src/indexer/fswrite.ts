@@ -7,7 +7,7 @@
  * 2) 删除**只走系统回收站**：回收站不可用时如实报错，绝不静默改成永久删除；
  * 3) 写入带 `baseMtimeMs` 冲突检测：磁盘在编辑期间被外部改过就拒绝写，把决定权交回用户。
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -120,6 +120,188 @@ function firstLine(text: string): string {
   return (text.split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? text).slice(0, 300);
 }
 
+export type RevealOutcome = { ok: true } | { ok: false; error: 'not_found' | 'failed'; message: string };
+
+/**
+ * 在系统文件管理器里打开并选中该条目（2026-10-21 用户要求：文件树右键「在资源管理器中打开」）。
+ *
+ * Windows 上交给 REVEAL_SCRIPT 一步做完「开窗口 → 确保显示 → 带到最前」。
+ * 为什么不能只 `explorer.exe <dir>`：本机实测 explorer 打开目录后**新窗口是隐藏的**
+ * （IsWindowVisible=0，EnumWindows 能看到、用户看不见），这正是「点了菜单没反应」的真因。
+ *
+ * 两条约定：
+ * 1) 路径必须先存在：不存在就报 `not_found`，不让 explorer 自己退化成「我的文档」；
+ * 2) 回执只代表**命令已交出**：窗口由独立进程创建，这边 detached 起、不等待。
+ */
+export async function revealInFileManager(abs: string): Promise<RevealOutcome> {
+  let isDir: boolean;
+  try {
+    isDir = (await fsp.stat(abs)).isDirectory();
+  } catch {
+    return { ok: false, error: 'not_found', message: `路径不存在：${abs}` };
+  }
+  try {
+    if (process.platform === 'win32') {
+      // 用 -EncodedCommand 传脚本：-Command 传多行含引号的脚本会被 Windows 命令行转义弄坏，
+      // 表现为「powershell 退出码 0、但脚本一行都没执行」（实测 2026-10-21，这是「点了没反应」的真因）。
+      await spawnDetached('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodePowerShell(REVEAL_SCRIPT)], {
+        // 目标只走 env：脚本正文不拼字符串，路径里的引号 / 空格 / 中文都安全
+        WCR_REVEAL_TARGET: abs,
+        WCR_REVEAL_ISDIR: isDir ? '1' : '0',
+        WCR_REVEAL_DIR: isDir ? abs : path.dirname(abs),
+      });
+    } else {
+      const [cmd, args] = revealCommand(abs, isDir, process.platform);
+      await spawnDetached(cmd, args);
+    }
+  } catch (e) {
+    return { ok: false, error: 'failed', message: `打开文件管理器失败：${firstLine((e as Error).message)}` };
+  }
+  return { ok: true };
+}
+
+/** 把 PowerShell 脚本编成 -EncodedCommand 需要的形式（UTF-16LE 的 base64），绕开命令行转义。 */
+function encodePowerShell(script: string): string {
+  return Buffer.from(script, 'utf16le').toString('base64');
+}
+
+/**
+ * 起一个不等它的进程（spawn 成功即算交出）。
+ *
+ * **不能加 detached**（2026-10-21 实测，花了很久才找到）：Windows 下 `detached: true` 起的
+ * powershell.exe 会以退出码 0 结束、但脚本一行都没执行（连第一行的日志都没写），
+ * 这就是「点了菜单没反应」的真因。服务本身常驻，不需要 detached 也能活下去；
+ * unref() 只让父进程的事件循环不等它。
+ */
+function spawnDetached(cmd: string, args: string[], extraEnv?: Record<string, string>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      stdio: 'ignore',
+      windowsHide: true,
+      ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}),
+    });
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+    child.once('error', reject);
+  });
+}
+
+/**
+ * macOS / Linux 上要跑的命令与参数（Windows 走 REVEAL_SCRIPT）。
+ * 目录是「打开它」；文件是「打开所在目录并选中它」（Linux 的 xdg-open 没有选中，只能开父目录）。
+ */
+export function revealCommand(abs: string, isDir: boolean, platform: NodeJS.Platform): [string, string[]] {
+  if (platform === 'darwin') return isDir ? ['open', [abs]] : ['open', ['-R', abs]];
+  return ['xdg-open', [isDir ? abs : path.dirname(abs)]];
+}
+
+/**
+ * Windows：开资源管理器窗口，并保证它**真的出现在用户眼前**。
+ *
+ * 四步都来自实测（每一步都曾单独把功能搞挂）：
+ * 1) 窗口定位用 EnumWindows 的**快照差集**：COM(Shell.Application) 的 LocationURL 对新窗口会滞后，
+ *    按路径匹配经常挑到旧的隐藏窗口；快照必须在 explorer 起来之前做；
+ * 2) 选中的窗口先 ShowWindowAsync(SW_RESTORE)：本机 explorer 开出的新窗口是隐藏的，不 restore 永远看不见；
+ * 3) 置前要 AttachThreadInput（挂到当前前台线程）+ 补一发 ALT 键：后台进程直接 SetForegroundWindow 会被前台锁拒；
+ * 4) 拿不到稳定前台就 SetWindowPos(HWND_TOPMOST) 压 2 秒，让窗口浮在所有普通窗口之上，2 秒后放掉。
+ */
+const REVEAL_SCRIPT = [
+  // 日志最先建：detached 跑时 stdout 被丢弃，脚本哪一步崩了只能靠它（%TEMP%\wcr-reveal.log）
+  "$log = Join-Path ([System.IO.Path]::GetTempPath()) 'wcr-reveal.log'",
+  "function L($m) { [System.IO.File]::AppendAllText($log, ((Get-Date).ToString('HH:mm:ss') + ' ' + $m + [Environment]::NewLine)) }",
+  "L 'boot'",
+  "try {",
+  "if (-not ('WcrReveal' -as [type])) {",
+  "Add-Type -TypeDefinition @\"",
+  "using System;",
+  "using System.Collections.Generic;",
+  "using System.Text;",
+  "using System.Runtime.InteropServices;",
+  "public class WcrReveal {",
+  "  public delegate bool EnumProc(IntPtr h, IntPtr l);",
+  "  [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);",
+  "  [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, StringBuilder s, int n);",
+  "  [DllImport(\"user32.dll\")] public static extern bool IsWindowVisible(IntPtr h);",
+  "  [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();",
+  "  [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);",
+  "  [DllImport(\"kernel32.dll\")] public static extern uint GetCurrentThreadId();",
+  "  [DllImport(\"user32.dll\")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);",
+  "  [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);",
+  "  [DllImport(\"user32.dll\")] public static extern bool ShowWindowAsync(IntPtr h, int n);",
+  "  [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint f);",
+  "  [DllImport(\"user32.dll\")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);",
+  "  public static List<long> ShellWindows() {",
+  "    var list = new List<long>();",
+  "    EnumWindows((h, l) => {",
+  "      var sb = new StringBuilder(256);",
+  "      GetClassNameW(h, sb, 256);",
+  "      var cls = sb.ToString();",
+  "      if (cls == \"CabinetWClass\" || cls == \"ExploreWClass\") list.Add(h.ToInt64());",
+  "      return true;",
+  "    }, IntPtr.Zero);",
+  "    return list;",
+  "  }",
+  "  public static void BringToFront(IntPtr h) {",
+  "    ShowWindowAsync(h, 9);",
+  "    uint fgT = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);",
+  "    uint myT = GetCurrentThreadId();",
+  "    AttachThreadInput(myT, fgT, true);",
+  "    SetForegroundWindow(h);",
+  "    AttachThreadInput(myT, fgT, false);",
+  "    keybd_event(0x12, 0, 0, UIntPtr.Zero);",
+  "    keybd_event(0x12, 0, 2, UIntPtr.Zero);",
+  "    SetForegroundWindow(h);",
+  "  }",
+  "}",
+  "\"@",
+  "}",
+  "} catch { L ('addtype-failed: ' + $_.Exception.Message); exit 0 }",
+  "$target = $env:WCR_REVEAL_TARGET",
+  "$isDir = $env:WCR_REVEAL_ISDIR -eq \"1\"",
+  "$dir = $env:WCR_REVEAL_DIR",
+  "$arg = if ($isDir) { $target } else { \"/select,$target\" }",
+  "L (\"start target=$target isDir=$isDir dir=$dir\")",
+  "$before = [WcrReveal]::ShellWindows()",
+  "L (\"snapshot-before=\" + $before.Count)",
+  "Start-Process -FilePath \"explorer.exe\" -ArgumentList $arg | Out-Null",
+  "$shell = New-Object -ComObject Shell.Application",
+  "$hwnd = [long]0",
+  "$diag = ''",
+  // 优先用 COM 定位：实测 COM 返回的 HWND 能 restore 出来，而 EnumWindows 兜到的那个 restore 无效
+  "for ($i = 0; $i -lt 15 -and $hwnd -eq 0; $i++) {",
+  "  Start-Sleep -Milliseconds 200",
+  "  $matched = @()",
+  "  foreach ($w in $shell.Windows()) {",
+  "    try {",
+  "      if (-not $w.LocationURL -or -not $w.HWND) { continue }",
+  "      if (([System.Uri]$w.LocationURL).LocalPath -ine $dir) { continue }",
+  "      $matched += [int64]$w.HWND",
+  "    } catch {}",
+  "  }",
+  "  $diag = 'com-matched=' + $matched.Count",
+  // 不过滤隐藏窗口：explorer 会把新请求交给隐藏窗口处理，跳过它们就是「点了没反应」
+  "  if ($matched.Count) { $hwnd = ($matched | Sort-Object -Descending)[0] }",
+  "}",
+  // 兜底：COM 还没跟上（新窗口的 LocationURL 滞后）→ 用 EnumWindows 的差集找新窗口
+  "if ($hwnd -eq 0) {",
+  "  foreach ($h in [WcrReveal]::ShellWindows()) {",
+  "    if (-not $before.Contains($h)) { $hwnd = $h; break }",
+  "  }",
+  "  $diag = $diag + ' enum-fresh=' + $hwnd",
+  "}",
+  "if ($hwnd -eq 0) { L ('no-window-found ' + $diag); exit 0 }",
+  "$h2 = [System.IntPtr]$hwnd",
+  "L ('picked hwnd=' + $hwnd + ' visible-before=' + [WcrReveal]::IsWindowVisible($h2) + ' ' + $diag)",
+  "[WcrReveal]::BringToFront($h2)",
+  "L (\"after-front visible=\" + [WcrReveal]::IsWindowVisible($h2))",
+  "$tp = [WcrReveal]::SetWindowPos($h2, [System.IntPtr](-1), 0, 0, 0, 0, 0x0003)",
+  "L (\"topmost=$tp visible=\" + [WcrReveal]::IsWindowVisible($h2))",
+  "Start-Sleep -Milliseconds 2000",
+  "[WcrReveal]::SetWindowPos($h2, [System.IntPtr](-2), 0, 0, 0, 0, 0x0003) | Out-Null",
+  "L 'released'",
+].join('\n');
 // ------------------------------------------------- 新建 / 重命名 / 移动 / 复制（FR-0009）
 
 /** Windows 保留设备名：这些名字（含带扩展名，如 `con.txt`）在 Win32 上建不出来。 */
