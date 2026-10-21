@@ -509,6 +509,7 @@ export const en: Record<string, string> = {
   'app.bottomPanels': 'Bottom panel',
   'app.collapseBottom': 'Collapse bottom panel',
   'app.expandBottom': 'Expand bottom panel',
+  'app.bottomHiddenInAgent': 'The bottom panel is hidden in code agent mode',
   'app.maximize': 'Maximize (fullscreen)',
   'app.restore': 'Restore',
   'app.outputFilter': 'Filter commands…',

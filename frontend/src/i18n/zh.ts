@@ -508,6 +508,7 @@ export const zh: Record<string, string> = {
   'app.bottomPanels': '底部面板',
   'app.collapseBottom': '收起底部面板',
   'app.expandBottom': '展开底部面板',
+  'app.bottomHiddenInAgent': 'code agent 模式下不显示底部面板',
   'app.maximize': '最大化（全屏）',
   'app.restore': '还原',
   'app.outputFilter': '过滤命令…',

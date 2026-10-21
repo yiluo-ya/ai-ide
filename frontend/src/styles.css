@@ -4119,6 +4119,14 @@ mark {
   background: var(--row-hover);
 }
 
+/* 不可用（code agent 模式下底部面板不开放）：置灰且不响应鼠标 */
+.region-toggle:disabled {
+  color: var(--fg-dim);
+  opacity: 0.35;
+  cursor: default;
+  background: transparent;
+}
+
 /* 对应区域展开中：方块内部条显示为实心；未展开时为空心（透明） */
 .region-toggle.active {
   color: var(--fg);

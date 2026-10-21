@@ -169,13 +169,16 @@ export default function App() {
   const searchInputRef = useRef<HTMLDivElement>(null);
 
   // 项目地图：主区视图（map = 强制看地图）、依赖图浮层、文件树叠加过滤（M9/M10）
-  // 2026-10-03：主区可在「代码 / 地图 / Agent 会话」之间切；agent 不入 URL
-  // 2026-10-21 用户反馈：刷新后停在 code agent 上、主区却掉回代码视图（mainView 不进 URL，
-  // 存档里只有活动栏的选中视图）。改为按活动栏当前视图认领：某侧选中的就是 agent = 进来还在 agent 里。
+  // 2026-10-03：主区可在「代码 / 地图 / Agent 会话」之间切。
+  // 2026-10-21：agent 也要进 URL（view=agent）—— 否则刷新后只能靠猜，实测踩到：
+  // 用户先前打开过文件使 URL 长期带着 `file=`，「带 file 就优先代码视图」的旧口径
+  // 把他从 agent 里踢了出来（主区显示代码区，终端也跟着回到底部）。
   const [mainView, setMainView] = useState<'auto' | 'map' | 'agent'>(() => {
-    // 深链带文件（`?file=`）= 明确要看那个文件，优先代码视图，不被上次的 agent 模式抢走
+    const view = snapshot.get('view');
+    if (view === 'agent' || view === 'map') return view;
+    // 没写 view（旧链接）：带 file = 明确要看那个文件，优先代码视图；否则按活动栏存档认领
     if (!snapshot.get('file') && (layout.active.left === 'agent' || layout.active.right === 'agent')) return 'agent';
-    return snapshot.get('view') === 'map' ? 'map' : 'auto';
+    return 'auto';
   });
   /**
    * 是否处于「code agent 方式」（终端位置随之切换，2026-10-21 用户口径）：
@@ -299,6 +302,11 @@ export default function App() {
   const [bottomTab, setBottomTab] = useState<BottomTab>('output');
   /** 底部面板高度（px），拖动顶边调整。 */
   const [bottomHeight, setBottomHeight] = useState(220);
+  /**
+   * 底部面板的实际展开条件（2026-10-21 用户要求）：code agent 时刻**底部整块不出现、也点不开**。
+   * 与 bottomOpen 分开，是为了不改用户的开关偏好 —— 退出 agent 后原样还原。
+   */
+  const bottomVisible = bottomOpen && !agentMode;
   /** 底部面板实际显示的页：agent 模式下终端搬到右栏了，底部不再提供「终端」页。 */
   const shownBottomTab: BottomTab = agentMode && bottomTab === 'terminal' ? 'output' : bottomTab;
   const bottomTabs: BottomTab[] = agentMode ? BOTTOM_TABS.filter((id) => id !== 'terminal') : BOTTOM_TABS;
@@ -368,25 +376,18 @@ export default function App() {
   }, [agentMode, layout.active.right, layout.sides]);
 
   /**
-   * 2026-10-15 用户要求：进 Code Agent 时把底部面板收拢，回到代码时**还原进来前的样子**。
-   * 只在「在 Agent 里没自己动过底部面板」时还原 —— 用户为装 pi 特意开了终端，别抢他的状态。
-   * （右栏不在这里管：它完全由上面那个 agentMode effect 驱动。）
+   * 主区在「会话」与「代码」之间切。
+   *
+   * 底部面板不用在这里操心：agent 模式的隐藏由 bottomVisible 表达（
+   * `bottomOpen && !agentMode`）—— 不碰用户的开关状态，退出 agent 自动恢复，
+   * 也不依赖内存 ref（刷新后同样正确）。右栏同理，由上面那个 agentMode effect 驱动。
    */
-  const codeBottomRef = useRef<{ open: boolean; tab: BottomTab } | null>(null);
   const showAgent = useCallback(() => {
-    codeBottomRef.current = { open: bottomOpen, tab: bottomTab };
-    setBottomOpen(false);
     setMainView('agent');
-  }, [bottomOpen, bottomTab]);
+  }, []);
   const backToCode = useCallback(() => {
-    const saved = codeBottomRef.current;
-    codeBottomRef.current = null;
     setMainView('auto');
-    if (saved && !bottomOpen) {
-      setBottomTab(saved.tab);
-      setBottomOpen(saved.open);
-    }
-  }, [bottomOpen]);
+  }, []);
 
   /**
    * FR-0011「在终端中运行」：token 自增的一次运行请求，交给 TerminalPanel 写进激活终端。
@@ -838,9 +839,11 @@ export default function App() {
   }, [store.openFile, cursor.line, cursor.col, openPanel, runFileInTerminal, revealFileInTree, collapseAllInTree]);
 
   // M20 地图快照：视图变化写回 URL；从 URL 打开时把热点口径也恢复
+  // 2026-10-21：view 也要写 agent —— 否则刷新后主区掉回代码区（用户实测：
+  // 「点 code agent → 刷新 → 出现代码区」）。
   useEffect(() => {
     writeSnapshot({
-      view: mainView === 'map' ? 'map' : null,
+      view: mainView === 'auto' ? null : mainView,
       tab: tab === 'files' ? null : tab,
       hot: mapOptions.hot === 'files' ? null : mapOptions.hot,
       denoise: mapOptions.denoise ? null : '0',
@@ -1619,10 +1622,11 @@ export default function App() {
           )}
 
           {/* 底部面板（VS Code 布局迁移 2026-10-08）：输出 / 终端，位于状态栏上方。
-              标签竖排在面板右列（2026-10-08），不再占用顶部一行高度。 */}
+              标签竖排在面板右列（2026-10-08），不再占用顶部一行高度。
+              2026-10-21 用户要求：code agent 时刻底部整块不出现（bottomVisible）。 */}
           <div
-            className={`bottom-panel ${bottomOpen ? '' : 'collapsed'}`}
-            style={bottomOpen ? { height: bottomHeight } : undefined}
+            className={`bottom-panel ${bottomVisible ? '' : 'collapsed'}`}
+            style={bottomVisible ? { height: bottomHeight } : undefined}
           >
             <div
               className="bottom-resize-handle"
@@ -1675,7 +1679,7 @@ export default function App() {
                       className={`bottom-tab${bottomTab === id ? ' active' : ''}`}
                       title={t(BOTTOM_TITLE[id])}
                       onClick={() => {
-                        if (bottomOpen && bottomTab === id) setBottomOpen(false);
+                        if (bottomVisible && bottomTab === id) setBottomOpen(false);
                         else {
                           setBottomTab(id);
                           setBottomOpen(true);
@@ -1689,9 +1693,9 @@ export default function App() {
                 <button
                   className="bottom-toggle"
                   onClick={() => setBottomOpen((v) => !v)}
-                  title={bottomOpen ? t('app.collapseBottom') : t('app.expandBottom')}
+                  title={bottomVisible ? t('app.collapseBottom') : t('app.expandBottom')}
                 >
-                  {bottomOpen ? '▾' : '▴'}
+                  {bottomVisible ? '▾' : '▴'}
                 </button>
               </div>
             </div>
@@ -1793,8 +1797,15 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    className={`region-toggle${bottomOpen ? ' active' : ''}`}
-                    title={bottomOpen ? t('app.collapseBottom') : t('app.expandBottom')}
+                    className={`region-toggle${bottomVisible ? ' active' : ''}`}
+                    disabled={agentMode}
+                    title={
+                      agentMode
+                        ? t('app.bottomHiddenInAgent')
+                        : bottomOpen
+                          ? t('app.collapseBottom')
+                          : t('app.expandBottom')
+                    }
                     onClick={() => setBottomOpen((v) => !v)}
                   >
                     <span className="region-glyph region-glyph-bottom" aria-hidden="true" />

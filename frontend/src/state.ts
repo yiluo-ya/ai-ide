@@ -531,6 +531,10 @@ function fsErrorMessage(e: unknown): string {
  * 打开文件后把位置写进地址栏，便于把「文件+行」当链接分享（也是给宿主的深链格式）。
  * N18：程序化跳转用 pushState（浏览器后退键回到上一个阅读位置），
  * 历史导航自身（Alt+←/→ 与 popstate）用 replaceState，避免自激。同 URL 去重。
+ *
+ * 2026-10-21：只改自己负责的四个参数，**其它查询参数原样保留** —— 原来重建整个 URL
+ * 会把 App 写进去的 view=agent / tab / hot 等一并抹掉（实测后果：点 code agent 后
+ * 一旦打开文件，刷新就掉回代码区）。
  */
 function syncUrl(
   projectId: string | null,
@@ -539,12 +543,16 @@ function syncUrl(
   col: number | undefined,
   mode: 'push' | 'replace' = 'push',
 ) {
+  const own = ['project', 'file', 'line', 'col'];
   const params = new URLSearchParams();
   if (projectId) params.set('project', projectId);
   if (file) {
     params.set('file', file);
     if (line) params.set('line', String(line));
     if (col) params.set('col', String(col));
+  }
+  for (const [k, v] of new URLSearchParams(window.location.search)) {
+    if (!own.includes(k) && !params.has(k)) params.set(k, v);
   }
   const qs = params.toString();
   const url = qs ? `/?${qs}` : '/';
