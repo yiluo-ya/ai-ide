@@ -1765,6 +1765,20 @@ export function createApp(
   // ------------------------------------------------------ 前端静态资源
 
   const relDist = path.relative(process.cwd(), frontendDist).split(path.sep).join('/');
+  /**
+   * 缓存策略（2026-10-21）：没设 Cache-Control 时浏览器会启发式缓存 index.html，
+   * 于是重新 build 后仍跑旧 JS（页面看起来正常、行为却是旧版）—— 排查「改了没生效」的头号坑。
+   * 带内容 hash 的 /assets/* 可长缓存，其余（含 index.html）一律每次回源校验。
+   */
+  app.use('/*', async (c, next) => {
+    await next();
+    const p = c.req.path;
+    if (p.startsWith('/assets/')) {
+      c.res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    } else if ((c.res.headers.get('content-type') ?? '').includes('text/html')) {
+      c.res.headers.set('Cache-Control', 'no-cache');
+    }
+  });
   app.use('/*', serveStatic({ root: relDist }));
   app.get('*', serveStatic({ path: `${relDist}/index.html` }));
 
