@@ -330,15 +330,16 @@ export default function App() {
   }, [agentMode]);
 
   /**
-   * 刷页后若右栏存档还停在「终端」（非 agent 模式终端在底部），把它挪到该侧第一个别的视图。
-   * 只跑一次：模式切换期间的还原由 showAgent / backToCode 负责。
+   * 非 agent 模式下终端住在底部面板，右栏不该停在「终端」：把存档里的选中项挪到该侧第一个别的视图。
+   * 两个入口都要盖住 —— 刷页（此时 codeDockViewRef 已丢）+ 退出 agent（含在 agent 里刷过页、
+   * 没有「进 agent 前的视图」可还原那种情况，否则右栏会留一个空槽）。
+   * backToCode 的精确还原照旧优先：它先把选中项改掉，这个 effect 到时已无 terminal 可挪。
    */
   useEffect(() => {
     if (agentMode || layout.active.right !== 'terminal') return;
     const fallback = viewsOn('right').find((v) => v !== 'terminal');
     if (fallback) setActiveView('right', fallback);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [agentMode, layout.active.right]);
 
   /**
    * 2026-10-15 用户要求：进 Code Agent 时把底部面板收拢，回到代码时**还原进来前的样子**。
