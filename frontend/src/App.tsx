@@ -177,8 +177,14 @@ export default function App() {
     if (!snapshot.get('file') && (layout.active.left === 'agent' || layout.active.right === 'agent')) return 'agent';
     return snapshot.get('view') === 'map' ? 'map' : 'auto';
   });
-  /** 是否停在 code agent 会话上 —— 终端位置随之切换（2026-10-21，见下方终端宿主）。 */
-  const agentMode = mainView === 'agent';
+  /**
+   * 是否处于「code agent 方式」（终端位置随之切换，2026-10-21 用户口径）：
+   * 主区看会话**或**某侧活动栏停在「code 会话」都算。
+   *
+   * 后一条是必需的：在 agent 里点开一个文件时主区会切回代码视图（mainView = auto），
+   * 但界面上仍停在 code 会话里 —— 只认 mainView 的话终端会错回到下面（用户实测报的缺陷）。
+   */
+  const agentMode = mainView === 'agent' || layout.active.left === 'agent' || layout.active.right === 'agent';
   const [graphOpen, setGraphOpen] = useState(() => snapshot.get('graph') === '1');
   /** 2026-10-03：code-agent 会话（左栏管会话 + 中间看内容，见 mainView === 'agent'）。 */
   /** W5：流视图浮层的焦点（null = 关着）。 */
@@ -330,62 +336,57 @@ export default function App() {
   }, [agentMode]);
 
   /**
-   * 刷新后重新认领模式（见 mainView 初值）：若落在 agent，右栏必须是「终端」且展开——
-   * 否则没有 terminal 槽位可搬，宿主会缩回屏幕外的锚点里（表现：终端凭空消失）。
-   * 只校正一次（挂载时）：之后用户自己把右栏切去看 git / 接口就不该再抢回来。
+   * 右栏跟随 agentMode —— 只在**进去 / 出来那一刻**校正一次（2026-10-21）：
+   * - 刚进 code agent 方式 → 右栏切到「终端」并展开（否则 terminal 槽位不存在，宿主没处可搬）；
+   * - 刚离开 → 右栏还原成进来前那个视图（默认第一个非 terminal）。
+   *
+   * 只在切换沿上动，是因为：① 用户随后自己把右栏切去看 git 不该被弹回来（终端会话仍然活着，
+   * 点回「终端」就恢复显示）；② 刷新就落在 agent 时靠 ref 初值 false 补上这一次校正。
    */
-  const dockCalibratedRef = useRef(false);
+  const codeDockViewRef = useRef<ViewId | null>(null);
+  const prevAgentModeRef = useRef(false);
   useEffect(() => {
-    if (dockCalibratedRef.current) return;
-    dockCalibratedRef.current = true;
-    if (!agentMode) return;
-    setChangesDockOpen(true);
-    if (layout.active.right !== 'terminal') setActiveView('right', 'terminal');
-  }, [agentMode, layout.active.right]);
-
-  /**
-   * 非 agent 模式下终端住在底部面板，右栏不该停在「终端」：把存档里的选中项挪到该侧第一个别的视图。
-   * 两个入口都要盖住 —— 刷页（此时 codeDockViewRef 已丢）+ 退出 agent（含在 agent 里刷过页、
-   * 没有「进 agent 前的视图」可还原那种情况，否则右栏会留一个空槽）。
-   * backToCode 的精确还原照旧优先：它先把选中项改掉，这个 effect 到时已无 terminal 可挪。
-   */
-  useEffect(() => {
-    if (agentMode || layout.active.right !== 'terminal') return;
-    const fallback = viewsOn('right').find((v) => v !== 'terminal');
+    const was = prevAgentModeRef.current;
+    prevAgentModeRef.current = agentMode;
+    if (was === agentMode) return;
+    if (agentMode) {
+      if (layout.active.right !== 'terminal') {
+        codeDockViewRef.current = layout.active.right;
+        setActiveView('right', 'terminal');
+      }
+      setChangesDockOpen(true);
+      return;
+    }
+    if (layout.active.right !== 'terminal') return;
+    const remembered = codeDockViewRef.current;
+    codeDockViewRef.current = null;
+    const fallback =
+      remembered && remembered !== 'terminal' && layout.sides[remembered] === 'right'
+        ? remembered
+        : viewsOn('right').find((v) => v !== 'terminal');
     if (fallback) setActiveView('right', fallback);
-  }, [agentMode, layout.active.right]);
+  }, [agentMode, layout.active.right, layout.sides]);
 
   /**
    * 2026-10-15 用户要求：进 Code Agent 时把底部面板收拢，回到代码时**还原进来前的样子**。
    * 只在「在 Agent 里没自己动过底部面板」时还原 —— 用户为装 pi 特意开了终端，别抢他的状态。
+   * （右栏不在这里管：它完全由上面那个 agentMode effect 驱动。）
    */
   const codeBottomRef = useRef<{ open: boolean; tab: BottomTab } | null>(null);
-  /** 进 agent 前右栏停在哪（退出时还原；用户自己在 agent 里换过视图就不抢）。 */
-  const codeDockViewRef = useRef<ViewId | null>(null);
   const showAgent = useCallback(() => {
     codeBottomRef.current = { open: bottomOpen, tab: bottomTab };
     setBottomOpen(false);
-    // 终端在 agent 里住右栏：进来就把「终端」视图选中并展开右栏（2026-10-21 用户要求 auto-open）。
-    codeDockViewRef.current = layout.active.right === 'terminal' ? null : layout.active.right;
-    setActiveView('right', 'terminal');
-    setChangesDockOpen(true);
     setMainView('agent');
-  }, [bottomOpen, bottomTab, layout.active.right]);
+  }, [bottomOpen, bottomTab]);
   const backToCode = useCallback(() => {
     const saved = codeBottomRef.current;
     codeBottomRef.current = null;
-    const savedDock = codeDockViewRef.current;
-    codeDockViewRef.current = null;
     setMainView('auto');
     if (saved && !bottomOpen) {
       setBottomTab(saved.tab);
       setBottomOpen(saved.open);
     }
-    // 右栏只在还停在「终端」时才还原（用户在 agent 里换去看 git 就别抢）
-    if (savedDock && savedDock !== 'terminal' && layout.active.right === 'terminal') {
-      setActiveView('right', savedDock);
-    }
-  }, [bottomOpen, layout.active.right]);
+  }, [bottomOpen]);
 
   /**
    * FR-0011「在终端中运行」：token 自增的一次运行请求，交给 TerminalPanel 写进激活终端。
