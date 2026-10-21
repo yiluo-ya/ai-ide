@@ -120,3 +120,53 @@
 .file-tree .tree-row.vcs-conflict .tree-name {
   color: var(--vcs-conflict);
 }
+
+/* ---------------------------------------------------------------- 被忽略的条目（2026-10-21 用户要求）
+
+   .gitignore / .wcrignore／内置黑名单里的文件与目录也出现在树上，但画到「一眼就想跳过」的
+   一档（--tree-ignored，比普通行淡一截、仍可读 —— 用户反馈太淡时「完全看不到」）；
+   热力条 / 徽标一起淡下去，图标跟着淡；**悬停时提到常规黯淡前景**（偶尔还是要用）。
+   放在 vcs 规则之后、同一特异度，所以即便某个状态想上色也压得住。 */
+.file-tree .tree-row.is-ignored .tree-name,
+.file-tree .tree-row.is-ignored .tree-count,
+.file-tree .tree-row.is-ignored .chevron {
+  color: var(--tree-ignored);
+  font-weight: 400;
+}
+
+.file-tree .tree-row.is-ignored .heat,
+.file-tree .tree-row.is-ignored .badge {
+  opacity: 0.35;
+}
+
+.file-tree .tree-row.is-ignored .file-icon,
+.file-tree .tree-row.is-ignored svg {
+  opacity: 0.55;
+}
+
+/* 悬停：真的要用的时候能看清（只提亮，不动字重 —— 字重变化会让整行抖一下） */
+.file-tree .tree-row.is-ignored:hover .tree-name,
+.file-tree .tree-row.is-ignored:hover .tree-count,
+.file-tree .tree-row.is-ignored:hover .chevron {
+  color: var(--fg-dim);
+  font-weight: 400;
+}
+
+.file-tree .tree-row.is-ignored:hover .file-icon,
+.file-tree .tree-row.is-ignored:hover svg {
+  opacity: 1;
+}
+
+/* 灰色组折叠行（2026-10-21 用户要求「默认把 ignore 的直接折叠」）——
+   它不是某个被忽略条目，而是「这一层有 N 项被忽略」的控制器：用同一档淡色，
+   悬停时提亮到常规黯淡前景，否则看不出可以点。 */
+.file-tree .tree-row.ignored-fold .tree-name,
+.file-tree .tree-row.ignored-fold .chevron {
+  color: var(--tree-ignored);
+  font-weight: 400;
+}
+
+.file-tree .tree-row.ignored-fold:hover .tree-name,
+.file-tree .tree-row.ignored-fold:hover .chevron {
+  color: var(--fg-dim);
+}

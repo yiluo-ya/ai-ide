@@ -219,6 +219,10 @@ export const api = {
   allFiles: (id: string) =>
     request<{ tree: FileNode; status: IndexStatus }>(`/projects/${id}/all-files`),
 
+  /** 2026-10-21：被忽略目录的懒加载 —— 树上的 `lazy` 节点展开时拉一层。 */
+  dirNodes: (id: string, path: string) =>
+    request<{ nodes: FileNode[] }>(`/projects/${id}/dir?path=${encodeURIComponent(path)}`),
+
   /** 变更（2026-10-03）：以 git 为准的工作区改动清单。 */
   gitChanges: (id: string) => request<GitChangesResult>(`/projects/${id}/git-changes`),
 

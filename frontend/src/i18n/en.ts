@@ -1306,6 +1306,9 @@ export const en: Record<string, string> = {
   'filetree.confidence': ' (confidence {n})',
   'filetree.hotTitle': 'Hotspot: referenced by many files, a good place to start reading',
   'filetree.orphanTitle': 'Nothing references this file',
+  'filetree.ignoredFold': 'Ignored ({n})',
+  'filetree.ignoredFoldTitle':
+    'Excluded by .gitignore / .wcrignore / built-in rules; click to expand or fold, double-click an ignored row to fold',
   'filetree.noProject': 'No project open yet',
   'filetree.noFiles': 'No readable files in this project',
   'filetree.noFilesFiltered': 'No files match the current filter',

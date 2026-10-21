@@ -11,6 +11,14 @@
   directories first, files after, **collapsed by default**, directories and files **in the same colour**
   (IDEA convention: bold weight and the folder icon tell them apart; colour is reserved for git status,
   see Platform); filter by time (all / changed today / within 3 days / within 7 days), “orphan” and “indexed”
+- **Ignored entries are shown too, folded by default** (2026-10-21, user request; see `FR/FR-0014-fr.md`):
+  files and directories matched by `.gitignore` / `.wcrignore` / the built-in blacklist (`node_modules`, `dist`, …)
+  stay in the tree, painted in the **faintest tier — the “skip me” colour** (`--tree-ignored`; icons and badges
+  dim as well); per level, the dimmed rows (files and directories together) collapse into one **“Ignored (N)”**
+  row at the very end — click it to expand / collapse, or **double-click any dimmed row** to fold; all-dimmed
+  levels (e.g. inside `node_modules`) and levels with a single dimmed entry stay flat, and the group expands
+  automatically while filtering; an ignored directory shows one row and **loads its children lazily on expand**
+  (`GET /api/projects/:id/dir`), so it is visible without slowing the scan down
 - **File-tree navigation** (2026-10-14, see `FR/FR-0012-fr.md`): the toolbar’s **“Collapse” folds every
   folder at once** (`Ctrl+Alt+-` / `Ctrl+Shift+-`), **“Reveal” puts the open file back in the tree**
   (expands its ancestors, scrolls to it and flashes; `Alt+F`, the tab context menu and auto-reveal on
@@ -422,6 +430,7 @@ requests return 400. Routes marked **local** return 403 in share mode.
 | POST | `/api/projects/:id/verify` | Reconcile now and heal (added / changed / deleted) |
 | GET | `/api/projects/:id/files` | File tree of indexable files |
 | GET | `/api/projects/:id/all-files` | File tree of all files (incl. binaries / assets / ignored) |
+| GET | `/api/projects/:id/dir?path=` | Lazy loading of an ignored directory (reads one level, no indexing) |
 | GET | `/api/projects/:id/file?path=` | File contents (415 for binary, 413 when too large) |
 | GET | `/api/fs/dirs?path=` | Directory picker (**local**; 403 in share mode) |
 

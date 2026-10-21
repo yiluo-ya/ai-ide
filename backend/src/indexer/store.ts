@@ -77,7 +77,9 @@ export interface EntryInfo {
 interface ScanAcc {
   entries: Map<string, EntryInfo>;
   dirs: Set<string>;
-  allFiles: Map<string, { size: number; mtimeMs: number; binary: boolean }>;
+  allFiles: Map<string, { size: number; mtimeMs: number; binary: boolean; ignored?: boolean }>;
+  /** 2026-10-21：被忽略规则剪掉的目录（只记这一层，不下探）——文件树里画成最淡的 `lazy` 节点。 */
+  ignoredDirs: Set<string>;
   ignored: number;
 }
 
@@ -116,8 +118,13 @@ export class ProjectIndex {
    * 连被规则忽略的与二进制的文件也记一份，专供 `/all-files` 给文件树用；
    * 不混进 entries，是因为 entries 参与快照指纹与对账，语义必须是「可索引的候选文件」。
    */
-  readonly allFiles = new Map<string, { size: number; mtimeMs: number; binary: boolean }>();
+  readonly allFiles = new Map<string, { size: number; mtimeMs: number; binary: boolean; ignored?: boolean }>();
   readonly dirs = new Set<string>();
+  /**
+   * 2026-10-21 用户要求「被忽略的也展示」：扫描时被整目录剪掉的目录名（如 node_modules/dist），
+   * 文件树里保留一行淡色节点、展开时再按需拉一层（`listDir`）。不进 `dirs`，索引与对账都不受影响。
+   */
+  readonly ignoredDirs = new Set<string>();
   /** 已建符号索引的源码文件。 */
   readonly files = new Map<string, FileIndex>();
   /** 非源码 / 过大的正文缓存（按需加载，供查看与文本搜索）。 */
@@ -284,7 +291,7 @@ export class ProjectIndex {
    */
   private async doScan(): Promise<void> {
     await this.ignore.reload(this.root);
-    const acc: ScanAcc = { entries: new Map(), dirs: new Set(), allFiles: new Map(), ignored: 0 };
+    const acc: ScanAcc = { entries: new Map(), dirs: new Set(), allFiles: new Map(), ignoredDirs: new Set(), ignored: 0 };
     let level: string[] = [''];
     while (level.length) {
       const next: string[] = [];
@@ -298,6 +305,8 @@ export class ProjectIndex {
     for (const dir of acc.dirs) this.dirs.add(dir);
     this.allFiles.clear();
     for (const [rel, info] of acc.allFiles) this.allFiles.set(rel, info);
+    this.ignoredDirs.clear();
+    for (const dir of acc.ignoredDirs) this.ignoredDirs.add(dir);
     this.ignoredCount = acc.ignored;
   }
 
@@ -324,6 +333,8 @@ export class ProjectIndex {
       const childRel = rel ? `${rel}/${d.name}` : d.name;
       if (d.isDirectory()) {
         if (this.ignore.ignoresDir(childRel, d.name)) {
+          // 2026-10-21：忽略目录也留个节点（只这一层，内部不扫）——文件树里淡色显示，点开再懒加载
+          acc.ignoredDirs.add(childRel);
           acc.ignored++;
           continue;
         }
@@ -334,8 +345,8 @@ export class ProjectIndex {
       }
       if (!d.isFile()) continue;
       if (this.ignore.ignoresFile(childRel)) {
-        // 被规则忽略的也记进 allFiles（文件树要显示「所有文件」），但不进 entries
-        acc.allFiles.set(childRel, { size: 0, mtimeMs: 0, binary: isBinaryName(childRel) });
+        // 被规则忽略的也记进 allFiles（文件树要显示「所有文件」，画成最淡的一档），但不进 entries
+        acc.allFiles.set(childRel, { size: 0, mtimeMs: 0, binary: isBinaryName(childRel), ignored: true });
         acc.ignored++;
         continue;
       }
@@ -1025,6 +1036,7 @@ export class ProjectIndex {
     for (const p of [...this.allFiles.keys()]) if (inSubtree(p)) this.allFiles.delete(p);
     for (const p of [...this.entries.keys()]) if (inSubtree(p)) this.entries.delete(p);
     for (const p of [...this.dirs]) if (inSubtree(p)) this.dirs.delete(p);
+    for (const p of [...this.ignoredDirs]) if (inSubtree(p)) this.ignoredDirs.delete(p);
     this.rebuildClassMap();
     this.indexVersion++;
     this.status.filesIndexed = this.files.size;
@@ -1264,19 +1276,84 @@ export class ProjectIndex {
   }
 
   /**
+   * 按需列一层目录（2026-10-21）：被忽略目录在树上只是 `lazy` 节点，用户点开才读这一层，
+   * 于是 node_modules / dist 也能看得见，但扫描与索引不会被它们拖慢。
+   * 返回项都带 `ignored`（含「祖先目录被整目录忽略」的继承）与 `lazy`（子目录内容同样还没读）。
+   */
+  async listDir(rel: string): Promise<FileNode[]> {
+    const abs = this.resolveInside(rel);
+    if (!abs) return [];
+    let dirents;
+    try {
+      dirents = await fsp.readdir(abs, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const out: FileNode[] = [];
+    for (const d of dirents) {
+      const childRel = rel ? `${rel}/${d.name}` : d.name;
+      const ignored = this.ignoredUnder(childRel, d.isDirectory());
+      if (d.isDirectory()) {
+        out.push({ name: d.name, path: childRel, type: 'directory', ignored, lazy: true });
+        continue;
+      }
+      if (!d.isFile()) continue;
+      out.push({
+        name: d.name,
+        path: childRel,
+        type: 'file',
+        size: this.entries.get(childRel)?.size ?? this.allFiles.get(childRel)?.size ?? 0,
+        lang: langForFile(childRel),
+        binary: isBinaryName(childRel),
+        indexed: this.files.has(childRel),
+        ignored,
+      });
+    }
+    // 目录在前、文件在后，各自按名字升序；被忽略的沉到同类最后（与前端 sortNodes 同口径）
+    return out.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+      const ai = a.ignored ? 1 : 0;
+      const bi = b.ignored ? 1 : 0;
+      if (ai !== bi) return ai - bi;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  /** 一条路径是否「在忽略范围内」：自己命中规则，或任一祖先目录被整目录忽略。 */
+  private ignoredUnder(rel: string, isDir: boolean): boolean {
+    const parts = rel.split('/');
+    let prefix = '';
+    for (let i = 0; i < parts.length - 1; i++) {
+      prefix = prefix ? `${prefix}/${parts[i]}` : parts[i];
+      if (this.ignore.ignoresDir(prefix, parts[i])) return true;
+    }
+    return this.ignore.ignoresPath(rel, isDir);
+  }
+
+  /**
    * 全部文件的树（2026-10-03）：只跳过噪声目录（node_modules / .git 那类），
    * 被规则忽略的、二进制的、超大的文件都出现在树上，各自标出自己的状态。
    * 与 buildFileTree 的区别：后者只给「可索引的候选文件」。
+   *
+   * 2026-10-21 用户要求：被忽略的**目录**也要露一行（淡色、`lazy`，点开时用 `listDir` 拉一层），
+   * 之前是整棵剪掉，用户以为「这个项目里没有 node_modules」。
    */
   buildAllFileTree(): FileNode {
     const root: FileNode = { name: this.name, path: '', type: 'directory', count: 0, children: [] };
     const dirNodes = new Map<string, FileNode>();
     dirNodes.set('', root);
-    for (const dir of [...this.dirs].sort()) {
+    for (const dir of [...this.dirs, ...this.ignoredDirs].sort()) {
       const parts = dir.split('/');
       const parent = dirNodes.get(parts.slice(0, -1).join('/'));
       if (!parent) continue;
-      const node: FileNode = { name: parts[parts.length - 1], path: dir, type: 'directory', count: 0, children: [] };
+      const node: FileNode = { name: parts[parts.length - 1], path: dir, type: 'directory', count: 0 };
+      if (this.ignoredDirs.has(dir)) {
+        // 被忽略目录：不打探内容（node_modules 可能上万个文件），展开时再拉
+        node.ignored = true;
+        node.lazy = true;
+      } else {
+        node.children = [];
+      }
       parent.children?.push(node);
       dirNodes.set(dir, node);
     }
@@ -1294,6 +1371,7 @@ export class ProjectIndex {
         lang: langForFile(rel),
         binary: info.binary,
         indexed,
+        ignored: info.ignored,
       });
     }
     const countFiles = (n: FileNode): number => {

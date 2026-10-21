@@ -1279,6 +1279,8 @@ export const zh: Record<string, string> = {
   'filetree.confidence': '（置信度 {n}）',
   'filetree.hotTitle': '热点：被多个文件引用，适合当阅读起点',
   'filetree.orphanTitle': '没人引用这个文件',
+  'filetree.ignoredFold': '已忽略 {n} 项',
+  'filetree.ignoredFoldTitle': '由 .gitignore / .wcrignore / 内置规则排除；点击展开或收起，双击灰色项也能收起',
   'filetree.noProject': '尚未打开项目',
   'filetree.noFiles': '项目里没有可读文件',
   'filetree.noFilesFiltered': '当前过滤条件下没有文件',

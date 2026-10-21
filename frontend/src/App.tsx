@@ -1087,6 +1087,7 @@ export default function App() {
               revealToken={treeRevealToken}
               collapseAllToken={treeCollapseToken}
               expandAllToken={treeExpandToken}
+              onLoadDir={async (path) => (await api.dirNodes(store.projectId ?? '', path)).nodes}
             />
           </>
         );

@@ -93,6 +93,8 @@ interface Props {
   collapseAllToken?: number;
   /** 2026-10-15：每次 +1 就展开所有文件夹（与收拢对称）。 */
   expandAllToken?: number;
+  /** 2026-10-21：展开 `lazy`（被忽略）目录时按需拉一层；不传则这些目录只展示不可展开。 */
+  onLoadDir?: (path: string) => Promise<FileNode[]>;
 }
 
 /** 右键菜单（视口坐标定位）：文件与目录都可开（目录用于复制路径 / 文件名）。 */
@@ -115,6 +117,47 @@ interface Dnd {
   dropOn: (dir: string) => (e: React.DragEvent) => void;
   /** 当前悬停的目录（高亮用；null = 没有）。 */
   target: string | null;
+}
+
+/**
+ * 2026-10-21：`lazy` 目录（被忽略的 node_modules / dist 这类）的按需加载 ——
+ * 扫描时不打探它们的内部，用户展开时才拉一层（`GET /dir`）。
+ */
+interface LazyApi {
+  /** 已拉过的子节点（path → 子节点）。 */
+  loaded: Map<string, FileNode[]>;
+  /** 发起一次加载（内部去重）。 */
+  request: (path: string) => void;
+}
+
+/**
+ * 2026-10-21 用户要求：一层里的灰色（被忽略）条目默认收成一行「已忽略 N 项」。
+ * 拆成两份，各自沿用 sortNodes 的顺序（normal：目录在前、文件在后）。
+ */
+export function splitIgnored(nodes: FileNode[]): { normal: FileNode[]; ignored: FileNode[] } {
+  const normal: FileNode[] = [];
+  const ignored: FileNode[] = [];
+  for (const n of nodes) (n.ignored ? ignored : normal).push(n);
+  return { normal, ignored };
+}
+
+/**
+ * 该层要不要折叠：
+ * - 全灰层（没有正常项，典型如 `node_modules` 内部）不折 —— 否则点开只看到另一行汇总，套娃；
+ * - 只有 1 个灰色项也不折 —— 为了一个条目多一次点击不值。
+ */
+export function shouldFoldIgnored(normalCount: number, ignoredCount: number): boolean {
+  return normalCount > 0 && ignoredCount > 1;
+}
+
+/** 灰色条目折叠组的状态（key = 该层所在目录的路径，项目根为空串）。 */
+interface IgnoredGroups {
+  /** 已展开的组。 */
+  open: Set<string>;
+  /** 过滤 / 只看时自动展开：否则命中的灰色文件被藏起来，等于搜不到。 */
+  auto: boolean;
+  toggle: (path: string) => void;
+  collapse: (path: string) => void;
 }
 
 /** 高亮命中过滤词的部分。 */
@@ -167,17 +210,26 @@ const ORIGIN_BADGE: Record<FileOrigin, { mark: string; titleKey: string } | null
 /**
  * 文件树的排序（2026-10-03 用户要求）：目录在前、文件在后，各自按名称升序。
  * 后端给的顺序是路径序，目录与文件会混在一起（`a.ts` 跑到 `a/` 前面），看起来乱。
+ * 2026-10-21 用户要求：被忽略的（淡色）沉到同类最后 —— 于是同层顺序是
+ * 目录（正常）→ 目录（忽略）→ 文件（正常）→ 文件（忽略）。
  */
 function sortNodes(nodes: FileNode[]): FileNode[] {
   return [...nodes].sort((a, b) => {
     if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+    const ai = a.ignored ? 1 : 0;
+    const bi = b.ignored ? 1 : 0;
+    if (ai !== bi) return ai - bi;
     return a.name.localeCompare(b.name);
   });
 }
 
 /** 过滤（搜索 / 只看）之后的子节点，按目录在前排序。 */
+function pickChildren(list: FileNode[], filter: string, decor: TreeDecor | undefined): FileNode[] {
+  return sortNodes(list.filter((c) => matchesFilter(c, filter) && matchesVisible(c, decor?.visible)));
+}
+
 function visibleChildren(node: FileNode, filter: string, decor: TreeDecor | undefined): FileNode[] {
-  return sortNodes((node.children ?? []).filter((c) => matchesFilter(c, filter) && matchesVisible(c, decor?.visible)));
+  return pickChildren(node.children ?? [], filter, decor);
 }
 
 /**
@@ -239,22 +291,10 @@ function FileBadges({ file, decor }: { file: string; decor?: TreeDecor }) {
   );
 }
 
-function TreeNode({
-  node,
-  depth,
-  activeFile,
-  onOpen,
-  filter,
-  decor,
-  dirVcs,
-  expanded,
-  collapsed,
-  flashPath,
-  toggle,
-  onMenu,
-  dnd,
-}: {
-  node: FileNode;
+/** 渲染一层（或一个节点）需要的全部上下文；`ChildRows` 与 `TreeNode` 共用，避免逐层摊 props。 */
+interface RowProps {
+  /** 本行所在层级的目录路径（项目根为 `''`）：灰色组按它记展开状态、双击按它收起。 */
+  parentKey: string;
   depth: number;
   activeFile: string | null;
   onOpen: (file: string) => void;
@@ -270,7 +310,13 @@ function TreeNode({
   toggle: (paths: string[]) => void;
   onMenu: (e: React.MouseEvent, path: string, isDir: boolean) => void;
   dnd: Dnd;
-}) {
+  lazy: LazyApi;
+  /** 2026-10-21：灰色（被忽略）条目的折叠组。 */
+  groups: IgnoredGroups;
+}
+
+function TreeNode(props: RowProps & { node: FileNode }) {
+  const { node, depth, parentKey, activeFile, onOpen, filter, decor, dirVcs, expanded, collapsed, flashPath, toggle, onMenu, dnd, lazy, groups } = props;
   if (!matchesFilter(node, filter) || !matchesVisible(node, decor?.visible)) return null;
 
   if (node.type === 'directory') {
@@ -283,22 +329,30 @@ function TreeNode({
     const tail = chain[chain.length - 1];
     const open = !collapsed.has(node.path) && (expanded.has(node.path) || auto);
     const label = open ? chain.map((n) => n.name).join('/') : node.name;
-    const children = visibleChildren(tail, filter, decor);
+    // 2026-10-21：被忽略目录的子节点是懒加载的（不在 tree 里），有拉过就用拉回来的那份
+    const lazyKids = lazy.loaded.get(tail.path);
+    const children = lazyKids ? pickChildren(lazyKids, filter, decor) : visibleChildren(tail, filter, decor);
     return (
       <div className="tree-dir">
         <div
-          className={`tree-row dir${vcsRowClass(dirVcs.get(tail.path))}${
+          className={`tree-row dir${vcsRowClass(dirVcs.get(tail.path))}${tail.ignored ? ' is-ignored' : ''}${
             dnd.target === tail.path ? ' drop-target' : ''
           }${flashPath === tail.path ? ' reveal-flash' : ''}`}
           data-path={tail.path}
           style={{ paddingLeft: depth * 12 + 6 }}
-          onClick={() => toggle(chain.map((n) => n.path))}
+          onClick={() => {
+            // 2026-10-21：懒加载目录（含懒加载出来的更深一层）展开时立刻拉一层；
+            // 已拉过 / 正在拉的由 request 自己短路
+            if (tail.lazy) lazy.request(tail.path);
+            toggle(chain.map((n) => n.path));
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             // 不让它冒到容器（容器的空白右键 = 对项目根操作）
             e.stopPropagation();
             onMenu(e, tail.path, true);
           }}
+          onDoubleClick={tail.ignored ? () => groups.collapse(parentKey) : undefined}
           title={dirTitle(tail, decor)}
           draggable
           onDragStart={dnd.dragStart(tail.path)}
@@ -321,27 +375,29 @@ function TreeNode({
           <span className="tree-name">
             <Highlight text={label} term={filter} />
           </span>
-          <span className="tree-count">{node.count ?? 0}</span>
+          {/* 懒加载的目录不知道里面几个（没下探），不报一个假的 0 */}
+          {tail.lazy ? null : <span className="tree-count">{node.count ?? 0}</span>}
         </div>
-        {open &&
-          children.map((c) => (
-            <TreeNode
-              key={c.path}
-              node={c}
-              depth={depth + 1}
-              activeFile={activeFile}
-              onOpen={onOpen}
-              filter={filter}
-              decor={decor}
-              dirVcs={dirVcs}
-              expanded={expanded}
-              collapsed={collapsed}
-              flashPath={flashPath}
-              toggle={toggle}
-              onMenu={onMenu}
-              dnd={dnd}
-            />
-          ))}
+        {open && (
+          <ChildRows
+            list={children}
+            depth={depth + 1}
+            parentKey={tail.path}
+            activeFile={activeFile}
+            onOpen={onOpen}
+            filter={filter}
+            decor={decor}
+            dirVcs={dirVcs}
+            expanded={expanded}
+            collapsed={collapsed}
+            flashPath={flashPath}
+            toggle={toggle}
+            onMenu={onMenu}
+            dnd={dnd}
+            lazy={lazy}
+            groups={groups}
+          />
+        )}
       </div>
     );
   }
@@ -351,6 +407,8 @@ function TreeNode({
     'file',
     activeFile === node.path ? 'active' : '',
     flashPath === node.path ? 'reveal-flash' : '',
+    // 2026-10-21：被忽略（.gitignore / 内置黑名单里）的文件照常能点开，只是画得最淡
+    node.ignored ? 'is-ignored' : '',
     decor?.vcs?.has(node.path) ? VCS_CLASS[decor.vcs.get(node.path) ?? 'added'] : '',
   ]
     .filter(Boolean)
@@ -368,6 +426,7 @@ function TreeNode({
         e.stopPropagation();
         onMenu(e, node.path, false);
       }}
+      onDoubleClick={node.ignored ? () => groups.collapse(parentKey) : undefined}
       title={node.path}
       draggable
       onDragStart={dnd.dragStart(node.path)}
@@ -379,6 +438,43 @@ function TreeNode({
       </span>
       <FileBadges file={node.path} decor={decor} />
     </div>
+  );
+}
+
+/**
+ * 渲染一层子节点（2026-10-21 用户要求）：正常项照旧；灰色项在本层「有正常项且不止一个」时
+ * 收成一行「已忽略 N 项」，点那行展开 / 收起，灰色项双击也能收起。
+ * 全灰层（如 node_modules 内部）与只有一个灰色项的层直接平铺 —— 折了反而多一次点击。
+ */
+function ChildRows({ list, ...row }: RowProps & { list: FileNode[] }) {
+  const { t } = useI18n();
+  const { normal, ignored } = splitIgnored(list);
+  const canFold = shouldFoldIgnored(normal.length, ignored.length);
+  // 过滤 / 只看时自动展开：否则命中的灰色文件被藏起来，等于搜不到
+  const open = !canFold || row.groups.auto || row.groups.open.has(row.parentKey);
+  return (
+    <>
+      {normal.map((c) => (
+        <TreeNode key={c.path} {...row} node={c} />
+      ))}
+      {canFold && (
+        <div
+          className="tree-row dir ignored-fold"
+          style={{ paddingLeft: row.depth * 12 + 6 }}
+          onClick={() => row.groups.toggle(row.parentKey)}
+          title={t('filetree.ignoredFoldTitle')}
+        >
+          <span className={`chevron ${open ? 'open' : ''}`} aria-hidden>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M6 4l4 4-4 4V4z" />
+            </svg>
+          </span>
+          <span className="tree-name">{t('filetree.ignoredFold', { n: ignored.length })}</span>
+        </div>
+      )}
+      {open &&
+        ignored.map((c) => <TreeNode key={c.path} {...row} node={c} />)}
+    </>
   );
 }
 
@@ -415,6 +511,7 @@ export function FileTree({
   revealToken = 0,
   collapseAllToken = 0,
   expandAllToken = 0,
+  onLoadDir,
 }: Props) {
   const { t } = useI18n();
   const prefs = usePrefs();
@@ -435,6 +532,23 @@ export function FileTree({
   const [pendingReveal, setPendingReveal] = useState<{ path: string; nonce: number } | null>(null);
   const [flashPath, setFlashPath] = useState<string | null>(null);
   const flashTimer = useRef<number | null>(null);
+  /** 2026-10-21：被忽略目录的懒加载结果（path → 子节点）；key 不在里面 = 还没拉过。 */
+  const [lazyLoaded, setLazyLoaded] = useState<Map<string, FileNode[]>>(() => new Map());
+  /** 正在拉的目录（防止重复请求）。 */
+  const lazyBusy = useRef<Set<string>>(new Set());
+
+  /** 拉一层（只对 `lazy` 目录有意义）：失败就当空目录，不让面板报错。 */
+  const loadDir = useCallback(
+    (path: string) => {
+      if (!onLoadDir || lazyBusy.current.has(path) || lazyLoaded.has(path)) return;
+      lazyBusy.current.add(path);
+      onLoadDir(path)
+        .then((nodes) => setLazyLoaded((prev) => new Map(prev).set(path, nodes)))
+        .catch(() => setLazyLoaded((prev) => new Map(prev).set(path, [])))
+        .finally(() => lazyBusy.current.delete(path));
+    },
+    [onLoadDir, lazyLoaded],
+  );
 
   const canDrop = (dir: string) => {
     const src = dragSource.current;
@@ -596,6 +710,49 @@ export function FileTree({
 
   // 2026-10-20：目录颜色不再是固定蓝，改为「与文件同色 + 加粗」，未提交变更才染状态色。
   const children = useMemo(() => sortNodes(tree?.children ?? []), [tree]);
+
+  /** 2026-10-21：树上的 `lazy` 目录（被忽略的 node_modules / dist 那类）——展开时才拉一层。 */
+  const lazyDirs = useMemo(() => {
+    const out = new Set<string>();
+    const walk = (n: FileNode) => {
+      if (n.lazy) out.add(n.path);
+      for (const c of n.children ?? []) if (c.type === 'directory') walk(c);
+    };
+    if (tree) walk(tree);
+    return out;
+  }, [tree]);
+
+  // 用户把懒加载目录点开（或「展开全部」把它放了出来）就拉一层；已拉过的由 loadDir 自己短路。
+  useEffect(() => {
+    for (const path of expanded) if (lazyDirs.has(path)) loadDir(path);
+  }, [expanded, lazyDirs, loadDir]);
+
+  const lazyApi: LazyApi = { loaded: lazyLoaded, request: loadDir };
+
+  /**
+   * 2026-10-21：灰色（被忽略）折叠组的展开状态。key = 该层所在目录（根为 `''`），
+   * 默认全收（这就是「默认折叠」）；过滤 / 只看时自动展开，不把命中项藏起来。
+   */
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
+  const groups: IgnoredGroups = {
+    open: openGroups,
+    auto: Boolean(filter || decor?.visible),
+    toggle: (path) =>
+      setOpenGroups((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return next;
+      }),
+    // 双击灰色项 = 收起本层组（过滤态下被 auto 盖住，不收）
+    collapse: (path) =>
+      setOpenGroups((prev) => {
+        if (!prev.has(path)) return prev;
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      }),
+  };
 
   /**
    * 目录 → 子树里最强 git 状态（IDEA 口径：目录里只要有一处未提交，目录也跟着染色）。
@@ -809,24 +966,24 @@ export function FileTree({
         (empty ? (
           <div className="panel-empty">{children.length ? t('filetree.noFilesFiltered') : t('filetree.noFiles')}</div>
         ) : (
-          children.map((c) => (
-            <TreeNode
-              key={c.path}
-              node={c}
-              depth={1}
-              activeFile={activeFile}
-              onOpen={onOpen}
-              filter={filter}
-              decor={decor}
-              dirVcs={dirVcs}
-              expanded={expanded}
-              collapsed={collapsed}
-              flashPath={flashPath}
-              toggle={toggle}
-              dnd={dnd}
-              onMenu={(e, path, isDir) => setMenu({ path, isDir, x: e.clientX, y: e.clientY })}
-            />
-          ))
+          <ChildRows
+            list={children}
+            depth={1}
+            parentKey=""
+            activeFile={activeFile}
+            onOpen={onOpen}
+            filter={filter}
+            decor={decor}
+            dirVcs={dirVcs}
+            expanded={expanded}
+            collapsed={collapsed}
+            flashPath={flashPath}
+            toggle={toggle}
+            dnd={dnd}
+            lazy={lazyApi}
+            groups={groups}
+            onMenu={(e, path, isDir) => setMenu({ path, isDir, x: e.clientX, y: e.clientY })}
+          />
         ))}
       {menu && (
         <>

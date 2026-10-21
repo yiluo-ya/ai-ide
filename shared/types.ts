@@ -109,6 +109,13 @@ export interface FileNode {
   binary?: boolean;
   /** 是否已进符号索引；false = 非源码 / 被规则忽略 / 过大（点开时给明确理由）。 */
   indexed?: boolean;
+  /**
+   * 被忽略规则命中（内置黑名单 / .gitignore / .wcrignore / 设置里的自定义规则）。
+   * 2026-10-21：这类条目照常出现在文件树里，只是画得最淡（前端 `is-ignored`）。
+   */
+  ignored?: boolean;
+  /** 子节点还没读（被忽略目录首次出现在树上时）：展开时按需拉一层，见 `GET /dir`。 */
+  lazy?: boolean;
   /** 目录的子节点（文件为 undefined）。 */
   children?: FileNode[];
 }

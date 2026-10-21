@@ -180,6 +180,8 @@ export function createApp(
       lookupProject: 'GET /api/projects/lookup?root=<abs path>',
       projectStatus: 'GET /api/projects/:id/status',
       fileTree: 'GET /api/projects/:id/files',
+      allFiles: 'GET /api/projects/:id/all-files',
+      dirList: 'GET /api/projects/:id/dir?path=<rel dir>（被忽略目录的懒加载一层）',
       fileText: 'GET /api/projects/:id/file?path=<rel path>',
       // FR-0009：文件树的新建 / 重命名（含移动）/ 复制
       fileCreate: 'POST /api/projects/:id/file { path, text? }',
@@ -709,6 +711,18 @@ export function createApp(
     // 同上：不让文件树在「还没扫过」时返回空树。
     await project.ensureScanned();
     return c.json({ tree: project.buildAllFileTree(), status: project.status });
+  });
+
+  /**
+   * 2026-10-21：被忽略目录的懒加载 —— 文件树里它们是 `lazy` 节点，点开时才读一层。
+   * 只读盘，不建索引、不改扫描结果；路径必经 `resolveInside`。
+   */
+  app.get('/api/projects/:id/dir', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const rel = (c.req.query('path') ?? '').replace(/^\/+|\/+$/g, '');
+    if (project.resolveInside(rel) === null) return fail(c, 400, 'path_escape', '路径越界');
+    return c.json({ nodes: await project.listDir(rel) });
   });
 
   // ------------------------------------------------------- API 面板（FR-0001）
