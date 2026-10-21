@@ -100,12 +100,10 @@ function MessageRow({ message }: { message: AgentMessage }) {
 export function AgentView({
   projectId,
   projectName,
-  onBack,
   onInstallPi,
 }: {
   projectId: string;
   projectName: string;
-  onBack: () => void;
   /** FR-0013：错误里带了安装命令时，把「在终端安装」接进来（只填入，不回车）。 */
   onInstallPi?: (command: string) => void;
 }) {
@@ -211,9 +209,6 @@ export function AgentView({
             )}
           </div>
         )}
-        <button className="btn ghost" onClick={onBack} title={t('agent.backToReadingHint')}>
-          {t('app.backToCode')}
-        </button>
       </header>
 
       {error && (

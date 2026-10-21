@@ -170,9 +170,13 @@ export default function App() {
 
   // 项目地图：主区视图（map = 强制看地图）、依赖图浮层、文件树叠加过滤（M9/M10）
   // 2026-10-03：主区可在「代码 / 地图 / Agent 会话」之间切；agent 不入 URL
-  const [mainView, setMainView] = useState<'auto' | 'map' | 'agent'>(() =>
-    snapshot.get('view') === 'map' ? 'map' : 'auto',
-  );
+  // 2026-10-21 用户反馈：刷新后停在 code agent 上、主区却掉回代码视图（mainView 不进 URL，
+  // 存档里只有活动栏的选中视图）。改为按活动栏当前视图认领：某侧选中的就是 agent = 进来还在 agent 里。
+  const [mainView, setMainView] = useState<'auto' | 'map' | 'agent'>(() => {
+    // 深链带文件（`?file=`）= 明确要看那个文件，优先代码视图，不被上次的 agent 模式抢走
+    if (!snapshot.get('file') && (layout.active.left === 'agent' || layout.active.right === 'agent')) return 'agent';
+    return snapshot.get('view') === 'map' ? 'map' : 'auto';
+  });
   /** 是否停在 code agent 会话上 —— 终端位置随之切换（2026-10-21，见下方终端宿主）。 */
   const agentMode = mainView === 'agent';
   const [graphOpen, setGraphOpen] = useState(() => snapshot.get('graph') === '1');
@@ -1191,7 +1195,6 @@ export default function App() {
         return store.projectId ? (
           <AgentSessions
             projectId={store.projectId}
-            onBack={backToCode}
             onOpen={showAgent}
           />
         ) : (
@@ -1352,7 +1355,6 @@ export default function App() {
             <AgentView
               projectId={store.projectId ?? ''}
               projectName={store.project?.name ?? store.projectId ?? ''}
-              onBack={backToCode}
               onInstallPi={installPiInTerminal}
             />
           ) : (

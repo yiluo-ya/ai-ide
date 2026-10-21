@@ -188,8 +188,9 @@ the real command from the language instead of only sending the path).
 
 The “Code sessions” tab in the left panel turns the main area into Agent mode — **sessions on the
 left, content in the middle**: talk in plain language and let it read / change / generate code;
-“Back to code” returns to reading mode (same page, not a new window). Nothing sends a model request
-unless you enter this mode.
+Picking any other view in the left panel (files / search / source control…) returns to reading mode
+(same page, not a new window), and a page reload keeps you in Agent mode. Nothing sends a model
+request unless you enter this mode.
 
 - A deliberately **minimal** built-in agent: **one loop + one tool set** (no skills, no MCP, no
   sandbox), modelled on the core of pi; the loop is “call the model → execute any tools → feed

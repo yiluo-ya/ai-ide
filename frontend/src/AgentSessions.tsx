@@ -21,11 +21,9 @@ interface Pick {
 
 export function AgentSessions({
   projectId,
-  onBack,
   onOpen,
 }: {
   projectId: string;
-  onBack: () => void;
   /** 选中某个会话：主区切到对话内容（左栏只列会话，见 2026-10-03 的布局调整）。 */
   onOpen?: () => void;
 }) {
@@ -88,9 +86,6 @@ export function AgentSessions({
     <div className="ag-side">
       <div className="ag-side-head">
         <span className="ag-side-title">Code Agent</span>
-        <button className="btn ghost small" onClick={onBack} title={t('agent.backToReadingTitle')}>
-          {t('app.backToCode')}
-        </button>
       </div>
 
       <div className="ag-side-list">
