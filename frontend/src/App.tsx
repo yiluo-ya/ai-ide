@@ -330,6 +330,20 @@ export default function App() {
   }, [agentMode]);
 
   /**
+   * 刷新后重新认领模式（见 mainView 初值）：若落在 agent，右栏必须是「终端」且展开——
+   * 否则没有 terminal 槽位可搬，宿主会缩回屏幕外的锚点里（表现：终端凭空消失）。
+   * 只校正一次（挂载时）：之后用户自己把右栏切去看 git / 接口就不该再抢回来。
+   */
+  const dockCalibratedRef = useRef(false);
+  useEffect(() => {
+    if (dockCalibratedRef.current) return;
+    dockCalibratedRef.current = true;
+    if (!agentMode) return;
+    setChangesDockOpen(true);
+    if (layout.active.right !== 'terminal') setActiveView('right', 'terminal');
+  }, [agentMode, layout.active.right]);
+
+  /**
    * 非 agent 模式下终端住在底部面板，右栏不该停在「终端」：把存档里的选中项挪到该侧第一个别的视图。
    * 两个入口都要盖住 —— 刷页（此时 codeDockViewRef 已丢）+ 退出 agent（含在 agent 里刷过页、
    * 没有「进 agent 前的视图」可还原那种情况，否则右栏会留一个空槽）。
