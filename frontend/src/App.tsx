@@ -914,8 +914,8 @@ export default function App() {
     const hot = new Set((mapOverview?.hot ?? []).map((h) => h.file));
     // M9.3：SSE 刚报过的文件（mapState 里 20 秒后自动撤掉）
     const pulse = new Set(Object.keys(mapPulse));
-    // 2026-10-20 用户要求（IDEA 口径）：文件树按 git 状态染色 —— 新增绿 / 修改蓝 / 删除灰 /
-    // 重命名蓝 / 冲突红；被忽略的文件不在清单里，不染色。目录汇总在 FileTree 内部做。
+    // 2026-10-20 用户要求（IDEA 口径）：文件树按 git 状态染色 —— 新增绿 / 删除灰 / 冲突红；
+    // 2026-10-21 用户要求：修改 / 重命名不再染色。被忽略的文件由后端标 ignored，本处不乱猜。
     const vcs = new Map<string, GitChangeEntry['status']>();
     for (const entry of changesEntries ?? []) vcs.set(entry.file, entry.status);
     // 2026-10-03 用户要求去掉「已读 / 未读」标准：不再往文件树叠 read / ignored，也不再按未读过滤。

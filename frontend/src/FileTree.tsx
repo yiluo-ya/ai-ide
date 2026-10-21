@@ -31,16 +31,23 @@ export interface TreeDecor {
   vcs?: Map<string, GitChangeEntry['status']>;
 }
 
-/** 状态 → 行上的附加类名（颜色在 filetree.css 里用 `--vcs-*` 变量定义）。 */
+/**
+ * 状态 → 行上的附加类名（颜色在 filetree.css 里用 `--vcs-*` 变量定义）。
+ * 2026-10-21 用户要求：**修改 / 重命名不再染色**（读代码时改一下文件就整行变色太干扰），
+ * 只剩新增绿 / 删除灰 / 冲突红。空串 = 该状态不画颜色。
+ */
 const VCS_CLASS: Record<GitChangeEntry['status'], string> = {
   added: 'vcs-add',
-  modified: 'vcs-mod',
+  modified: '',
   deleted: 'vcs-del',
-  renamed: 'vcs-ren',
+  renamed: '',
   conflicted: 'vcs-conflict',
 };
 
-/** 目录汇总用：子项状态混在一起时取最「显眼」的那个（冲突 > 修改 > 重命名 > 新增 > 删除）。 */
+/** 会染色的状态：目录汇总只汇这些，否则「目录里只有修改」会把下面的新增/删除盖掉。 */
+const VCS_PAINTED = new Set<GitChangeEntry['status']>(['added', 'deleted', 'conflicted']);
+
+/** 目录汇总用：子项状态混在一起时取最「显眼」的那个（冲突 > 新增 > 删除；另两档不参与，见 VCS_PAINTED）。 */
 const VCS_RANK: Record<GitChangeEntry['status'], number> = {
   conflicted: 5,
   modified: 4,
@@ -49,9 +56,10 @@ const VCS_RANK: Record<GitChangeEntry['status'], number> = {
   deleted: 1,
 };
 
-/** 行类名后缀：没有状态就是空串。 */
+/** 行类名后缀：没有状态、或该状态不染色就是空串。 */
 function vcsRowClass(status: GitChangeEntry['status'] | undefined): string {
-  return status ? ` ${VCS_CLASS[status] ?? VCS_CLASS.added}` : '';
+  const cls = status ? VCS_CLASS[status] : '';
+  return cls ? ` ${cls}` : '';
 }
 
 interface Props {
@@ -757,10 +765,13 @@ export function FileTree({
   /**
    * 目录 → 子树里最强 git 状态（IDEA 口径：目录里只要有一处未提交，目录也跟着染色）。
    * 只往上汇总，不改文件自身的状态（文件行直接用 decor.vcs）。
+   * 2026-10-21：只汇「会染色的状态」—— 修改 / 重命名不画色，否则一个改过的子目录
+   * 会把同级的新增 / 删除盖掉，看起来像整棵都没变动。
    */
   const dirVcs = useMemo(() => {
     const out = new Map<string, GitChangeEntry['status']>();
     for (const [file, status] of decor?.vcs ?? []) {
+      if (!VCS_PAINTED.has(status)) continue;
       // `''` 是项目根那一行：它也是祖先（ancestorDirs 只给真实目录段）
       for (const dir of ['', ...ancestorDirs(file)]) {
         const prev = out.get(dir);

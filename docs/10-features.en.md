@@ -342,9 +342,10 @@ unquoted identifiers fold to lower case, quoted ones keep their case); resolutio
   A new theme = one entry in each of those three places, no component changes
 - **File tree coloured by git status** (IDEA convention, 2026-10-20): directories and files **share one
   colour** (bold weight + folder icon tell them apart; no more “directories are blue”), colour only
-  expresses workspace status — added green, modified / renamed blue, deleted grey, conflicted red;
+  expresses workspace status — added green, deleted grey, conflicted red; **modified / renamed are no
+  longer coloured** (2026-10-21, user request: recolouring a row on every edit is too noisy while reading);
   a directory whose subtree has anything uncommitted takes the strongest status in that subtree
-  (`dirVcs` in `FileTree.tsx`; priority conflicted > modified > renamed > added > deleted). The statuses
+  (`dirVcs` in `FileTree.tsx`; priority conflicted > added > deleted). The statuses
   come from the same `gitChanges` feed the Changes panel uses, so ignored files never show up (and are
   never coloured). Every theme ships its own `--vcs-*` values (`styles.css`)
 - **Settings & i18n**: “Model” and “Settings” sit side by side in the top bar; Settings groups
