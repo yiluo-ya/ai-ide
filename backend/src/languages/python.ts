@@ -394,6 +394,11 @@ export const python: LanguageSpec = {
     import_from_statement(node, ctx) {
       const moduleNode = node.childForFieldName('module_name');
       const moduleText = moduleNode ? moduleNode.text : '';
+      // `from . import X` / `from .. import X`：module_name 是纯相对点（没有子模块名），
+      // 此时 X 是「当前包（或其上级）里的子模块」，不是模块成员。
+      // 把 dots 前缀拼上 X 形成完整模块说明符（如 `.model`），并登记为 module 导入，
+      // 否则 module 只剩 `.`，resolveModule 无法定位 X.py，跳转会误判成外部依赖。
+      const relativeDots = /^\.+$/.test(moduleText);
       for (const child of node.namedChildren as any[]) {
         if (
           moduleNode &&
@@ -411,26 +416,44 @@ export const python: LanguageSpec = {
           const alias = child.childForFieldName('alias');
           const importedName = name ? name.text : '';
           const localName = alias ? alias.text : firstSegment(importedName);
-          ctx.addImport({
-            localName,
-            module: moduleText,
-            importedName,
-            kind: 'named',
-            range: alias ? ctx.rangeOf(alias) : ctx.rangeOf(name ?? child),
-          });
+          ctx.addImport(
+            relativeDots
+              ? {
+                  localName,
+                  module: moduleText + importedName,
+                  kind: 'module',
+                  range: alias ? ctx.rangeOf(alias) : ctx.rangeOf(name ?? child),
+                }
+              : {
+                  localName,
+                  module: moduleText,
+                  importedName,
+                  kind: 'named',
+                  range: alias ? ctx.rangeOf(alias) : ctx.rangeOf(name ?? child),
+                },
+          );
           ctx.addRef(alias ?? name ?? child, { kind: 'import', name: localName });
           continue;
         }
         if (child.type === 'dotted_name' || child.type === 'identifier') {
           const importedName = child.text;
           const localName = firstSegment(importedName);
-          ctx.addImport({
-            localName,
-            module: moduleText,
-            importedName,
-            kind: 'named',
-            range: ctx.rangeOf(child),
-          });
+          ctx.addImport(
+            relativeDots
+              ? {
+                  localName,
+                  module: moduleText + importedName,
+                  kind: 'module',
+                  range: ctx.rangeOf(child),
+                }
+              : {
+                  localName,
+                  module: moduleText,
+                  importedName,
+                  kind: 'named',
+                  range: ctx.rangeOf(child),
+                },
+          );
           ctx.addRef(child, { kind: 'import', name: localName });
         }
       }
