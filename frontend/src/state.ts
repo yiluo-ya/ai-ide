@@ -134,6 +134,8 @@ interface State {
   fileLang: string;
   fileContent: string;
   fileLoading: boolean;
+  /** 阅读模式（图片 / 音视频 / PDF / office）：非 null 时编辑器区渲染阅读面板而非 Monaco。 */
+  readerKind: ReaderKind | null;
   symbols: SymbolInfo[];
   searchHits: SearchHit[];
   searchBusy: boolean;
@@ -454,6 +456,25 @@ function snapToSymbol(
 /** 文本预览的头部截取上限（与后端 VIEW_PREVIEW_BYTES 一致，仅用于提示文案展示）。 */
 export const DOC_PREVIEW_MAX_BYTES = 1 * 1024 * 1024;
 
+/** 阅读模式类型：浏览器能 native 渲染的二进制内容（走 /raw 流式加载）。 */
+export type ReaderKind = 'image' | 'video' | 'audio' | 'pdf' | 'office';
+
+const IMAGE_LIKE = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
+const VIDEO_LIKE = /\.(mp4|webm|ogg|mov|avi|mkv|m4v)$/i;
+const AUDIO_LIKE = /\.(mp3|wav|m4a|flac|aac|opus|weba)$/i;
+const PDF_LIKE = /\.pdf$/i;
+const OFFICE_LIKE = /\.(docx?|xlsx?|pptx?|odt|ods|odp)$/i;
+
+/** 按扩展名判断阅读模式类型；null = 走原文本编辑器链路。 */
+export function readerKindOf(file: string): ReaderKind | null {
+  if (IMAGE_LIKE.test(file)) return 'image';
+  if (VIDEO_LIKE.test(file)) return 'video';
+  if (AUDIO_LIKE.test(file)) return 'audio';
+  if (PDF_LIKE.test(file)) return 'pdf';
+  if (OFFICE_LIKE.test(file)) return 'office';
+  return null;
+}
+
 function formatBytes(n: number): string {
   if (n < 1024) return translate('state.bytes', { n });
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -556,6 +577,7 @@ export const useStore = create<State>((set, get) => ({
   fileLang: 'plaintext',
   fileContent: '',
   fileLoading: false,
+  readerKind: null,
   symbols: [],
   searchHits: [],
   searchBusy: false,
@@ -638,6 +660,7 @@ export const useStore = create<State>((set, get) => ({
       tree: null,
       openFile: null,
       fileContent: '',
+      readerKind: null,
       symbols: [],
       searchHits: [],
       notice: null,
@@ -795,6 +818,37 @@ export const useStore = create<State>((set, get) => ({
     const targetCol = col ?? memory?.col ?? 1;
     // 先只置 loading：openFile 与 fileLang 必须同时更新，否则 Editor 会先用旧语言建 model
     set({ fileLoading: true });
+    // 阅读模式：图片 / 音视频 / PDF / office 等二进制走 /raw 流式渲染，不进文本正文链路
+    const kind = readerKindOf(file);
+    if (kind) {
+      set({
+        openFile: file,
+        fileLoading: false,
+        readerKind: kind,
+        notice: null,
+        saveStatus: 'idle',
+        fileTruncated: false,
+        reveal: {
+          file,
+          line: targetLine,
+          col: targetCol,
+          endLine,
+          endCol,
+          token: Date.now(),
+          scrollTop: line == null ? memory?.scrollTop : undefined,
+        },
+      });
+      if (!suppressed) pushHistoryEntry(file, targetLine, targetCol);
+      const tabs = [
+        { file, line: targetLine, col: targetCol },
+        ...get().tabs.filter((t) => t.file !== file),
+      ].slice(0, TAB_LIMIT);
+      set({ tabs });
+      useGuideStore.getState().rememberRead(file, targetLine, targetCol, id);
+      scheduleSnapshotWrite(id);
+      syncUrl(id, file, targetLine, targetCol, suppressed ? 'replace' : 'push');
+      return;
+    }
     try {
       const res = await api.fileText(id, file);
       // 上次保存失败留下的正文优先（不能拿磁盘上的旧内容换掉用户还没落盘的手改）
@@ -807,6 +861,8 @@ export const useStore = create<State>((set, get) => ({
         fileContent: pending ?? fresh,
         fileLang: res.lang,
         fileLoading: false,
+        // 从阅读模式（图片 / 视频）切回文本：清掉 readerKind，否则会错误渲染阅读面板
+        readerKind: null,
         savedText: fresh,
         fileTruncated: res.truncated,
         fileMtimeMs: res.mtimeMs,

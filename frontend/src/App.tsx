@@ -39,6 +39,7 @@ import { monaco, setProviderContext } from './monaco-setup';
 import { listenPopState, showFlash, showToast, useStore } from './state';
 import { SummaryBar } from './SummaryBar';
 import { Dialog } from './Dialog';
+import { FileReaderPanel } from './FileReaderPanel';
 import { initHostBridge } from './bridge';
 import { useMapStore } from './mapState';
 import { purgeLegacyReadState } from './marks';
@@ -1546,6 +1547,9 @@ export default function App() {
                     onOpenChanges={() => openPanel('git')}
                   />
                 ) : store.openFile ? (
+                  store.readerKind ? (
+                    <FileReaderPanel projectId={store.projectId!} file={store.openFile} kind={store.readerKind} />
+                  ) : (
                   <div className={`panes ${store.secondary ? 'split' : ''}`}>
                     <div className="pane">
                       <Editor
@@ -1611,6 +1615,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                  )
                 ) : (
                   // 死分支留给兜底：无项目时同样是三步引导（正常路径下主区总是项目地图）
                   <div className="welcome">

@@ -1,6 +1,8 @@
 /** HTTP 路由：项目 / 文件 / 代码智能 / 文本搜索 / SSE 事件。 */
 import path from 'node:path';
 import os from 'node:os';
+import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
 import fsp from 'node:fs/promises';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
@@ -154,6 +156,34 @@ const fail = (
   message?: string,
   extra?: Record<string, unknown>,
 ) => c.json({ error, message: message ?? error, ...(extra ?? {}) } satisfies ApiError, status);
+
+/** 阅读模式（/raw）的 Content-Type：按扩展名给浏览器能 native 渲染的类型。 */
+const RAW_CONTENT_TYPES: Array<[RegExp, string]> = [
+  [/\.png$/i, 'image/png'],
+  [/\.jpe?g$/i, 'image/jpeg'],
+  [/\.gif$/i, 'image/gif'],
+  [/\.webp$/i, 'image/webp'],
+  [/\.svg$/i, 'image/svg+xml'],
+  [/\.bmp$/i, 'image/bmp'],
+  [/\.ico$/i, 'image/x-icon'],
+  [/\.avif$/i, 'image/avif'],
+  [/\.mp4$/i, 'video/mp4'],
+  [/\.webm$/i, 'video/webm'],
+  [/\.ogg$/i, 'video/ogg'],
+  [/\.mov$/i, 'video/quicktime'],
+  [/\.mp3$/i, 'audio/mpeg'],
+  [/\.wav$/i, 'audio/wav'],
+  [/\.m4a$/i, 'audio/mp4'],
+  [/\.flac$/i, 'audio/flac'],
+  [/\.pdf$/i, 'application/pdf'],
+];
+
+function rawContentType(rel: string): string {
+  for (const [re, type] of RAW_CONTENT_TYPES) {
+    if (re.test(rel)) return type;
+  }
+  return 'application/octet-stream';
+}
 
 export function createApp(
   registry: ProjectRegistry,
@@ -832,6 +862,66 @@ export function createApp(
       mtimeMs = null;
     }
     return c.json({ file: rel, lang: file.lang, text: file.text, size: file.size, mtimeMs, truncated: file.truncated });
+  });
+
+  /**
+   * 2026-10-23 用户要求：给图片 / 音视频 / PDF 等加「阅读模式」。
+   * 这些内容浏览器 native 就能渲染，但不能走 `/file`（那是文本正文，二进制拿不到）；
+   * 这里按扩展名给正确的 Content-Type 并支持 Range，`<img>` / `<video>` / `<iframe>` 直接指过来即可流式加载。
+   * 只限「项目内」路径（`resolveInside`），不开放任意磁盘文件。
+   */
+  app.get('/api/projects/:id/raw', async (c) => {
+    const project = registry.get(c.req.param('id'));
+    if (!project) return fail(c, 404, 'project_not_found');
+    const rel = c.req.query('path');
+    if (!rel) return fail(c, 400, 'bad_request', 'path is required');
+    const abs = project.resolveInside(rel);
+    if (!abs) return fail(c, 400, 'path_escape', '路径越界');
+    let stat;
+    try {
+      stat = await fsp.stat(abs);
+    } catch {
+      return fail(c, 404, 'file_not_found', `无法读取：${rel}`);
+    }
+    if (!stat.isFile()) return fail(c, 404, 'file_not_found', `不是文件：${rel}`);
+
+    const type = rawContentType(rel);
+    const headers: Record<string, string> = {};
+    headers['Content-Type'] = type;
+    headers['Accept-Ranges'] = 'bytes';
+
+    // Range：媒体拖动 / 断点续播靠它；不规范或越界的 Range 一律回 416。
+    const range = c.req.header('range');
+    const total = stat.size;
+    if (range) {
+      const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+      if (!m) return c.body(null, 416, { 'Content-Range': `bytes */${total}` });
+      let start: number;
+      let end: number;
+      if (m[1] === '' && m[2] === '') {
+        return c.body(null, 416, { 'Content-Range': `bytes */${total}` });
+      } else if (m[1] === '') {
+        // 后缀范围：最后 N 字节
+        const n = Number(m[2]);
+        if (!Number.isFinite(n) || n <= 0) return c.body(null, 416, { 'Content-Range': `bytes */${total}` });
+        start = Math.max(0, total - n);
+        end = total - 1;
+      } else {
+        start = Number(m[1]);
+        end = m[2] === '' ? total - 1 : Math.min(Number(m[2]), total - 1);
+      }
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= total) {
+        return c.body(null, 416, { 'Content-Range': `bytes */${total}` });
+      }
+      headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
+      headers['Content-Length'] = String(end - start + 1);
+      const stream = createReadStream(abs, { start, end });
+      return c.body(Readable.toWeb(stream) as ReadableStream, 206, headers);
+    }
+
+    headers['Content-Length'] = String(total);
+    const stream = createReadStream(abs);
+    return c.body(Readable.toWeb(stream) as ReadableStream, 200, headers);
   });
 
   /**

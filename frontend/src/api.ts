@@ -305,6 +305,9 @@ export const api = {
       `/projects/${id}/file?path=${encodeURIComponent(path)}`,
     ),
 
+  /** 阅读模式（图片 / 音视频 / PDF）的原始字节 URL：`<img>` / `<video>` 直接指过去即可。 */
+  rawUrl: (id: string, path: string) => `${BASE}/projects/${id}/raw?path=${encodeURIComponent(path)}`,
+
   /**
    * 2026-10-10：把编辑器里的正文写回磁盘。
    * `baseMtimeMs` 是打开文件时拿到的 mtime：磁盘在编辑期间被改过 → 409（看 `ApiRequestError.status`）。

@@ -3147,6 +3147,96 @@ mark {
   top: 25px;
 }
 
+/* ------------------------------------------------- 阅读模式（图片 / 音视频 / PDF / office） */
+
+.reader-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg, #1e1e1e);
+  overflow: auto;
+}
+
+.reader-image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.reader-video video {
+  max-width: 100%;
+  max-height: 100%;
+  outline: none;
+}
+
+.reader-audio {
+  flex-direction: column;
+  gap: 20px;
+}
+
+.reader-audio-meta {
+  color: var(--fg-dim);
+  font-size: 13px;
+  word-break: break-all;
+  max-width: 80%;
+  text-align: center;
+}
+
+.reader-audio audio {
+  width: 80%;
+  max-width: 560px;
+}
+
+.reader-pdf iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.reader-unsupported {
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+  padding: 24px;
+}
+
+.reader-unsupported-icon {
+  font-size: 42px;
+}
+
+.reader-unsupported-file {
+  font-size: 14px;
+  color: var(--fg);
+  word-break: break-all;
+  max-width: 80%;
+}
+
+.reader-unsupported-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg-dim);
+  line-height: 1.6;
+  max-width: 440px;
+}
+
+/* md 预览：内嵌一个白底文档视图，padding 留给正文呼吸 */
+.reader-md {
+  justify-content: stretch;
+  align-items: stretch;
+  padding: 0;
+}
+
+.reader-md-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
 /* ------------------------------------------------- 搜索：范围 / 历史 / 全屏（N11/N13/N14） */
 
 .search-input-row {
