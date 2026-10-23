@@ -40,6 +40,7 @@ import { listenPopState, showFlash, showToast, useStore } from './state';
 import { SummaryBar } from './SummaryBar';
 import { Dialog } from './Dialog';
 import { FileReaderPanel } from './FileReaderPanel';
+import { MarkdownPreview } from './MarkdownPreview';
 import { initHostBridge } from './bridge';
 import { useMapStore } from './mapState';
 import { purgeLegacyReadState } from './marks';
@@ -553,6 +554,9 @@ export default function App() {
   /** W3 / G7.3：整文件 blame 视图开关 + 当前文件的 blame（按文件缓存，光标移动不重新拉）。 */
   const [blameOn, setBlameOn] = useState(false);
   const [blame, setBlame] = useState<BlameResult | null>(null);
+  /** md 文件「源码 / 预览」切换（切文件即回源码）。 */
+  const [mdPreview, setMdPreview] = useState(false);
+  const isMdFile = store.openFile ? /\.(md|markdown)$/i.test(store.openFile) : false;
   const blameOnRef = useRef(false);
   blameOnRef.current = blameOn;
   /** W3 / G7.3：光标所在行的 blame（只在开着 blame 视图时取）。 */
@@ -689,6 +693,11 @@ export default function App() {
       cancelled = true;
     };
   }, [blameOn, store.projectId, store.openFile, store.highlightsToken]);
+
+  // md 预览：切文件即回源码视图（预览是「本文件的一种视图」，不跨文件保持）
+  useEffect(() => {
+    setMdPreview(false);
+  }, [store.openFile]);
 
   // 全屏搜索也是浮层：Esc 关闭（与依赖图 / 解释 / 调用流图保持一致）。
   // capture 阶段：焦点在搜索框或编辑器里时也能可靠关掉，不让 Esc 落到别处。
@@ -1421,6 +1430,16 @@ export default function App() {
                   </div>
                 )}
                 <div className="editor-actions">
+                  {isMdFile && (
+                    <button
+                      className={`btn ghost${mdPreview ? ' on' : ''}`}
+                      onClick={() => setMdPreview((v) => !v)}
+                      title={t('md.preview')}
+                      aria-pressed={mdPreview}
+                    >
+                      {mdPreview ? t('md.source') : t('md.preview')}
+                    </button>
+                  )}
                   <button
                     className="btn ghost"
                     disabled={!store.openFile || !isRunnable(store.openFile)}
@@ -1549,6 +1568,8 @@ export default function App() {
                 ) : store.openFile ? (
                   store.readerKind ? (
                     <FileReaderPanel projectId={store.projectId!} file={store.openFile} kind={store.readerKind} />
+                  ) : isMdFile && mdPreview ? (
+                    <MarkdownPreview text={store.fileContent} />
                   ) : (
                   <div className={`panes ${store.secondary ? 'split' : ''}`}>
                     <div className="pane">
