@@ -1286,7 +1286,7 @@ export const en: Record<string, string> = {
   'editor.copySnippetLabel': 'Copy selected code (with source)',
   'editor.openAsideLabel': 'Open in aside pane',
   'state.bytes': '{n} bytes',
-  'state.fileTooLarge': 'File is too large to preview: {file} ({size}; documents over {limit} are not loaded)',
+  'state.truncatedHint': 'File is {size}; only the first {limit} is loaded (read-only preview, never written back)',
   'state.copied': 'Copied {text}',
   'state.copiedSnippet': 'Copied snippet {range}',
   'bridge.ignoredOrigin': '[Bridge] Ignored a message from origin {origin} (trust boundary tightened).',

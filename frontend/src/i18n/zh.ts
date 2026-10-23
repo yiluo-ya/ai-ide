@@ -1260,7 +1260,7 @@ export const zh: Record<string, string> = {
   'editor.copySnippetLabel': '复制选中代码（带出处）',
   'editor.openAsideLabel': '在旁边打开（分屏对照）',
   'state.bytes': '{n} 字节',
-  'state.fileTooLarge': '文件太大，不支持预览：{file}（{size}；文档类超过 {limit} 不加载）',
+  'state.truncatedHint': '文件 {size}，仅加载前 {limit}（只读预览，不会写回）',
   'state.copied': '已复制 {text}',
   'state.copiedSnippet': '已复制片段 {range}',
   'bridge.ignoredOrigin': '[信使] 忽略了来源 {origin} 的消息（信任边界已收紧）。',

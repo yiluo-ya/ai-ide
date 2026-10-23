@@ -187,6 +187,8 @@ interface State {
   fileMtimeMs: number | null;
   /** 「未改动」的正文基准：打开文件时的内容，或最近一次保存成功的内容。 */
   savedText: string;
+  /** 当前文件是否只加载了头部 1 MB（truncated）：只读，禁止编辑/保存，避免把截断头部写回破坏原文件。 */
+  fileTruncated: boolean;
   /**
    * FR-0008：需要把 `fileContent` 灌进编辑器 model 的信号（打开文件 / 重载时 +1）。
    * 编辑器不监听 `fileContent` 本身 —— 否则保存回写会覆盖用户正在敲的字。
@@ -449,31 +451,13 @@ function snapToSymbol(
   return { line, col };
 }
 
-/** 文档类文件的预览上限：超过就不加载，直接提示（用户 2026-10-03 定的 100KB）。 */
-export const DOC_PREVIEW_MAX_BYTES = 100 * 1024;
-
-/** 文档 / 配置类扩展名：这类文件常常很大（日志、锁文件），整篇塞进编辑器没意义。 */
-const DOC_LIKE = /\.(md|markdown|txt|log|json|ya?ml|toml|ini|csv|tsv|xml|html?|css|map|lock|svg)$/i;
-
-function isDocLike(file: string): boolean {
-  return DOC_LIKE.test(file);
-}
+/** 文本预览的头部截取上限（与后端 VIEW_PREVIEW_BYTES 一致，仅用于提示文案展示）。 */
+export const DOC_PREVIEW_MAX_BYTES = 1 * 1024 * 1024;
 
 function formatBytes(n: number): string {
   if (n < 1024) return translate('state.bytes', { n });
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-/** 在文件树里找某个路径的节点（拿体积用；找不到返回 null）。 */
-function findFileNode(node: FileNode | null, path: string): FileNode | null {
-  if (!node) return null;
-  if (node.path === path) return node;
-  for (const child of node.children ?? []) {
-    const hit = findFileNode(child, path);
-    if (hit) return hit;
-  }
-  return null;
 }
 
 export function readPositions(projectId: string | null): Record<string, MemoryPosition> {
@@ -602,6 +586,7 @@ export const useStore = create<State>((set, get) => ({
   highlightsToken: 0,
   fileMtimeMs: null,
   savedText: '',
+  fileTruncated: false,
   contentToken: 0,
   saveStatus: 'idle',
   saveError: null,
@@ -670,6 +655,7 @@ export const useStore = create<State>((set, get) => ({
       highlightsToken: 0,
       fileMtimeMs: null,
       savedText: '',
+      fileTruncated: false,
       contentToken: 0,
       saveStatus: 'idle',
       saveError: null,
@@ -725,6 +711,7 @@ export const useStore = create<State>((set, get) => ({
               openFile: null,
               fileContent: '',
               savedText: '',
+              fileTruncated: false,
               fileMtimeMs: null,
               saveStatus: 'idle',
               saveError: null,
@@ -808,15 +795,6 @@ export const useStore = create<State>((set, get) => ({
     const targetCol = col ?? memory?.col ?? 1;
     // 先只置 loading：openFile 与 fileLang 必须同时更新，否则 Editor 会先用旧语言建 model
     set({ fileLoading: true });
-    // 2026-10-03 用户要求：文档类文件超过 10KB 不预览，直接说清楚（不把浏览器拖死）
-    const node = findFileNode(get().tree, file);
-    if (node && node.type === 'file' && isDocLike(file) && (node.size ?? 0) > DOC_PREVIEW_MAX_BYTES) {
-      set({
-        fileLoading: false,
-        error: translate('state.fileTooLarge', { file, size: formatBytes(node.size ?? 0), limit: formatBytes(DOC_PREVIEW_MAX_BYTES) }),
-      });
-      return;
-    }
     try {
       const res = await api.fileText(id, file);
       // 上次保存失败留下的正文优先（不能拿磁盘上的旧内容换掉用户还没落盘的手改）
@@ -830,6 +808,7 @@ export const useStore = create<State>((set, get) => ({
         fileLang: res.lang,
         fileLoading: false,
         savedText: fresh,
+        fileTruncated: res.truncated,
         fileMtimeMs: res.mtimeMs,
         // 跳转 / 打开成功即清除任何「跳转失败」残留提示（N2 的 external/unresolved/no-symbol 浮层）；
         // 否则上一次失败留下的提示会一直挂到 5 秒定时器耗尽，出现「跳转成功了却还在提示失败」。
@@ -862,6 +841,9 @@ export const useStore = create<State>((set, get) => ({
       // W3 / G8.2：读到哪就把「现在的代码长什么样」防抖记一次（2s 后落盘）
       scheduleSnapshotWrite(id);
       syncUrl(id, file, targetLine, targetCol, suppressed ? 'replace' : 'push');
+      if (res.truncated) {
+        showFlash(translate('state.truncatedHint', { size: formatBytes(res.size), limit: formatBytes(DOC_PREVIEW_MAX_BYTES) }));
+      }
       if (pending != null) scheduleSave();
     } catch (e) {
       set({ fileLoading: false, error: e instanceof Error ? e.message : String(e) });
@@ -1208,6 +1190,8 @@ export const useStore = create<State>((set, get) => ({
   editorChanged(text) {
     const openFile = get().openFile;
     if (!openFile) return;
+    // 截断预览（只加载了头部 1 MB）只读：拒绝任何编辑，否则保存时会把头部写回、毁掉原文件
+    if (get().fileTruncated) return;
     unsavedEdits.set(openFile, text);
     const dirty = text !== get().savedText;
     if (dirty) {
@@ -1370,6 +1354,7 @@ export const useStore = create<State>((set, get) => ({
         openFile: null,
         fileContent: '',
         savedText: '',
+        fileTruncated: false,
         fileMtimeMs: null,
         saveStatus: 'idle',
         saveError: null,

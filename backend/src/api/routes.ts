@@ -831,7 +831,7 @@ export function createApp(
     } catch {
       mtimeMs = null;
     }
-    return c.json({ file: rel, lang: file.lang, text: file.text, size: file.size, mtimeMs });
+    return c.json({ file: rel, lang: file.lang, text: file.text, size: file.size, mtimeMs, truncated: file.truncated });
   });
 
   /**

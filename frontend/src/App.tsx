@@ -1568,7 +1568,8 @@ export default function App() {
                         onExplain={openExplain}
                         onFlow={openFlow}
                         onRun={runFileInTerminal}
-                        editable
+                        // 截断预览（>1MB 只加载头部）只读：可编辑开关被它压掉
+                        editable={!store.fileTruncated}
                         onChange={(text) => useStore.getState().editorChanged(text)}
                       />
                     </div>

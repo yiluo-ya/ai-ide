@@ -48,6 +48,20 @@ export { IGNORED_DIRS, IGNORED_FILE_PATTERNS };
 export const MAX_INDEX_BYTES = 1_000_000;
 /** 超过该大小直接拒绝查看。 */
 export const MAX_VIEW_BYTES = 5_000_000;
+/** 文本预览的头部截取上限：超过就只加载前 1 MB（2026-10-23 用户要求，避免整读大文件拖慢）。 */
+export const VIEW_PREVIEW_BYTES = 1_000_000;
+
+/** 只读文件前 `maxBytes` 字节（不等整读，避免大文件占满内存）。 */
+async function readHead(abs: string, maxBytes: number): Promise<Buffer> {
+  const fh = await fsp.open(abs, 'r');
+  try {
+    const buf = Buffer.alloc(maxBytes);
+    const { bytesRead } = await fh.read(buf, 0, maxBytes, 0);
+    return buf.subarray(0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
 
 /** 少于该文件数不值得起 worker（tsx 启动成本高于解析收益）。 */
 const MIN_PARALLEL_FILES = 8;
@@ -1212,6 +1226,24 @@ export class ProjectIndex {
   async readText(
     rel: string,
   ): Promise<{ text: string; lang: LangId; size: number; truncated: boolean } | null> {
+    // 文本类超过 1 MB：只读头部，标 truncated（2026-10-23 用户要求「太大就只加载前 1 MB」）。
+    const status = this.fileStatus(rel);
+    if (status && !status.binary && status.size > VIEW_PREVIEW_BYTES) {
+      const abs = this.resolveInside(rel);
+      if (!abs) return null;
+      try {
+        const buf = await readHead(abs, VIEW_PREVIEW_BYTES);
+        // 头部仍可能带二进制特征（如名义 .txt 实为二进制）：一并拒掉
+        if (looksBinary(buf)) return null;
+        const decoded = decodeBuffer(buf);
+        // 截断点可能切断多字节字符（UTF-8 中文 / UTF-16）：去掉尾部的 U+FFFD 残片
+        const text = decoded.text.replace(/\ufffd+$/, '');
+        this.noteEncoding(decoded.encoding);
+        return { text, lang: langForFile(rel), size: status.size, truncated: true };
+      } catch {
+        return null;
+      }
+    }
     const fi = await this.ensureText(rel);
     if (!fi) return null;
     return { text: fi.source, lang: fi.lang, size: fi.size, truncated: false };

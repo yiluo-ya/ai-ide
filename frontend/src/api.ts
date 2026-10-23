@@ -301,7 +301,7 @@ export const api = {
     ),
 
   fileText: (id: string, path: string) =>
-    request<{ file: string; lang: string; text: string; size: number; mtimeMs: number | null }>(
+    request<{ file: string; lang: string; text: string; size: number; mtimeMs: number | null; truncated: boolean }>(
       `/projects/${id}/file?path=${encodeURIComponent(path)}`,
     ),
 
