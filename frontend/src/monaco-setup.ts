@@ -19,6 +19,7 @@ import type {
   HoverResult,
   Location,
   Range,
+  ReferenceLocation,
   SymbolInfo,
   SymbolKind,
 } from '../../shared/types';
@@ -809,6 +810,36 @@ function registerRefProviders(lang: string) {
         return null;
       }
       return res.locations.map((loc) => toLocation(loc.file, loc.range));
+    },
+  });
+
+  monaco.languages.registerDocumentHighlightProvider(lang, {
+    async provideDocumentHighlights(model, position) {
+      if (!ctx.projectId) return null;
+      const file = fileOfModel(model);
+      const res = await api
+        .findReferences(ctx.projectId, {
+          file,
+          line: position.lineNumber,
+          col: position.column,
+          includeDeclaration: true,
+        })
+        .catch(() => null);
+      if (!res || !res.locations.length || res.reason !== 'resolved') return null;
+
+      const decl = res.declaration;
+      const isDecl = (loc: ReferenceLocation): boolean =>
+        decl != null &&
+        loc.file === decl.file &&
+        loc.range.start.line === decl.range.start.line &&
+        loc.range.start.col === decl.range.start.col;
+
+      return res.locations.map((loc) => ({
+        range: toMonacoRange(loc.range),
+        kind: isDecl(loc)
+          ? monaco.languages.DocumentHighlightKind.Write
+          : monaco.languages.DocumentHighlightKind.Text,
+      }));
     },
   });
 }

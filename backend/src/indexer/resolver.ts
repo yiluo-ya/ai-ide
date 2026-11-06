@@ -775,10 +775,13 @@ export function workspaceSymbols(
 export type HighlightKind = 0 | 1 | 2;
 
 /**
- * 值得「提亮」的符号：项目里的模块级 / 类级定义（函数、类、方法、属性、常量）。
- * 局部变量与参数降一档（local），它们密度最高，压过这一档会淹没「哪里是外部依赖」这个信号。
+ * 值得「提亮」的符号：只要能解析到定义（即「可跳转」），就进最亮档。
+ *
+ * 口径（2026-11-04 用户要求「高亮 = 可跳转」）：项目级定义、类成员、函数内局部变量都算——
+ * 局部变量同样有定义点、同样能跳转，之前把它们一律压到 local 档，导致 `world` 这类解包变量
+ * 虽有定义却看不出「可跳」。参数除外：它的定义在调用方，本处无处可跳，保持 local 档。
  */
-const isEmphasizable = (def: DefRecord): boolean => !def.local && def.kind !== 'parameter';
+const isEmphasizable = (def: DefRecord): boolean => def.kind !== 'parameter';
 
 /** 着色结果缓存上限（FIFO 淘汰，与 store 的 textCache 同口径）：防止长会话按「看过的文件数」涨内存。 */
 const HIGHLIGHT_CACHE_MAX = 2000;
@@ -787,9 +790,9 @@ const HIGHLIGHT_CACHE_MAX = 2000;
  * 逐符号判定「本项目 / 外部 / 局部」，返回扁平数组，每 4 个一组
  * `[line(1-based), col(1-based), length(UTF-16), kind]`，按位置升序。
  *
- * 三档口径：
- * - project：项目内的顶层/类级定义，以及能解析到它们的引用（最亮）
- * - local：局部变量、参数，以及解析不出的普通名字（次亮，比默认语法色稍亮）
+ * 三档口径（2026-11-04 调整：以「可跳转」为准）：
+ * - project：凡是能解析到本项目定义的符号（项目级定义、类成员、函数内局部变量）及其引用（最亮）
+ * - local：参数（定义在调用方，本处无处可跳），以及解析不出的普通名字（次亮）
  * - external：外部依赖（第三方包、标准库、node_modules…）与语言内置（print / System…）（略暗）
  *
  * 不标注的：`self` / `this` 这类语法成分，以及需要类型推断的成员访问（`obj.method` 的 method）。

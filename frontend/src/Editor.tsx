@@ -363,8 +363,10 @@ export function Editor({
       guides: { indentation: initial.whitespace },
       contextmenu: true,
       fixedOverflowWidgets: true,
-      occurrencesHighlight: 'off',
-      selectionHighlight: false,
+      // 光标所在符号的所有出现处高亮（由 DocumentHighlightProvider 供给，见 monaco-setup.ts）
+      occurrencesHighlight: 'singleFile',
+      // 选中文本时相同文本自动高亮
+      selectionHighlight: true,
       // 7（2026-10-15 用户要求）：给类 / 方法等定义行留出图标槽（gutter）
       glyphMargin: true,
     });

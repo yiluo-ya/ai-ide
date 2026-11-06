@@ -3243,6 +3243,8 @@ mark {
   display: flex;
   gap: 4px;
   align-items: center;
+  /* 搜索历史下拉以此为锚：紧贴当前这一行输入框下面弹出 */
+  position: relative;
 }
 
 .search-input-row .text-input {
@@ -3252,7 +3254,8 @@ mark {
 
 .search-history {
   position: absolute;
-  top: 38px;
+  top: 100%;
+  margin-top: 4px;
   left: 8px;
   right: 8px;
   background: var(--bg-3);

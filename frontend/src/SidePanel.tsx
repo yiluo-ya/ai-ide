@@ -648,6 +648,29 @@ export function SearchPanel({
               {t('app.tab.search')}
             </button>
           )}
+          {showHistory && history.length > 0 && (
+            <div className="search-history">
+              {history.map((h) => (
+                <div
+                  key={h}
+                  className="search-history-item"
+                  onMouseDown={() => {
+                    setText(h);
+                    setShowHistory(false);
+                    onSearch(h, {
+                      regex,
+                      caseSensitive,
+                      wholeWord,
+                      filePattern: filePattern || undefined,
+                      dirs: selectedDirs.length ? selectedDirs : undefined,
+                    });
+                  }}
+                >
+                  {h}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="search-input-row">
           <input
@@ -657,29 +680,6 @@ export function SearchPanel({
             onChange={(e) => setFilePattern(e.target.value)}
           />
         </div>
-        {showHistory && history.length > 0 && (
-          <div className="search-history">
-            {history.map((h) => (
-              <div
-                key={h}
-                className="search-history-item"
-                onMouseDown={() => {
-                  setText(h);
-                  setShowHistory(false);
-                  onSearch(h, {
-                    regex,
-                    caseSensitive,
-                    wholeWord,
-                    filePattern: filePattern || undefined,
-                    dirs: selectedDirs.length ? selectedDirs : undefined,
-                  });
-                }}
-              >
-                {h}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
       {dirs.length > 0 && (
         <div className="search-scopes">
